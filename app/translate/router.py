@@ -64,6 +64,7 @@ class Translator:
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
         asyncio.create_task(self.ollama.warm_up(self.system_prompt))
+        self._keep_warm = asyncio.create_task(self._ollama_keep_warm())
         if self.cfg.mode != "ollama":
             if not self.has_claude:
                 self.last_error = "claude CLI not found — using Ollama only"
@@ -71,7 +72,18 @@ class Translator:
             else:
                 self._maintain()
 
+    async def _ollama_keep_warm(self) -> None:
+        while True:
+            try:
+                await self.ollama.keep_warm(self.system_prompt)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # pragma: no cover
+                await asyncio.sleep(60)
+
     async def close(self) -> None:
+        if getattr(self, "_keep_warm", None):
+            self._keep_warm.cancel()
         for s in (self.active, self.standby):
             if s:
                 await s.close()

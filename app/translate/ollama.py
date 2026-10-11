@@ -1,6 +1,7 @@
 """Local fallback translator through Ollama's HTTP API."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -21,6 +22,7 @@ class OllamaClient:
         self.warm = False
         self.last_error = ""
         self.last_ms = 0.0
+        self.last_used = 0.0
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout_s, connect=2.0))
 
     async def check(self) -> bool:
@@ -59,6 +61,7 @@ class OllamaClient:
         }
         r = await self._client.post(f"{self.url}/api/chat", json=body, timeout=timeout_s or self.timeout_s)
         r.raise_for_status()
+        self.last_used = time.monotonic()
         self.last_ms = (time.monotonic() - t0) * 1000
         return r.json().get("message", {}).get("content", "")
 
@@ -75,6 +78,19 @@ class OllamaClient:
         except Exception as e:
             self.last_error = f"warm-up failed: {e}"
             log.warning("ollama warm-up failed: %s", e)
+
+    async def keep_warm(self, system: str, idle_s: float = 1200) -> None:
+        """While Claude does the work, touch Ollama now and then so a fallback never starts cold."""
+        while True:
+            await asyncio.sleep(60)
+            if time.monotonic() - self.last_used > idle_s:
+                try:
+                    await self.translate(system, [], "Thank you, brothers and sisters.", timeout_s=180)
+                    self.warm = True
+                except Exception as e:
+                    self.warm = False
+                    self.last_error = f"keep-warm failed: {e}"
+                    self.last_used = time.monotonic()  # don't retry every minute
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -1,6 +1,6 @@
 # Defaults for the live translation server.
-# Changes made on the operator page are saved to data/overrides.json and win over this file.
-# Delete data/overrides.json to go back to these defaults.
+# Changes made on the operator page are saved to data/overrides.<platform>.json (overrides.darwin.json
+# on a Mac) and win over this file. Delete that file to go back to these defaults.
 
 [server]
 host = "0.0.0.0"

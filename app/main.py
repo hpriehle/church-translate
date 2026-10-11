@@ -53,6 +53,7 @@ class State:
     autostart: dict | None = None
     exit_when_done: bool = False
     port_override: int | None = None
+    mode_override: str | None = None
 
 
 S = State()
@@ -100,6 +101,8 @@ async def lifespan(app: FastAPI):
     S.settings = load_settings()
     if S.port_override:
         S.settings.server.port = S.port_override
+    if S.mode_override:
+        S.settings.translate.mode = S.mode_override
     S.glossary = load_glossary()
     S.started = time.time()
     S.local_addrs = netinfo.local_addresses()

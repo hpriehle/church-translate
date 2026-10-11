@@ -74,7 +74,7 @@ phone, but needs HTTPS (or localhost), e.g. through a tunnel. The page shows wha
 French, and the latency. Open the listener page on a *different* device with headphones; if the
 French voice reaches this microphone, it gets translated again.
 
-The key is `[server] operator_pin` (in `data/overrides.json` on the test box). When the server sits
+The key is `[server] operator_pin` (in `data/overrides.<platform>.json`). When the server sits
 behind a tunnel or reverse proxy, requests carrying `Cf-Connecting-Ip`/`X-Forwarded-For` never count
 as "local", so the operator, speak and API pages always require the key. Set `[server] public_url`
 so the QR code shows the public address.
@@ -151,8 +151,8 @@ a session with the new glossary in the background.
 ## Configuration
 
 `config.toml` holds the defaults (ports, VAD thresholds, models, voice, rate, backlog thresholds).
-Changes made on the operator page are saved to `data/overrides.json`; delete it to go back to the
-defaults. Useful settings:
+Changes made on the operator page are saved to `data/overrides.<platform>.json`
+(`overrides.darwin.json` on the Mac); delete it to go back to the defaults. Useful settings:
 
 - `[server] port = 80` gives a shorter link without `:8000`.
 - `[server] operator_pin = "1234"` opens the operator page from a tablet:

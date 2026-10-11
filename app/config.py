@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,9 @@ from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.toml"
-OVERRIDES_PATH = ROOT / "data" / "overrides.json"
+# Per platform, because the project folder may be synced between a Mac and a Linux box
+# (e.g. Syncthing) and each needs its own engines/voices: overrides.darwin.json, overrides.linux.json.
+OVERRIDES_PATH = ROOT / "data" / f"overrides.{sys.platform}.json"
 GLOSSARY_PATH = ROOT / "glossary.json"
 LOG_DIR = ROOT / "logs"
 SAMPLES_DIR = ROOT / "samples"

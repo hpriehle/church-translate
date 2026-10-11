@@ -101,6 +101,8 @@ class ClaudeSession:
             cmd += ["--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,Task,NotebookEdit"]
         if "--safe-mode" in help_text:
             cmd += ["--safe-mode"]          # no CLAUDE.md, hooks, plugins or MCP servers
+        elif "--setting-sources" in help_text:
+            cmd += ["--setting-sources", ""]  # older Claude Code: at least skip user hooks/plugins
         if "--strict-mcp-config" in help_text:
             cmd += ["--strict-mcp-config"]
         if "--no-session-persistence" in help_text:

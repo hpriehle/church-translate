@@ -23,6 +23,7 @@ def main() -> None:
     p.add_argument("--mic", action="store_true", help="start capturing from the input device right away")
     p.add_argument("--record", action="store_true", help="save the French stream to logs/ as MP3")
     p.add_argument("--exit-when-done", action="store_true", help="test mode: quit after the file has been fully processed")
+    p.add_argument("--translator", choices=["auto", "ollama"], help="this run only: override [translate].mode")
     p.add_argument("--no-browser", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
@@ -48,6 +49,7 @@ def main() -> None:
         appmod.S.autostart = {"kind": "mic", "record": args.record}
     appmod.S.exit_when_done = args.exit_when_done
     appmod.S.port_override = args.port
+    appmod.S.mode_override = args.translator
 
     if settings.server.open_browser and not args.no_browser and not args.exit_when_done:
         def _open():

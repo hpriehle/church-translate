@@ -17,7 +17,10 @@ ollama_up() { curl -s --max-time 1 "$(cfg 's.translate.ollama_url')/api/tags" >/
 start_ollama() {
   if need ollama && ! ollama_up; then
     echo "Starting Ollama…"
-    nohup ollama serve >logs/ollama.log 2>&1 &
+    # One request slot: the long glossary prompt is cached once and every fallback reuses it.
+    # (With several slots each one re-reads the prompt the first time, ~10 s each on a 24B model.)
+    OLLAMA_NUM_PARALLEL=1 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_KEEP_ALIVE=3h \
+      nohup ollama serve >logs/ollama.log 2>&1 &
     for _ in $(seq 1 20); do ollama_up && break; sleep 0.5; done
   fi
 }
