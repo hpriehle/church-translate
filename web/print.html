@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Traduction en français — affiche</title>
+<style>
+  @page { size: A4 portrait; margin: 14mm; }
+  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; color: #111; margin: 0; }
+  .controls { background: #f3f3f3; padding: 10px 14px; border-bottom: 1px solid #ccc; font-size: 14px; }
+  .controls input { font-size: 14px; padding: 4px 6px; margin: 0 10px 0 4px; }
+  .sheet { max-width: 180mm; margin: 0 auto; text-align: center; padding-top: 10mm; }
+  h1 { font-size: 34pt; margin: 0 0 4mm; }
+  .en { font-size: 13pt; color: #555; margin: 0 0 8mm; }
+  .codes { display: flex; justify-content: center; gap: 14mm; align-items: flex-start; }
+  .code { width: 82mm; }
+  .code img { width: 100%; }
+  .step { font-size: 15pt; font-weight: 700; margin: 3mm 0; }
+  .sub { font-size: 12pt; color: #444; }
+  .url { font-size: 18pt; font-weight: 700; margin-top: 6mm; word-break: break-all; }
+  ol { text-align: left; font-size: 15pt; line-height: 1.6; margin: 10mm auto 0; max-width: 150mm; }
+  .wifi[hidden] { display: none; }
+  @media print { .controls { display: none; } }
+</style>
+</head>
+<body>
+<div class="controls">
+  Wi-Fi name <input id="ssid" placeholder="ex. Eglise-Invites">
+  Password <input id="pass" placeholder="(optional)">
+  <button onclick="window.print()">Print</button>
+  <span style="color:#666">These fields add a "join the Wi-Fi" code. Leave empty for the listener code only.</span>
+</div>
+<div class="sheet">
+  <h1>🎧 Traduction en français</h1>
+  <p class="en">French translation — scan with your phone camera</p>
+  <div class="codes">
+    <div class="code wifi" id="wifiBox" hidden>
+      <div class="step">① Wi-Fi</div>
+      <img id="wifiQr" alt="">
+      <div class="sub" id="wifiName"></div>
+    </div>
+    <div class="code">
+      <div class="step" id="pageStep">Scannez ce code</div>
+      <img src="/qr.svg" alt="">
+      <div class="sub">puis touchez « Écouter »</div>
+    </div>
+  </div>
+  <div class="url" id="url"></div>
+  <ol>
+    <li id="liWifi">Connectez-vous au Wi-Fi de l'église<span id="liSsid"></span>.</li>
+    <li>Ouvrez l'appareil photo et visez le code, ou tapez l'adresse ci-dessus.</li>
+    <li>Touchez <b>« Écouter »</b>. Utilisez des écouteurs.</li>
+    <li>Si le son s'arrête, gardez l'écran allumé.</li>
+  </ol>
+</div>
+<script>
+  fetch("/api/state").then(r => r.json()).then(s => { document.getElementById("url").textContent = s.listener_url; });
+  const ssid = document.getElementById("ssid"), pass = document.getElementById("pass");
+  const esc = (v) => v.replace(/([\\;,:"])/g, "\\$1");
+  function update() {
+    const has = ssid.value.trim().length > 0;
+    document.getElementById("wifiBox").hidden = !has;
+    document.getElementById("pageStep").textContent = has ? "② Traduction" : "Scannez ce code";
+    document.getElementById("liSsid").textContent = has ? ` « ${ssid.value.trim()} »` : "";
+    document.getElementById("wifiName").textContent = has ? ssid.value.trim() : "";
+    if (has) {
+      const t = pass.value ? `WIFI:T:WPA;S:${esc(ssid.value.trim())};P:${esc(pass.value)};;` : `WIFI:T:nopass;S:${esc(ssid.value.trim())};;`;
+      document.getElementById("wifiQr").src = "/api/qr?text=" + encodeURIComponent(t);
+    }
+    localStorage.setItem("ssid", ssid.value);
+  }
+  ssid.value = localStorage.getItem("ssid") || "";
+  ssid.oninput = update; pass.oninput = update; update();
+</script>
+</body>
+</html>

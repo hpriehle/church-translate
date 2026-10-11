@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>Traduction en direct</title>
+<link rel="stylesheet" href="/static/listener/listener.css">
+</head>
+<body>
+<header>
+  <span class="title">Traduction en direct · Français</span>
+  <span id="conn" class="pill wait">Connexion…</span>
+</header>
+
+<main id="captions" aria-live="polite" aria-label="Sous-titres en français"></main>
+<p id="waiting" class="waiting">La traduction commencera au début de la réunion.</p>
+<button id="jump" class="jump" hidden>↓ Revenir au direct</button>
+
+<footer>
+  <button id="listen" class="listen" type="button">
+    <span class="icon" aria-hidden="true">▶</span><span id="listenLabel">Écouter</span>
+  </button>
+  <div class="row">
+    <button id="smaller" type="button" aria-label="Texte plus petit">A−</button>
+    <span id="audioState" class="state">🎧 Utilisez des écouteurs</span>
+    <button id="bigger" type="button" aria-label="Texte plus grand">A+</button>
+  </div>
+  <div class="row small">
+    <label class="toggle"><input id="awake" type="checkbox"> Garder l'écran allumé</label>
+  </div>
+</footer>
+<script src="/static/listener/listener.js"></script>
+</body>
+</html>

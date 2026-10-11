@@ -1,0 +1,76 @@
+# Defaults for the live translation server.
+# Changes made on the operator page are saved to data/overrides.json and win over this file.
+# Delete data/overrides.json to go back to these defaults.
+
+[server]
+host = "0.0.0.0"
+port = 8000
+# Operator page is only reachable from the Mac itself unless a PIN is set.
+# With a PIN, open http://<lan-ip>:8000/operator?pin=1234 from another device.
+operator_pin = ""
+# Leave empty to auto-detect the Wi-Fi/Ethernet address for the QR code.
+lan_ip = ""
+open_browser = true
+
+[audio]
+# Name (or part of it) of the input device; empty = system default input.
+input_device = ""
+# Which input channel to use on multi-channel interfaces (1-based). 0 = mix all channels.
+input_channel = 0
+# Gain applied to the input before speech detection (1.0 = unchanged).
+input_gain = 1.0
+
+[vad]
+threshold = 0.5
+min_chunk_s = 3.0       # don't cut before this unless there is a long pause
+target_max_s = 8.0      # after this, cut on any short pause
+hard_max_s = 10.0       # never longer than this
+pause_ms = 300          # pause needed to cut between min_chunk_s and target_max_s
+short_pause_ms = 120    # pause needed to cut after target_max_s
+flush_pause_ms = 800    # a pause this long sends whatever was said (even < min_chunk_s)
+min_voiced_s = 0.45     # shorter chunks are dropped as noise (coughs, clicks)
+
+[stt]
+# "mlx" on Apple Silicon. "faster-whisper" only for development on other machines.
+engine = "mlx"
+model = "mlx-community/whisper-large-v3-turbo"
+faster_whisper_model = "small.en"
+language = "en"
+
+[translate]
+# "auto" = Claude with Ollama fallback, "claude" = same, "ollama" = local only.
+mode = "auto"
+claude_model = "opus"
+claude_effort = "low"
+claude_timeout_s = 6.0
+# Start a fresh Claude conversation (with recent context carried over) after this many chunks.
+claude_session_turns = 150
+ollama_url = "http://127.0.0.1:11434"
+ollama_model = "mistral-small3.2:24b"
+ollama_timeout_s = 10.0
+audience = "Francophone members from West Africa, mostly Senegal"
+
+[tts]
+# "say" (macOS) or "piper"
+engine = "say"
+# Exact name from `say -v '?'`. Empty = best installed French (France) voice.
+voice = ""
+# Words per minute. macOS default is about 175; slightly faster keeps up better.
+rate = 190
+piper_model = "~/.local/share/piper-voices/fr_FR-siwis-medium.onnx"
+volume = 1.0
+
+[backlog]
+# Seconds of French audio waiting to be played.
+speedup_start_s = 6.0   # start speaking faster above this
+speedup_full_s = 15.0   # reach max_speed here
+max_speed = 1.3
+condense_on_s = 15.0    # ask the translator for shorter translations above this
+condense_off_s = 9.0
+drop_above_s = 25.0     # hard cap: drop the oldest waiting audio (captions still show)
+
+[stream]
+bitrate_kbps = 64
+sample_rate = 44100
+# Seconds of recent audio sent to a phone when it (re)connects, so playback starts at once.
+burst_s = 1.0

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Operator · Live translation</title>
+<link rel="stylesheet" href="/static/operator/operator.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Live translation <span class="muted">EN → FR</span></div>
+  <div id="live" class="badge off">STOPPED</div>
+  <div class="stat"><span class="k">Listeners</span><span id="listeners" class="v">0</span></div>
+  <div class="stat"><span class="k">Behind live</span><span id="backlog" class="v">0.0 s</span></div>
+  <div class="stat"><span class="k">Voice speed</span><span id="speed" class="v">1.00×</span></div>
+  <div class="stat wide"><span class="k">Input level</span><div class="meter"><div id="level"></div></div></div>
+  <div class="stat"><span class="k">Speech-to-text</span><span id="sttState" class="v">…</span></div>
+  <div class="stat"><span class="k">Claude</span><span id="claudeState" class="v">…</span></div>
+  <div class="stat"><span class="k">Ollama</span><span id="ollamaState" class="v">…</span></div>
+  <div class="stat"><span class="k">Claude usage</span><span id="usage" class="v">–</span></div>
+</header>
+
+<div class="layout">
+  <aside>
+    <section>
+      <h2>Source</h2>
+      <div class="seg">
+        <label><input type="radio" name="src" value="mic" checked> Microphone / interface</label>
+        <label><input type="radio" name="src" value="file"> Test recording</label>
+      </div>
+      <div id="micBox">
+        <label>Input device <select id="device"></select></label>
+        <div class="two">
+          <label>Channel <select id="channel"><option value="0">Mix all</option></select></label>
+          <label>Gain <input id="gain" type="number" min="0.1" max="8" step="0.1" value="1"></label>
+        </div>
+      </div>
+      <div id="fileBox" hidden>
+        <label>Recording <select id="sample"></select></label>
+        <div class="two">
+          <label>Speed <select id="fileSpeed"><option value="1">1× (real time)</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
+          <label>Start at (s) <input id="fileStart" type="number" min="0" value="0"></label>
+        </div>
+        <label class="upload">Upload a recording… <input id="upload" type="file" accept="audio/*,video/*"></label>
+      </div>
+      <label class="check"><input id="record" type="checkbox"> Save the French audio to logs/</label>
+      <div class="buttons">
+        <button id="start" class="go">▶ Start</button>
+        <button id="stop" class="stop" disabled>■ Stop</button>
+      </div>
+      <button id="testVoice" class="ghost">🔊 Play a test sentence to all phones</button>
+    </section>
+
+    <section>
+      <h2>Voice &amp; translation</h2>
+      <label>French voice <select id="voice"></select></label>
+      <label>Rate <span id="rateVal" class="muted"></span><input id="rate" type="range" min="140" max="260" step="5"></label>
+      <label>Volume <span id="volVal" class="muted"></span><input id="volume" type="range" min="0.2" max="2" step="0.05"></label>
+      <label>Translator
+        <select id="mode"><option value="auto">Claude (Ollama fallback)</option><option value="ollama">Ollama only (offline)</option></select>
+      </label>
+      <div class="two">
+        <label>Claude model <select id="claudeModel"><option>opus</option><option>sonnet</option><option>haiku</option></select></label>
+        <label>Fallback after (s) <input id="timeout" type="number" min="2" max="20" step="0.5"></label>
+      </div>
+      <label>Ollama model <input id="ollamaModel" type="text"></label>
+    </section>
+
+    <section class="qr">
+      <h2>Listener link</h2>
+      <img id="qr" alt="QR code for the listener page">
+      <a id="url" class="url" target="_blank"></a>
+      <label>Address shown in QR <select id="lanIp"></select></label>
+      <a class="ghost button" href="/print" target="_blank">🖨 Printable sign</a>
+    </section>
+  </aside>
+
+  <main>
+    <section class="summary">
+      <div><span class="k">Caption after speaker pauses</span><span id="capLag" class="v">–</span></div>
+      <div><span class="k">Audio after speaker pauses</span><span id="airLag" class="v">–</span></div>
+      <div><span class="k">Translator</span><span id="engines" class="v">–</span></div>
+      <div><span class="k">Chunks</span><span id="chunkCount" class="v">0</span></div>
+      <div><span class="k">Dropped audio</span><span id="dropped" class="v">0</span></div>
+    </section>
+    <div class="tablewrap">
+      <table id="chunks">
+        <thead><tr>
+          <th>#</th><th>English (heard)</th><th>French (sent)</th><th>Engine</th>
+          <th title="speech-to-text / translation / voice, in ms">STT · MT · TTS</th>
+          <th title="seconds after the speaker finished the phrase">Caption · Audio</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <section class="split">
+      <div class="glossary">
+        <h2>Glossary <span class="muted">(names &amp; terms)</span></h2>
+        <div class="tabs">
+          <button data-tab="local_names" class="active">Local names</button>
+          <button data-tab="terms">Church terms</button>
+          <button data-tab="names">Names</button>
+          <button data-tab="books">Scripture books</button>
+        </div>
+        <div id="gLocal">
+          <p class="muted">One per line: people and places in your ward as the speaker pronounces them (Bishop Diallo, Sister Ndiaye…). They help speech recognition and are kept as written.</p>
+          <textarea id="localNames" rows="8"></textarea>
+        </div>
+        <div id="gTable" hidden>
+          <input id="gFilter" type="search" placeholder="Filter…">
+          <table class="gt"><thead><tr><th>English</th><th>French</th><th></th></tr></thead><tbody></tbody></table>
+          <button id="gAdd" class="ghost">+ Add row</button>
+        </div>
+        <div class="buttons"><button id="gSave" class="go">Save glossary</button><span id="gMsg" class="muted"></span></div>
+      </div>
+      <div class="log">
+        <h2>Log</h2>
+        <div id="log"></div>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/static/operator/operator.js"></script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+# Live French translation for church meetings
+
+English talks in → French captions and French audio out to phones on the church Wi-Fi.
+Listeners scan a QR code, tap **Écouter**, and hear the French voice (with earphones)
+while the captions scroll. Everything runs on one Apple Silicon Mac. The phones don't need internet.
+
+```
+ mic / soundboard ─► VAD chunks (3–8 s, cut on pauses) ─► Whisper large-v3-turbo (mlx)
+                                                              │ English text
+                                                              ▼
+                       Claude Code (one long-lived session, sermon context)
+                       └─ falls back to Ollama (local) if Claude errors or takes > 6 s
+                                                              │ French text ──► captions (WebSocket)
+                                                              ▼
+                       macOS `say` French voice ─► mixer ─► one continuous MP3 stream ──► phones
+```
+
+## One-time setup (on the Mac, with internet)
+
+1. Install Homebrew from <https://brew.sh> if it isn't installed yet.
+2. Install a good French voice:
+   **System Settings → Accessibility → Spoken Content → System voice → Manage Voices… → Français**.
+   Download **Thomas** or **Audrey** in the *Premium* or *Enhanced* version (France French, which
+   Senegalese listeners are used to). If the menu names differ on your macOS, search "voices" in System Settings.
+3. Make sure Claude Code is installed and logged in: run `claude` once in Terminal and log in.
+4. Run:
+
+   ```bash
+   cd ~/dev/church-translate
+   ./start.sh --setup
+   ```
+
+   This installs `uv`, `ffmpeg` and `ollama` with Homebrew, then the Python packages. It also
+   downloads the speech model (~1.6 GB) and the Ollama fallback model `mistral-small3.2:24b`
+   (~15 GB), lists your French voices, and sends Claude one test line.
+
+To pull the fallback model by hand: `ollama pull mistral-small3.2:24b`. A lighter option is
+`ollama pull gemma3:12b`; set it on the operator page or in `config.toml`.
+
+## Sunday checklist
+
+1. Plug the Mac into power and join the **church Wi-Fi** (the same network the phones will use).
+2. `./start.sh`. The operator page opens at <http://localhost:8000/operator>.
+3. The first time, macOS asks whether Python may **accept incoming connections** (allow it) and
+   whether Terminal may use the **microphone** (allow it).
+4. Wait until the top bar shows *Speech-to-text: ready*, *Claude: ready* and *Ollama: ready*.
+5. Pick the input device. Use the built-in mic for now; later, the USB interface from the
+   soundboard, with the right channel. Watch the input level meter while someone speaks.
+6. Press **Start**, then **Play a test sentence to all phones** to check that phones hear it.
+7. Put out the printed QR signs (**Printable sign** on the operator page). Type the Wi-Fi name
+   there to add a "join Wi-Fi" code too.
+8. Press **Stop** at the end. A report and a log for the meeting are saved in `logs/`.
+
+Listeners: scan → tap **Écouter** → earphones. A+ / A− change the text size.
+
+## Testing with a recording
+
+```bash
+./start.sh --file samples/talk.mp3                    # plays it in real time as if live; watch the operator page
+./start.sh --file samples/talk.mp3 --exit-when-done --record --no-browser
+                                                      # unattended run: writes logs/session-…-report.md
+                                                      # and the French audio logs/session-…-fr.mp3
+uv run python scripts/load_test.py --phones 30 --seconds 120   # 30 simulated phones (while a run is going)
+```
+
+You can also upload a recording on the operator page (**Test recording**). The report shows
+latency percentiles, which engine handled each chunk, Claude token use, and the whole
+English/French transcript.
+
+## How it keeps up (backlog control)
+
+French usually takes a bit longer to say than English. The mixer always knows how many seconds of
+French audio are waiting, and reacts in steps:
+
+| Waiting audio | What happens |
+|---|---|
+| < 6 s | normal voice rate |
+| 6–15 s | the voice speeds up gradually, to 1.3× |
+| > 15 s | Claude/Ollama are also asked to condense (`[ABRÉGER]`) until it falls below 9 s |
+| > 25 s | the oldest waiting audio is dropped (its caption still shows), so the delay never grows past this |
+
+If translation itself falls behind, waiting chunks are merged into one request. All thresholds
+are in `config.toml` under `[backlog]`.
+
+## Claude and the fallback
+
+- One `claude -p --input-format stream-json --output-format stream-json` process stays alive, so
+  Claude sees the whole talk as one conversation. It runs with its own system prompt, no tools,
+  and `--safe-mode`, so your CLAUDE.md, hooks and MCP servers aren't loaded. Model and effort are
+  set in `[translate]`; the default is Opus at low effort.
+- Every 150 chunks (~15 min), a fresh session is prepared in the background, primed with the last
+  12 chunks, and swapped in between two requests. This keeps context and cost bounded.
+- If Claude errors, is still busy with a late reply, or hasn't answered within **6 s**, Ollama
+  translates that chunk. A late Claude reply still wins if it arrives before Ollama's. The engine
+  used for each chunk is shown on the operator page and logged in `logs/session-*.jsonl`.
+- With no internet at the church, choose *Ollama only* on the operator page. Otherwise it switches
+  to Ollama automatically, chunk by chunk.
+
+**Usage.** Measured on test runs: about **$1.80–2 per hour of speech** API-equivalent with Opus,
+about 600 Claude turns per hour, mostly cached input. On a Claude subscription this counts against
+your plan limits instead of costing money. The operator page shows live turns, tokens and $.
+
+## The glossary
+
+`glossary.json` holds official Church French terminology (Sainte-Cène, pieu, Société de Secours,
+Doctrine et Alliances…), scripture book names, and names with French spellings (Néphi, Ésaïe…).
+Add the people in your ward under **Local names** on the operator page. This helps speech
+recognition spell them and keeps them unchanged in French. A few terms are marked `"review": true`
+for a French-speaking member to check.
+
+Saving the glossary takes effect right away for Ollama and speech recognition. Claude switches to
+a session with the new glossary in the background.
+
+## Phones, iPhone lock screen, and the network
+
+- **Audio is one continuous stream** (`/stream.mp3`, like internet radio; silence between
+  sentences), not clip-by-clip. On iPhone this should keep playing with the screen locked, because
+  Safari treats it like a podcast. The fallback `/?mode=clips` plays clip by clip and keeps the
+  screen on.
+- **Reconnects:** if a phone loses Wi-Fi, the page reconnects by itself (captions resume from
+  where they stopped, audio restarts at *live*). Tested by cutting all connections for 10 s.
+- **Many listeners:** 30 simulated phones ran with steady 64 kbps audio and captions arriving
+  within milliseconds of each other. 20–30 phones use about 2 Mbps of Wi-Fi.
+- **Guest Wi-Fi "client isolation":** many church guest networks block phones from reaching other
+  devices. If phones can't open the page, ask for a network without isolation, or use a small
+  travel router as the Mac's own network.
+
+### iPhone lock-screen test (please do this once)
+
+1. Phone on the same Wi-Fi; open the link; tap **Écouter**; earphones in.
+2. On the Mac, run a test recording (or press *Play a test sentence* every few seconds).
+3. Lock the iPhone. You should keep hearing French for several minutes, and the lock screen
+   should show *Traduction en direct* with a play/pause control.
+4. Turn Wi-Fi off for 10 s and back on while unlocked: the page should say *Reconnexion…* and
+   then resume.
+5. If the audio stops when locked, use `/?mode=clips` with *Garder l'écran allumé*, and tell
+   people to keep their screens on.
+
+## Configuration
+
+`config.toml` holds the defaults (ports, VAD thresholds, models, voice, rate, backlog thresholds).
+Changes made on the operator page are saved to `data/overrides.json`; delete it to go back to the
+defaults. Useful settings:
+
+- `[server] port = 80` gives a shorter link without `:8000`.
+- `[server] operator_pin = "1234"` opens the operator page from a tablet:
+  `http://<mac-ip>:8000/operator?pin=1234`. Without a PIN, it only opens on the Mac itself.
+- `[tts] engine = "piper"` uses Piper instead of `say` (`pip install piper-tts` plus a French voice
+  such as `fr_FR-siwis-medium`).
+
+## Files
+
+```
+start.sh               one start command (+ --setup)
+config.toml            defaults          glossary.json   names & terms
+app/main.py            FastAPI routes, WebSockets, operator API
+app/pipeline.py        capture → STT → translate → TTS → mixer, per-chunk timing
+app/audio_in.py        input devices, test-file playback, capture thread
+app/chunker.py         Silero VAD (ONNX) + pause-based chunking
+app/stt.py             mlx-whisper (faster-whisper for non-Mac development)
+app/translate/         Claude session, Ollama client, router (timeout/fallback), prompts
+app/tts/               say / Piper, French speech normalisation (scripture references)
+app/broadcast/         mixer (real-time clock), MP3 stream fan-out, caption hub
+app/backlog.py         speed-up / condense / drop policy
+app/report.py          markdown run reports
+web/listener/          phone page (French)        web/operator/   operator page
+web/print.html         printable QR sign
+scripts/               load_test.py, browser_check.mjs, flaky_proxy.py
+tests/                 uv run pytest
+```
