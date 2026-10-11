@@ -29,6 +29,14 @@ class Clip:
         return len(self.pcm) / sr
 
 
+def normalize_peak(pcm: np.ndarray, peak: float = 0.7) -> np.ndarray:
+    """Same loudness for every voice/engine (peak ≈ -3 dBFS), leaving headroom for the volume control."""
+    m = int(np.abs(pcm.astype(np.int32)).max()) if len(pcm) else 0
+    if m < 100:
+        return pcm
+    return np.clip(pcm.astype(np.float32) * (peak * 32767 / m), -32768, 32767).astype(np.int16)
+
+
 def trim_silence(pcm: np.ndarray, sr: int, threshold: int = 300, pad_s: float = 0.03) -> np.ndarray:
     loud = np.flatnonzero(np.abs(pcm) > threshold)
     if len(loud) == 0:
@@ -55,7 +63,7 @@ class Mixer:
 
     # ------------------------------------------------------------ queue
     def enqueue(self, clip: Clip, drop_above_s: float | None = None, drop_to_s: float | None = None) -> list[Clip]:
-        clip.pcm = np.concatenate([trim_silence(clip.pcm, self.sr), self.gap])
+        clip.pcm = np.concatenate([normalize_peak(trim_silence(clip.pcm, self.sr)), self.gap])
         self.queue.append(clip)
         dropped: list[Clip] = []
         if drop_above_s is not None and self.backlog_s > drop_above_s:
