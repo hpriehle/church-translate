@@ -224,6 +224,8 @@ class Translator:
     def _finish(self, raw: str, engine: str, t0: float, english: str,
                 session: ClaudeSession | None, note: str) -> TranslationResult:
         text = clean_output(raw)
+        if not text:
+            note = (note + " " + ("translator skipped it as noise" if raw and "<skip>" in raw else "empty reply")).strip()
         if engine == "claude":
             self._consecutive_errors = 0
             if session:
