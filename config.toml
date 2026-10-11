@@ -10,6 +10,8 @@ port = 8000
 operator_pin = ""
 # Leave empty to auto-detect the Wi-Fi/Ethernet address for the QR code.
 lan_ip = ""
+# Set when the pages are also published through a tunnel (the QR code then uses it).
+public_url = ""
 open_browser = true
 
 [audio]

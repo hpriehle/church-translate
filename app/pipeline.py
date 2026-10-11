@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
-from .audio_in import CaptureWorker, FileSource, MicSource
+from .audio_in import CaptureWorker, FileSource, MicSource, Source
 from .backlog import BacklogPolicy
 from .broadcast.hub import Hub
 from .broadcast.mixer import Clip, Mixer
@@ -91,11 +91,13 @@ class Pipeline:
 
     def start(self, kind: str, device: str | None = None, file: str | Path | None = None,
               speed: float = 1.0, start_s: float = 0.0, max_s: float | None = None,
-              record: bool = False) -> None:
+              record: bool = False, source: Source | None = None) -> None:
         if self.capturing:
             raise RuntimeError("already running")
         a = self.settings.audio
-        if kind == "mic":
+        if source is not None:
+            pass
+        elif kind == "mic":
             source = MicSource(device if device is not None else a.input_device, a.input_channel)
         elif kind == "file":
             if not file:

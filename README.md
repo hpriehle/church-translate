@@ -67,6 +67,18 @@ You can also upload a recording on the operator page (**Test recording**). The r
 latency percentiles, which engine handled each chunk, Claude token use, and the whole
 English/French transcript.
 
+## Speaking from a browser (remote testing)
+
+`/speak?key=<operator key>` turns any browser's microphone into the input. It works on a laptop or
+phone, but needs HTTPS (or localhost), e.g. through a tunnel. The page shows what was heard, the
+French, and the latency. Open the listener page on a *different* device with headphones; if the
+French voice reaches this microphone, it gets translated again.
+
+The key is `[server] operator_pin` (in `data/overrides.json` on the test box). When the server sits
+behind a tunnel or reverse proxy, requests carrying `Cf-Connecting-Ip`/`X-Forwarded-For` never count
+as "local", so the operator, speak and API pages always require the key. Set `[server] public_url`
+so the QR code shows the public address.
+
 ## How it keeps up (backlog control)
 
 French usually takes a bit longer to say than English. The mixer always knows how many seconds of

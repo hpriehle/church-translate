@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import netinfo
-from .audio_in import list_input_devices
+from .audio_in import BrowserSource, list_input_devices
 from .broadcast.hub import Hub
 from .broadcast.mixer import Mixer
 from .broadcast.stream import Mp3Broadcaster
@@ -59,6 +59,8 @@ S = State()
 
 
 def listener_url() -> str:
+    if S.settings.server.public_url:
+        return S.settings.server.public_url
     ip = netinfo.best_lan_ip(S.settings.server.lan_ip)
     port = S.settings.server.port
     return f"http://{ip}/" if port == 80 else f"http://{ip}:{port}/"
@@ -162,17 +164,34 @@ app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 # ------------------------------------------------------------------ access control
 
-def _is_operator(host: str | None, pin: str | None, cookie: str | None) -> bool:
-    if host and host.split("%")[0] in S.local_addrs:
+_PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "x-forwarded-for", "x-real-ip", "forwarded")
+
+
+def _is_operator(host: str | None, headers, query, cookies) -> bool:
+    """Operator = a browser on this machine, or anyone with the PIN/key.
+
+    Requests relayed by a tunnel/reverse proxy also come from localhost, so they never count as local.
+    """
+    proxied = any(h in headers for h in _PROXY_HEADERS)
+    if not proxied and host and host.split("%")[0] in S.local_addrs:
         return True
     want = S.settings.server.operator_pin
-    return bool(want) and (pin == want or cookie == want)
+    given = query.get("key") or query.get("pin") or cookies.get("op_pin")
+    return bool(want) and given == want
 
 
 def require_operator(request: Request) -> None:
-    if not _is_operator(request.client.host if request.client else None,
-                        request.query_params.get("pin"), request.cookies.get("op_pin")):
-        raise HTTPException(403, "Operator page is only available on the Mac running the server (or with the PIN).")
+    if not _is_operator(request.client.host if request.client else None, request.headers,
+                        request.query_params, request.cookies):
+        raise HTTPException(403, "Operator pages are only available on the computer running the server (or with the key).")
+
+
+def _remember_key(request: Request, resp: Response) -> Response:
+    key = request.query_params.get("key") or request.query_params.get("pin")
+    if key and key == S.settings.server.operator_pin:
+        resp.set_cookie("op_pin", key, httponly=True, samesite="lax", max_age=30 * 86400,
+                        secure=request.headers.get("x-forwarded-proto") == "https")
+    return resp
 
 
 # ------------------------------------------------------------------ listener side
@@ -209,7 +228,8 @@ async def clip(seq: int):
     data = S.pipeline.clips.get(seq)
     if data is None:
         raise HTTPException(404)
-    return Response(data, media_type="audio/mpeg", headers={"Cache-Control": "max-age=600"})
+    # no-store: clip numbers restart with the server, so a cached clip could be the wrong one.
+    return Response(data, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.websocket("/ws/listen")
@@ -248,11 +268,51 @@ async def health():
 @app.get("/operator", response_class=HTMLResponse)
 async def operator_page(request: Request):
     require_operator(request)
-    resp = FileResponse(WEB_DIR / "operator" / "index.html", headers={"Cache-Control": "no-cache"})
-    pin = request.query_params.get("pin")
-    if pin and pin == S.settings.server.operator_pin:
-        resp.set_cookie("op_pin", pin, httponly=True, samesite="strict")
-    return resp
+    return _remember_key(request, FileResponse(WEB_DIR / "operator" / "index.html", headers={"Cache-Control": "no-cache"}))
+
+
+@app.get("/speak", response_class=HTMLResponse)
+async def speak_page(request: Request):
+    require_operator(request)
+    return _remember_key(request, FileResponse(WEB_DIR / "speak" / "index.html", headers={"Cache-Control": "no-cache"}))
+
+
+@app.websocket("/ws/speak")
+async def ws_speak(ws: WebSocket):
+    """Browser microphone → pipeline. First message: {"type":"hello","sample_rate":48000}; then int16 PCM frames."""
+    if not _is_operator(ws.client.host if ws.client else None, ws.headers, ws.query_params, ws.cookies):
+        await ws.close(code=4403)
+        return
+    await ws.accept()
+    try:
+        hello = await asyncio.wait_for(ws.receive_json(), timeout=10)
+        rate = int(hello.get("sample_rate") or 48000)
+        if not 8000 <= rate <= 192000:
+            raise ValueError("bad sample rate")
+    except Exception:
+        await ws.close(code=1003)
+        return
+    source = BrowserSource(rate, label=f"browser microphone ({hello.get('device') or 'web page'})")
+    try:
+        S.pipeline.start("browser", source=source, record=bool(hello.get("record")))
+    except Exception as e:
+        await ws.send_json({"type": "error", "message": str(e)})
+        await ws.close()
+        return
+    await ws.send_json({"type": "started"})
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                break
+            if msg.get("bytes"):
+                source.push(msg["bytes"])
+            elif msg.get("text") and '"stop"' in msg["text"]:
+                break
+    except Exception:
+        pass
+    finally:
+        source.stop()
 
 
 @app.get("/print", response_class=HTMLResponse)
@@ -263,7 +323,7 @@ async def print_page(request: Request):
 
 @app.websocket("/ws/operator")
 async def ws_operator(ws: WebSocket):
-    if not _is_operator(ws.client.host if ws.client else None, ws.query_params.get("pin"), ws.cookies.get("op_pin")):
+    if not _is_operator(ws.client.host if ws.client else None, ws.headers, ws.query_params, ws.cookies):
         await ws.close(code=4403)
         return
     await ws.accept()

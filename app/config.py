@@ -23,6 +23,7 @@ class ServerCfg(BaseModel):
     port: int = 8000
     operator_pin: str = ""
     lan_ip: str = ""
+    public_url: str = ""          # e.g. https://traduction.example.com/ when served through a tunnel
     open_browser: bool = True
 
 

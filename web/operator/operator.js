@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const PIN = new URLSearchParams(location.search).get("pin");
+  const PIN = new URLSearchParams(location.search).get("pin") || new URLSearchParams(location.search).get("key");
   const withPin = (url) => PIN ? url + (url.includes("?") ? "&" : "?") + "pin=" + encodeURIComponent(PIN) : url;
   const api = async (path, body, method) => {
     const opts = body instanceof FormData ? { method: "POST", body }

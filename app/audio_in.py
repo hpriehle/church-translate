@@ -132,6 +132,39 @@ class MicSource(Source):
         self._stop.set()
 
 
+class BrowserSource(Source):
+    """Microphone audio streamed from a web page (/speak) as 16-bit PCM at the browser's rate."""
+
+    def __init__(self, sample_rate: int, label: str = "browser microphone"):
+        self.sample_rate = int(sample_rate)
+        self.label = label
+        self._q: queue.Queue = queue.Queue(maxsize=600)
+        self._stop = threading.Event()
+
+    def push(self, data: bytes) -> None:
+        pcm = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+        try:
+            self._q.put_nowait((pcm, time.monotonic()))
+        except queue.Full:
+            pass
+
+    def blocks(self):
+        import soxr
+
+        rs = soxr.ResampleStream(self.sample_rate, SR, 1, dtype="float32", quality="HQ")
+        while not self._stop.is_set():
+            try:
+                pcm, t = self._q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            out = rs.resample_chunk(pcm)
+            if len(out):
+                yield out, t
+
+    def stop(self):
+        self._stop.set()
+
+
 class FileSource(Source):
     """Plays a recording into the pipeline at real-time speed, as if it were live."""
 
