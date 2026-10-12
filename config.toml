@@ -2,6 +2,10 @@
 # Changes made on the operator page are saved to data/overrides.<platform>.json (overrides.darwin.json
 # on a Mac) and win over this file. Delete that file to go back to these defaults.
 
+# Output languages, in the order listeners see them (the first is the default).
+# Each one runs its own Claude session and voice. "fr" = French, "wo" = Wolof.
+languages = ["fr", "wo"]
+
 [server]
 host = "0.0.0.0"
 port = 8000
@@ -61,6 +65,12 @@ voice = "fr_FR-tom-medium"
 # Words per minute (about 175 is normal speech); slightly faster keeps up better.
 rate = 190
 volume = 1.0
+
+# Voices for languages other than French. Wolof: SpeechT5 trained on native Wolof speakers
+# ("male" or "female"); needs torch + transformers (installed on macOS by default).
+[voices.wo]
+engine = "speecht5"
+voice = "male"
 
 [backlog]
 # Seconds of French audio waiting to be played.

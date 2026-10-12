@@ -13,7 +13,9 @@
  */
 (() => {
   "use strict";
-  const MODE = new URLSearchParams(location.search).get("mode") === "clips" ? "clips" : "stream";
+  const params = new URLSearchParams(location.search);
+  const MODE = params.get("mode") === "clips" ? "clips" : "stream";
+  let lang = params.get("lang") || localStorage.getItem("lang") || "";   // "" = server default
   const KEEP_LINES = 6;
   const $ = (id) => document.getElementById(id);
   const captionsEl = $("captions"), waitingEl = $("waiting"), connEl = $("conn"), stateEl = $("audioState");
@@ -30,7 +32,7 @@
     lastSeq = c.seq;
     const p = document.createElement("p");
     p.dataset.seq = String(c.seq);
-    p.textContent = c.fr;
+    p.textContent = c.text || c.fr || "";
     captionsEl.appendChild(p);
     while (captionsEl.children.length > KEEP_LINES) captionsEl.removeChild(captionsEl.firstChild);
     const all = captionsEl.querySelectorAll("p");
@@ -58,6 +60,35 @@
     else waitingEl.textContent = "La traduction commencera au début de la réunion.";
   }
 
+  // ------------------------------------------------------------------ language picker
+  let shownLang = null;
+  const langsEl = $("langs");
+  function renderLangs(list) {
+    langsEl.hidden = list.length < 2;
+    langsEl.innerHTML = "";
+    for (const l of list) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = l.name;
+      b.setAttribute("aria-pressed", l.code === lang ? "true" : "false");
+      b.onclick = () => switchLang(l.code);
+      langsEl.appendChild(b);
+    }
+  }
+  function switchLang(code) {
+    if (code === lang) return;
+    lang = code;
+    localStorage.setItem("lang", code);
+    langsEl.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    clearCaptions();
+    // Reconnect the captions in the new language, and move the audio to that language's live stream.
+    try { if (ws) { ws.onclose = null; ws.onmessage = null; ws.close(); } } catch {}
+    ws = null;
+    connect();
+    clipQueue.length = 0;
+    if (MODE === "stream" && audio.src && !audio.paused) startStream();
+  }
+
   // ------------------------------------------------------------------ websocket
   let ws = null, wsDelay = 1000, wsTimer = null, lastPong = Date.now();
 
@@ -75,7 +106,7 @@
     ws.onopen = () => {
       wsDelay = 1000;
       lastPong = Date.now();
-      ws.send(JSON.stringify({ type: "hello", last_seq: lastSeq, boot, session, mode: MODE }));
+      ws.send(JSON.stringify({ type: "hello", last_seq: lastSeq, boot, session, lang, mode: MODE }));
       setConn("ok");
     };
     ws.onmessage = (ev) => {
@@ -83,8 +114,10 @@
       lastPong = Date.now();
       switch (m.type) {
         case "init":
-          // Different server or different run than what's on screen: start clean.
-          if (m.boot !== boot || m.session !== session) clearCaptions();
+          // Different server, run or language than what's on screen: start clean.
+          if (m.boot !== boot || m.session !== session || (m.lang && m.lang !== shownLang)) clearCaptions();
+          if (m.lang) { lang = m.lang; shownLang = m.lang; }
+          renderLangs(m.languages || []);
           boot = m.boot;
           session = m.session;
           live = !!m.live;
@@ -156,7 +189,7 @@
 
   function startStream() {
     ignorePauseUntil = Date.now() + 1500;
-    audio.src = "/stream.mp3?t=" + Date.now();   // always join at the live point
+    audio.src = (lang ? `/stream/${lang}.mp3` : "/stream.mp3") + "?t=" + Date.now();   // always join at the live point
     lastTime = 0; stuckSince = 0;
     const p = audio.play();
     if (p) p.catch((err) => {

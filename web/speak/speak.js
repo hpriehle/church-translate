@@ -106,7 +106,7 @@
 
   // ------------------------------------------------------------------ results feed (operator stream)
   const cards = new Map();
-  const lags = [];
+  const lags = {};
   function upsert(r) {
     let el = cards.get(r.seq);
     if (!el) {
@@ -116,18 +116,28 @@
       while (cards.size > 120) { const k = cards.keys().next().value; cards.get(k).remove(); cards.delete(k); }
     }
     el.className = "card " + r.status;
-    const meta = [];
-    if (r.engine) meta.push(`<span class="eng ${esc(r.engine)}">${esc(r.engine)}</span>`);
-    if (r.caption_lag != null) meta.push(`caption ${r.caption_lag.toFixed(1)}s after you paused`);
-    if (r.air_lag != null) meta.push(`voice ${r.air_lag.toFixed(1)}s`);
-    if (r.status === "skipped") meta.push("skipped (" + esc(r.note || "no speech") + ")");
-    else if (r.note) meta.push(esc(r.note));
-    el.innerHTML = `<div class="en">${esc(r.en) || "…"}</div><div class="fr">${esc(r.fr)}</div><div class="meta">${meta.join(" · ")}</div>`;
-    if (r.status === "aired" && r.caption_lag != null && !el.dataset.c) {
-      el.dataset.c = "1"; lags.push(r.caption_lag);
-      const s = [...lags].sort((a, b) => a - b);
-      $("lag").textContent = `${s[Math.floor(s.length / 2)].toFixed(1)} s (median of ${s.length})`;
+    const out = r.langs || {};
+    const many = Object.keys(out).length > 1;
+    let html = `<div class="en">${esc(r.en) || "…"}</div>`;
+    if (r.status === "skipped") html += `<div class="meta">skipped (${esc(r.note || "no speech")})</div>`;
+    for (const [code, x] of Object.entries(out)) {
+      const meta = [];
+      if (x.engine) meta.push(`<span class="eng ${esc(x.engine)}">${esc(x.engine)}</span>`);
+      if (x.caption_lag != null) meta.push(`caption ${x.caption_lag.toFixed(1)}s after you paused`);
+      if (x.air_lag != null) meta.push(`voice ${x.air_lag.toFixed(1)}s`);
+      if (["skipped", "failed", "merged", "dropped"].includes(x.status)) meta.push(esc(x.status + (x.note ? " — " + x.note : "")));
+      html += `<div class="fr">${many ? `<span class="lc">${code.toUpperCase()}</span> ` : ""}${esc(x.text)}</div>`
+        + `<div class="meta">${meta.join(" · ")}</div>`;
+      if (x.status === "aired" && x.caption_lag != null && !el.dataset["c" + code]) {
+        el.dataset["c" + code] = "1";
+        (lags[code] = lags[code] || []).push(x.caption_lag);
+      }
     }
+    el.innerHTML = html;
+    $("lag").textContent = Object.entries(lags).map(([code, a]) => {
+      const sorted = [...a].sort((p, q) => p - q);
+      return `${Object.keys(lags).length > 1 ? code.toUpperCase() + " " : ""}${sorted[Math.floor(sorted.length / 2)].toFixed(1)} s`;
+    }).join(" · ") || "–";
   }
 
   let urlShown = "";

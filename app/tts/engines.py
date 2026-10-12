@@ -175,21 +175,120 @@ class PiperTts:
         return _resample(np.concatenate(parts[:-1]), sr, self.out_sr)
 
 
+# ------------------------------------------------------------------ SpeechT5 (Wolof)
+
+WOLOF_DIR = MODELS_DIR / "wolof"
+SPEECHT5_MODEL = "bilalfaye/speecht5_tts-wolof"   # fine-tuned on ~40k sentences by native Wolof speakers (v1: steadier than v0.2)
+SPEECHT5_VOCODER = "microsoft/speecht5_hifigan"
+_SPEECHT5_LOADED: dict[str, object] = {}
+
+
+def speecht5_available() -> bool:
+    try:
+        import torch  # noqa: F401
+        import transformers  # noqa: F401
+    except ImportError:
+        return False
+    return any(WOLOF_DIR.glob("speaker-*.npy"))
+
+
+def list_wolof_voices() -> list[dict]:
+    if not speecht5_available():
+        return []
+    names = {"male": "male", "female": "female"}
+    return [{"id": f"speecht5:{p.stem[8:]}", "engine": "speecht5", "voice": p.stem[8:],
+             "label": f"Wolof — {names.get(p.stem[8:], p.stem[8:])}", "lang": "wo"}
+            for p in sorted(WOLOF_DIR.glob("speaker-*.npy"))]
+
+
+class SpeechT5Tts:
+    """Wolof voice. The model takes a speaker profile (x-vector) that sets the voice; runs on CPU
+    (faster than the Mac GPU for this model). Speaks sentence by sentence, with a length cap so a
+    sentence can never turn into a long babble."""
+
+    name = "speecht5"
+    SR = 16000
+
+    def __init__(self, cfg: TtsCfg, out_sr: int):
+        import torch
+        from transformers import SpeechT5ForTextToSpeech, SpeechT5HifiGan, SpeechT5Processor
+
+        self.cfg = cfg
+        self.out_sr = out_sr
+        voice = cfg.voice or "female"
+        path = WOLOF_DIR / f"speaker-{voice}.npy"
+        if not path.exists():
+            raise RuntimeError(f"Wolof voice profile {path.name} missing (models/wolof)")
+        self.voice = voice
+        if "model" not in _SPEECHT5_LOADED:
+            torch.set_num_threads(4)
+            _SPEECHT5_LOADED["processor"] = SpeechT5Processor.from_pretrained(SPEECHT5_MODEL)
+            _SPEECHT5_LOADED["model"] = SpeechT5ForTextToSpeech.from_pretrained(SPEECHT5_MODEL).eval()
+            _SPEECHT5_LOADED["vocoder"] = SpeechT5HifiGan.from_pretrained(SPEECHT5_VOCODER).eval()
+        self._proc = _SPEECHT5_LOADED["processor"]
+        self._model = _SPEECHT5_LOADED["model"]
+        self._voc = _SPEECHT5_LOADED["vocoder"]
+        self._spk = torch.tensor(np.load(path), dtype=torch.float32).reshape(1, -1)
+        self._lock = threading.Lock()
+
+    def _sentence(self, text: str) -> np.ndarray:
+        import torch
+
+        ids = self._proc(text=text, return_tensors="pt")["input_ids"]
+        with torch.inference_mode():
+            # maxlenratio caps the output at ~6 frames per input token: a normal sentence is ~2-3.
+            wav = self._model.generate_speech(ids, self._spk, vocoder=self._voc, threshold=0.4,
+                                              minlenratio=0.0, maxlenratio=6.0)
+        return wav.float().numpy()
+
+    def synth(self, text: str, speed: float = 1.0) -> np.ndarray:
+        parts = [p.strip() for p in re.split(r"(?<=[.!?;:])\s+", text) if p.strip()]
+        gap = np.zeros(int(0.15 * self.SR), dtype=np.float32)
+        out = []
+        with self._lock:
+            for p in parts or [text]:
+                out += [self._sentence(p), gap]
+        audio = np.concatenate(out[:-1]) if out else np.zeros(0, np.float32)
+        pcm = (np.clip(audio / max(1e-6, float(np.abs(audio).max())) * 0.9, -1, 1) * 32767).astype(np.int16)
+        return _resample(pcm, self.SR, self.out_sr)
+
+
+def list_voices_for(code: str) -> list[dict]:
+    if code == "wo":
+        return list_wolof_voices()
+    if code == "fr":
+        return list_voices()
+    return []
+
+
 def make_tts(cfg: TtsCfg, out_sr: int):
     if cfg.engine == "piper":
         return PiperTts(cfg, out_sr)
+    if cfg.engine == "speecht5":
+        return SpeechT5Tts(cfg, out_sr)
     return SayTts(cfg, out_sr)
 
 
 class TtsRunner:
-    """Runs the (blocking) engine in a worker thread and reports timing."""
+    """Runs the (blocking) engine in a worker thread and reports timing.
 
-    def __init__(self, cfg: TtsCfg, out_sr: int):
+    With lazy=True the engine is loaded by `await load()` in the background (the Wolof model takes
+    a few seconds), and synth() waits for it instead of failing.
+    """
+
+    def __init__(self, cfg: TtsCfg, out_sr: int, lazy: bool = False):
         self.cfg = cfg
         self.out_sr = out_sr
         self.engine = None
         self.error = ""
-        self.reload(cfg)
+        self.ready = asyncio.Event()
+        if not lazy:
+            self.reload(cfg)
+            self.ready.set()
+
+    async def load(self) -> None:
+        await asyncio.to_thread(self.reload, self.cfg)
+        self.ready.set()  # on the event loop, not from the worker thread
 
     def reload(self, cfg: TtsCfg) -> None:
         self.cfg = cfg
@@ -200,13 +299,15 @@ class TtsRunner:
         except Exception as e:
             # Keep the previous engine if there was one.
             self.error = str(e)
-            log.warning("TTS unavailable: %s", e)
+            log.warning("TTS unavailable (%s %s): %s", cfg.engine, cfg.voice, e)
 
     @property
     def voice(self) -> str:
         return getattr(self.engine, "voice", "")
 
     async def synth(self, text: str, speed: float = 1.0) -> tuple[np.ndarray, float]:
+        if not self.ready.is_set():
+            await asyncio.wait_for(self.ready.wait(), 120)
         if self.engine is None:
             raise RuntimeError(self.error or "no TTS engine")
         t0 = time.monotonic()

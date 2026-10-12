@@ -21,12 +21,14 @@ from .audio_in import BrowserSource, list_input_devices
 from .broadcast.hub import Hub
 from .broadcast.mixer import Mixer
 from .broadcast.stream import Mp3Broadcaster
-from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, load_glossary, load_settings, save_glossary,
-                     save_override, validate_glossary)
+from .channel import Channel
+from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, load_glossary, load_settings, save_glossary,
+                     save_override, tts_for, validate_glossary)
+from .languages import LANGUAGES, enabled
 from .pipeline import Pipeline
 from .stt import Transcriber
 from .translate.router import Translator
-from .tts.engines import TtsRunner, list_voices
+from .tts.engines import TtsRunner, list_voices_for
 
 log = logging.getLogger("app")
 
@@ -42,13 +44,9 @@ EDITABLE = {
 
 class State:
     settings: Settings
-    glossary: dict[str, Any]
+    glossaries: dict[str, dict[str, Any]]
     pipeline: Pipeline
-    broadcaster: Mp3Broadcaster
-    mixer: Mixer
-    listen: Hub
     operator: Hub
-    translator: Translator
     started: float
     local_addrs: set[str]
     autostart: dict | None = None
@@ -60,6 +58,16 @@ class State:
 
 
 S = State()
+
+
+def channel(code: str | None = None) -> Channel:
+    """The channel for a language code; the first (default) language if unknown/omitted."""
+    chans = S.pipeline.channels
+    return chans.get(code or "") or next(iter(chans.values()))
+
+
+def languages_public() -> list[dict[str, str]]:
+    return [{"code": c, "name": ch.lang.name} for c, ch in S.pipeline.channels.items()]
 
 
 def listener_url() -> str:
@@ -98,10 +106,10 @@ def full_status() -> dict[str, Any]:
         "time": time.time(),
         "server": server_info(),
         "pipeline": S.pipeline.status(),
-        "translate": S.translator.status(),
-        "listeners": {"stream": S.broadcaster.listeners, "captions": S.listen.count,
-                      "kicked": S.broadcaster.kicked_total, "dropped_ws": S.listen.dropped_clients},
-        "mixer_underruns": S.mixer.underruns,
+        "translate": {c: ch.translator.status() for c, ch in S.pipeline.channels.items()},
+        "languages": languages_public(),
+        "listeners": {"stream": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
+                      "captions": sum(ch.hub.count for ch in S.pipeline.channels.values())},
         "listener_url": listener_url(),
     }
 
@@ -120,24 +128,29 @@ async def lifespan(app: FastAPI):
         S.settings.server.port = S.port_override
     if S.mode_override:
         S.settings.translate.mode = S.mode_override
-    S.glossary = load_glossary()
     S.started = time.time()
     S.version = _code_version()
     S.local_addrs = netinfo.local_addresses()
     st = S.settings
-    S.listen = Hub("listen", history=300, queue_size=400)
+    langs = enabled(st.languages)
+    S.glossaries = {lang.code: load_glossary(lang.glossary_file) for lang in langs}
     S.operator = Hub("operator", queue_size=2000)
-    S.broadcaster = Mp3Broadcaster(st.stream.sample_rate, st.stream.bitrate_kbps, st.stream.burst_s)
-    S.mixer = Mixer(st.stream.sample_rate, on_frame=S.broadcaster.feed)
-    S.mixer.volume = st.tts.volume
-    S.translator = Translator(st.translate, S.glossary, ROOT / "data" / "claude-workdir")
-    tts = TtsRunner(st.tts, st.stream.sample_rate)
-    stt = Transcriber(st.stt)
-    S.pipeline = Pipeline(st, S.glossary, S.listen, S.operator, S.mixer, S.broadcaster, S.translator, stt, tts)
+    S.pipeline = Pipeline(st, S.glossaries, S.operator, Transcriber(st.stt))
+    sr = st.stream.sample_rate
+    for lang in langs:
+        # One translator, voice, mixer, MP3 stream and caption feed per language.
+        b = Mp3Broadcaster(sr, st.stream.bitrate_kbps, st.stream.burst_s)
+        m = Mixer(sr, on_frame=b.feed)
+        m.volume = st.tts.volume
+        tr = Translator(st.translate, S.glossaries[lang.code], ROOT / "data" / "claude-workdir", lang)
+        tts = TtsRunner(tts_for(st, lang.code), sr, lazy=True)
+        S.pipeline.add_channel(Channel(S.pipeline, lang, tr, tts, m, b, Hub(f"listen-{lang.code}", history=300, queue_size=400)))
     S.pipeline.start_tasks()
-    S.mixer.start()
-    bg = [asyncio.create_task(status_loop()), asyncio.create_task(S.translator.start()),
-          asyncio.create_task(S.pipeline.load_stt())]
+    bg = [asyncio.create_task(status_loop()), asyncio.create_task(S.pipeline.load_stt())]
+    for ch in S.pipeline.channels.values():
+        ch.mixer.start()
+        bg.append(asyncio.create_task(ch.translator.start()))
+        bg.append(asyncio.create_task(ch.tts.load()))
 
     if S.exit_when_done:
         def _drained():
@@ -149,11 +162,12 @@ async def lifespan(app: FastAPI):
             # Give Claude/Ollama/STT a moment so the first chunks aren't measured against cold models.
             t0 = time.monotonic()
             while time.monotonic() - t0 < 120:
-                ts = S.translator.status()
-                claude_ok = ts["claude"]["state"] in ("ready", "disabled", "missing")
-                ollama_ok = (S.settings.translate.mode != "ollama" or S.translator.ollama.warm
-                             or not S.translator.ollama.available)
-                if S.pipeline.stt.ready and claude_ok and ollama_ok:
+                chans = S.pipeline.channels.values()
+                claude_ok = all(ch.translator.status()["claude"]["state"] in ("ready", "disabled", "missing") for ch in chans)
+                ollama_ok = all(not ch.translator.uses_ollama or S.settings.translate.mode != "ollama"
+                                or ch.translator.ollama.warm or not ch.translator.ollama.available for ch in chans)
+                tts_ok = all(ch.tts.ready.is_set() for ch in chans)
+                if S.pipeline.stt.ready and claude_ok and ollama_ok and tts_ok:
                     break
                 await asyncio.sleep(0.5)
             log.info("autostart after %.1fs warm-up", time.monotonic() - t0)
@@ -168,7 +182,8 @@ async def lifespan(app: FastAPI):
         t.cancel()
     S.pipeline.stop()
     S.pipeline.release_awake()
-    await S.translator.close()
+    for ch in S.pipeline.channels.values():
+        await ch.translator.close()
 
 
 def _shutdown() -> None:
@@ -248,8 +263,20 @@ async def listener_page():
 
 
 @app.get("/stream.mp3")
-async def stream(request: Request):
-    sub, burst = S.broadcaster.subscribe()
+async def stream_default(request: Request):
+    return _stream(channel())
+
+
+@app.get("/stream/{code}.mp3")
+async def stream_lang(code: str):
+    if code not in S.pipeline.channels:
+        raise HTTPException(404)
+    return _stream(channel(code))
+
+
+def _stream(ch: Channel) -> StreamingResponse:
+    broadcaster = ch.broadcaster
+    sub, burst = broadcaster.subscribe()
 
     async def body():
         try:
@@ -261,17 +288,17 @@ async def stream(request: Request):
                     return
                 yield data
         finally:
-            S.broadcaster.unsubscribe(sub)
+            broadcaster.unsubscribe(sub)
 
     headers = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache",
                "X-Content-Type-Options": "nosniff", "Access-Control-Allow-Origin": "*",
-               "icy-name": "Traduction en direct"}
+               "icy-name": f"Traduction en direct ({ch.lang.name})"}
     return StreamingResponse(body(), media_type="audio/mpeg", headers=headers)
 
 
-@app.get("/clips/{seq}.mp3")
-async def clip(seq: int):
-    data = S.pipeline.clips.get(seq)
+@app.get("/clips/{code}/{seq}.mp3")
+async def clip(code: str, seq: int):
+    data = channel(code).clips.get(seq) if code in S.pipeline.channels else None
     if data is None:
         raise HTTPException(404)
     # no-store: clip numbers restart with the server, so a cached clip could be the wrong one.
@@ -285,14 +312,16 @@ async def ws_listen(ws: WebSocket):
         hello = await asyncio.wait_for(ws.receive_json(), timeout=10)
     except Exception:
         hello = {}
-    # Only the current session is ever shown. A phone reconnecting within the same session and
-    # server boot gets what it missed; anyone else gets the current session from its start.
+    # Only the current session is ever shown. A phone reconnecting within the same session, server
+    # boot and language gets what it missed; anyone else gets the current session from its start.
+    ch = channel(hello.get("lang") or ws.query_params.get("lang"))
     session = S.pipeline.session_id
-    same = hello.get("boot") == S.started and hello.get("session") == session
+    same = hello.get("boot") == S.started and hello.get("session") == session and hello.get("lang") == ch.code
     last = int(hello.get("last_seq") or 0) if same else 0
     init = {"type": "init", "boot": S.started, "session": session, "live": S.pipeline.running,
-            "server_time": time.time(), "history": S.listen.replay_after(last) if session else []}
-    await S.listen.serve(ws, [init])
+            "lang": ch.code, "languages": languages_public(),
+            "server_time": time.time(), "history": ch.hub.replay_after(last) if session else []}
+    await ch.hub.serve(ws, [init])
 
 
 @app.get("/qr.svg")
@@ -309,7 +338,8 @@ async def api_qr(request: Request, text: str):
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "listeners": S.broadcaster.listeners, "running": S.pipeline.running, "started": S.started}
+    return {"ok": True, "listeners": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
+            "running": S.pipeline.running, "started": S.started, "languages": list(S.pipeline.channels)}
 
 
 # ------------------------------------------------------------------ operator side
@@ -392,9 +422,11 @@ async def api_state(request: Request):
     return {
         "settings": st.model_dump(),
         "devices": list_input_devices(),
-        "voices": list_voices(),
+        "voices": {c: list_voices_for(c) for c in S.pipeline.channels},
         "samples": _samples(),
-        "glossary": S.glossary,
+        "languages": languages_public(),
+        "all_languages": [{"code": l.code, "name": l.name} for l in LANGUAGES.values()],
+        "glossaries": S.glossaries,
         "listener_url": listener_url(),
         "lan_candidates": netinfo.candidate_ips(),
         "status": full_status(),
@@ -431,9 +463,23 @@ async def api_stop(request: Request):
 @app.post("/api/settings")
 async def api_settings(request: Request):
     require_operator(request)
-    body: dict[str, dict] = await request.json()
+    body: dict[str, Any] = await request.json()
     data = S.settings.model_dump()
+    note = ""
     for section, values in body.items():
+        if section == "voices":  # {"wo": {"engine": "speecht5", "voice": "female"}}
+            for code, v in values.items():
+                if code in LANGUAGES and code != "fr":
+                    data["voices"][code] = VoiceCfg(**v).model_dump()
+            save_override("voices", data["voices"])
+            continue
+        if section == "languages":  # takes effect after a restart
+            codes = [c for c in values if c in LANGUAGES]
+            if codes:
+                data["languages"] = codes
+                save_override("languages", codes)
+                note = "Languages saved — restart the server to apply."
+            continue
         allowed = EDITABLE.get(section, set())
         clean = {k: v for k, v in values.items() if k in allowed}
         if not clean:
@@ -445,26 +491,28 @@ async def api_settings(request: Request):
     except Exception as e:
         raise HTTPException(400, str(e))
     S.settings = new
-    S.pipeline.apply_settings(new, S.glossary)
-    return {"ok": True, "settings": new.model_dump()}
+    S.pipeline.apply_settings(new, S.glossaries)
+    return {"ok": True, "settings": new.model_dump(), "message": note}
 
 
 @app.get("/api/glossary")
-async def api_glossary_get(request: Request):
+async def api_glossary_get(request: Request, lang: str = "fr"):
     require_operator(request)
-    return S.glossary
+    return S.glossaries.get(lang) or load_glossary(LANGUAGES[lang].glossary_file) if lang in LANGUAGES else {}
 
 
 @app.post("/api/glossary")
-async def api_glossary_set(request: Request):
+async def api_glossary_set(request: Request, lang: str = "fr"):
     require_operator(request)
+    if lang not in LANGUAGES:
+        raise HTTPException(400, "unknown language")
     try:
         g = validate_glossary(await request.json())
-        save_glossary(g)
+        save_glossary(g, LANGUAGES[lang].glossary_file)
     except Exception as e:
         raise HTTPException(400, f"Invalid glossary: {e}")
-    S.glossary = g
-    S.pipeline.apply_settings(S.settings, g)
+    S.glossaries[lang] = g
+    S.pipeline.apply_settings(S.settings, S.glossaries)
     return {"ok": True, "message": "Glossary saved. Claude restarts with it in the background (Ollama and speech recognition use it immediately)."}
 
 
@@ -485,10 +533,8 @@ async def api_upload(request: Request, file: UploadFile = File(...)):
 @app.post("/api/test-voice")
 async def api_test_voice(request: Request):
     require_operator(request)
-    body = await request.json() if request.headers.get("content-length") not in (None, "0") else {}
-    text = body.get("text") or "Bonjour. Ceci est un essai de la traduction en direct. Si vous m'entendez, tout fonctionne."
     try:
-        await S.pipeline.say_test(text)
+        await S.pipeline.say_test()
     except Exception as e:
         raise HTTPException(400, str(e))
     return {"ok": True}
@@ -506,12 +552,13 @@ async def _restart_in_place() -> None:
     import os
 
     S.operator.publish({"type": "restarting"})
-    S.listen.publish({"type": "status", "live": False})
+    for ch in S.pipeline.channels.values():
+        ch.hub.publish({"type": "status", "live": False})
     await asyncio.sleep(0.5)  # let the HTTP reply and the notices go out
     try:
         S.pipeline.stop()
         S.pipeline.release_awake()
-        await asyncio.wait_for(S.translator.close(), 8)
+        await asyncio.wait_for(asyncio.gather(*(ch.translator.close() for ch in S.pipeline.channels.values())), 8)
     except Exception:
         log.exception("cleanup before restart failed (continuing)")
     uv = shutil.which("uv")
@@ -546,4 +593,4 @@ async def api_report(request: Request):
     from .metrics import summarize
 
     recs = S.pipeline.metrics.records if S.pipeline.metrics else []
-    return JSONResponse(summarize(recs))
+    return JSONResponse({c: summarize(recs, c) for c in S.pipeline.channels})

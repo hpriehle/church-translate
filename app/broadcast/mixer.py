@@ -56,6 +56,10 @@ class Mixer:
         self.on_air = on_air
         self.volume = 1.0
         self.queue: deque[Clip] = deque()
+        # Hard ceiling: never start a clip whose speech ended more than max_age_s ago
+        # (clip.meta["t_ref"] = monotonic time the speaker finished it). 0 = off.
+        self.max_age_s = 0.0
+        self.on_skip: Callable[[Clip, float], None] | None = None
         self._current: Clip | None = None
         self._pos = 0
         self._task: asyncio.Task | None = None
@@ -97,7 +101,16 @@ class Mixer:
             if self._current is None:
                 if not self.queue:
                     break
-                self._current = self.queue.popleft()
+                clip = self.queue.popleft()
+                t_ref = clip.meta.get("t_ref")
+                if self.max_age_s and t_ref and time.monotonic() - t_ref > self.max_age_s:
+                    if self.on_skip:
+                        try:
+                            self.on_skip(clip, time.monotonic() - t_ref)
+                        except Exception:  # pragma: no cover
+                            log.exception("on_skip callback failed")
+                    continue
+                self._current = clip
                 self._pos = 0
                 if self.on_air:
                     try:

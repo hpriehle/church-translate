@@ -74,6 +74,15 @@ class TtsCfg(BaseModel):
     volume: float = 1.0
 
 
+class VoiceCfg(BaseModel):
+    engine: str
+    voice: str
+
+
+# Voices for languages other than French (French uses [tts]).
+DEFAULT_VOICES: dict[str, VoiceCfg] = {"wo": VoiceCfg(engine="speecht5", voice="male")}
+
+
 class BacklogCfg(BaseModel):
     speedup_start_s: float = 6.0
     speedup_full_s: float = 15.0
@@ -90,6 +99,9 @@ class StreamCfg(BaseModel):
 
 
 class Settings(BaseModel):
+    # Output languages, in the order listeners see them; the first is the default.
+    languages: list[str] = ["fr", "wo"]
+    voices: dict[str, VoiceCfg] = {}
     server: ServerCfg = ServerCfg()
     audio: AudioCfg = AudioCfg()
     vad: VadCfg = VadCfg()
@@ -98,6 +110,14 @@ class Settings(BaseModel):
     tts: TtsCfg = TtsCfg()
     backlog: BacklogCfg = BacklogCfg()
     stream: StreamCfg = StreamCfg()
+
+
+def tts_for(settings: "Settings", code: str) -> TtsCfg:
+    """Voice settings for one output language (rate and volume are shared)."""
+    if code == "fr":
+        return settings.tts
+    v = settings.voices.get(code) or DEFAULT_VOICES.get(code) or VoiceCfg(engine="piper", voice="")
+    return TtsCfg(engine=v.engine, voice=v.voice, rate=settings.tts.rate, volume=settings.tts.volume)
 
 
 def _deep_merge(base: dict, extra: dict) -> dict:
@@ -122,7 +142,7 @@ def load_settings(config_path: Path = CONFIG_PATH) -> Settings:
     return Settings.model_validate(data)
 
 
-def save_override(section: str, values: dict[str, Any]) -> None:
+def save_override(section: str, values: Any) -> None:
     """Persist operator-page changes so they survive a restart."""
     OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
     current: dict[str, Any] = {}
@@ -131,7 +151,10 @@ def save_override(section: str, values: dict[str, Any]) -> None:
             current = json.loads(OVERRIDES_PATH.read_text())
         except json.JSONDecodeError:
             current = {}
-    current.setdefault(section, {}).update(values)
+    if isinstance(values, dict) and isinstance(current.get(section, {}), dict):
+        current.setdefault(section, {}).update(values)
+    else:
+        current[section] = values
     OVERRIDES_PATH.write_text(json.dumps(current, indent=2, ensure_ascii=False))
 
 

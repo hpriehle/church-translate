@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import TranslateCfg
+from ..languages import LANGUAGES, Language
 from .claude_session import ClaudeSession, Usage, claude_binary
 from .ollama import OllamaClient
 from .prompts import build_system_prompt, clean_output, seed_message, user_message
@@ -40,11 +41,15 @@ def _swallow(task: asyncio.Task) -> None:
         task.exception()
 
 
+NO_FALLBACK_TIMEOUT_S = 15.0
+
+
 class Translator:
-    def __init__(self, cfg: TranslateCfg, glossary: dict[str, Any], workdir: Path):
+    def __init__(self, cfg: TranslateCfg, glossary: dict[str, Any], workdir: Path, lang: Language | None = None):
         self.cfg = cfg
+        self.lang = lang or LANGUAGES["fr"]
         self.workdir = workdir
-        self.system_prompt = build_system_prompt(glossary, cfg.audience)
+        self.system_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code)
         self.active: ClaudeSession | None = None
         self.standby: ClaudeSession | None = None
         self._standby_task: asyncio.Task | None = None
@@ -63,10 +68,17 @@ class Translator:
         self.last_activity = 0.0
 
     # ------------------------------------------------------------ lifecycle
+    @property
+    def uses_ollama(self) -> bool:
+        return self.lang.fallback == "ollama"
+
     async def start(self) -> None:
         # The 15 GB fallback model is loaded when a run starts (or now, if Ollama is the translator),
         # so an idle server doesn't hold it in memory.
         self.last_activity = 0.0
+        if not self.uses_ollama:
+            self._maintain()
+            return
         if self.cfg.mode == "ollama":
             self.prepare_fallback()
         else:
@@ -82,7 +94,7 @@ class Translator:
     def prepare_fallback(self) -> None:
         """A run is starting: make sure the fallback model is loaded and its prompt cached."""
         self.last_activity = time.monotonic()
-        if not self.ollama.warm and not getattr(self, "_warming", False):
+        if self.uses_ollama and not self.ollama.warm and not getattr(self, "_warming", False):
             async def _warm():
                 self._warming = True
                 try:
@@ -110,14 +122,14 @@ class Translator:
         await self.ollama.close()
 
     def reload(self, cfg: TranslateCfg, glossary: dict[str, Any]) -> None:
-        new_prompt = build_system_prompt(glossary, cfg.audience)
+        new_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code)
         restart = (new_prompt != self.system_prompt or cfg.claude_model != self.cfg.claude_model
                    or cfg.claude_effort != self.cfg.claude_effort)
         self.cfg = cfg
         self.system_prompt = new_prompt
         self.ollama.url = cfg.ollama_url.rstrip("/")
         self.ollama.timeout_s = cfg.ollama_timeout_s
-        if cfg.ollama_model != self.ollama.model:
+        if cfg.ollama_model != self.ollama.model and self.uses_ollama:
             self.ollama.model = cfg.ollama_model
             self.ollama.warm = False
             asyncio.create_task(self.ollama.warm_up(self.system_prompt))
@@ -130,7 +142,7 @@ class Translator:
 
     # ------------------------------------------------------------ sessions
     def _maintain(self) -> None:
-        if self.cfg.mode == "ollama" or not self.has_claude:
+        if (self.cfg.mode == "ollama" and self.uses_ollama) or not self.has_claude:
             return
         a = self.active
         need = a is None or not a.alive
@@ -151,7 +163,7 @@ class Translator:
                 asyncio.create_task(self._retire(old))
 
     async def _prepare_standby(self) -> None:
-        s = ClaudeSession(self.system_prompt, self.cfg.claude_model, self.cfg.claude_effort, self.workdir)
+        s = ClaudeSession(self.system_prompt, self.cfg.claude_model, self.cfg.claude_effort, self.workdir / self.lang.code)
         try:
             await s.start()
             self.sessions_started += 1
@@ -184,7 +196,8 @@ class Translator:
         note = ""
         claude_task: asyncio.Task | None = None
         s = self.active
-        if self.cfg.mode != "ollama" and self.has_claude:
+        claude_allowed = self.has_claude and (self.cfg.mode != "ollama" or not self.uses_ollama)
+        if claude_allowed:
             if time.monotonic() < self._paused_until:
                 note = "claude paused after errors"
             elif s and s.alive and s.ready and not s.busy:
@@ -196,14 +209,20 @@ class Translator:
                 note = "claude starting" if (self._standby_task or self.standby) else "claude down"
 
         if claude_task:
+            limit = self.cfg.claude_timeout_s if self.uses_ollama else NO_FALLBACK_TIMEOUT_S
             try:
-                raw = await asyncio.wait_for(asyncio.shield(claude_task), timeout=self.cfg.claude_timeout_s)
+                raw = await asyncio.wait_for(asyncio.shield(claude_task), timeout=limit)
                 return self._finish(raw, "claude", t0, english, s, note)
             except asyncio.TimeoutError:
-                note = f"claude > {self.cfg.claude_timeout_s:g}s"
+                note = f"claude > {limit:g}s"
             except Exception as e:
                 note = "claude error"
                 self._claude_error(str(e))
+
+        if not self.uses_ollama:
+            # No local fallback for this language: skip the sentence rather than say something wrong.
+            self.counts["none"] += 1
+            return TranslationResult(None, "none", (time.monotonic() - t0) * 1000, (note + "; no fallback").strip("; "))
 
         # Fallback. A late Claude reply still wins if it arrives before Ollama's.
         ollama_task = asyncio.create_task(
@@ -269,7 +288,7 @@ class Translator:
     def status(self) -> dict[str, Any]:
         a = self.active
         u = self.usage()
-        if self.cfg.mode == "ollama":
+        if self.cfg.mode == "ollama" and self.uses_ollama:
             claude_state = "disabled"
         elif not self.has_claude:
             claude_state = "missing"
@@ -290,7 +309,10 @@ class Translator:
                 "busy_for": round(a.busy_for, 1) if a else 0,
                 "rate_limit": a.rate_limit if a else None,
             },
+            "lang": self.lang.code,
+            "fallback": self.lang.fallback,
             "ollama": {
+                "used": self.uses_ollama,
                 "warming": getattr(self, "_warming", False),
                 "model": self.ollama.model,
                 "available": self.ollama.available,

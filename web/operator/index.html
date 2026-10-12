@@ -61,8 +61,10 @@
 
     <section>
       <h2>Voice &amp; translation</h2>
-      <label>French voice <select id="voice"></select></label>
+      <div id="voiceSelects"></div>
       <a class="ghost button" href="/static/voices/index.html" target="_blank">🎧 Compare voice samples</a>
+      <div class="langs-box"><span class="k">Languages offered to listeners</span><div id="langChecks"></div>
+        <div class="muted small">Each language runs its own Claude session. Changes apply after a restart.</div></div>
       <label>Rate <span id="rateVal" class="muted"></span><input id="rate" type="range" min="140" max="260" step="5"></label>
       <label>Volume <span id="volVal" class="muted"></span><input id="volume" type="range" min="0.2" max="2" step="0.05"></label>
       <label>Translator
@@ -95,16 +97,14 @@
     <div class="tablewrap">
       <table id="chunks">
         <thead><tr>
-          <th>#</th><th>English (heard)</th><th>French (sent)</th><th>Engine</th>
-          <th title="speech-to-text / translation / voice, in ms">STT · MT · TTS</th>
-          <th title="seconds after the speaker finished the phrase">Caption · Audio</th>
+          <th>#</th><th>English (heard)</th><th>French (sent)</th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
     <section class="split">
       <div class="glossary">
-        <h2>Glossary <span class="muted">(names &amp; terms)</span></h2>
+        <h2>Glossary <span class="muted">(names &amp; terms)</span> <select id="gLang" class="inline"></select></h2>
         <div class="tabs">
           <button data-tab="local_names" class="active">Local names</button>
           <button data-tab="terms">Church terms</button>

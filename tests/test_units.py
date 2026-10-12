@@ -257,3 +257,74 @@ def test_piper_voices_and_synthesis():
     assert len(faster) < len(pcm)
     # Unknown voice falls back to an installed one instead of failing.
     assert PiperTts(TtsCfg(engine="piper", voice="nope"), 44100).voice.startswith("fr_FR-")
+
+
+# ------------------------------------------------------------------ multi-language (French + Wolof)
+
+def test_wolof_numbers_and_speech_text():
+    from app.tts.normalize import speechify, wolof_number
+
+    assert wolof_number(3) == "ñett"
+    assert wolof_number(16) == "fukk ak juróom-benn"
+    assert wolof_number(30) == "fanweer"
+    assert wolof_number(118) == "téeméer ak fukk ak juróom-ñett"
+    out = speechify("wo", "Yowaana 3:16 « Yàlla »")
+    assert not any(ch.isdigit() for ch in out) and "«" not in out
+    assert speechify("fr", "Jean 3:16") == "Jean, chapitre 3, verset 16"
+
+
+def test_wolof_prompt():
+    from app.languages import LANGUAGES
+
+    g = load_glossary(LANGUAGES["wo"].glossary_file)
+    p = build_system_prompt(g, "x", "wo")
+    assert "Wolof" in p and "Yeesu Krist" in p and "never digits" in p
+    assert "Sainte-Cène" not in p
+
+
+def test_chunk_record_completes_only_when_every_language_is_done():
+    from app.metrics import ChunkRecord, LangResult
+
+    r = ChunkRecord(seq=1, audio_start_s=0, audio_dur_s=4, voiced_s=3, cut_reason="pause",
+                    t_speech_start=0, t_speech_end=4, t_cut=4.1, en="Hello")
+    r.out = {"fr": LangResult(), "wo": LangResult()}
+    r.out["fr"].status = "aired"
+    assert not r.complete
+    r.out["wo"].status = "dropped"
+    assert r.complete
+    d = r.public()
+    assert set(d["langs"]) == {"fr", "wo"} and d["langs"]["fr"]["status"] == "aired"
+
+
+async def test_wolof_never_falls_back_to_ollama():
+    from app.languages import LANGUAGES
+
+    cfg = TranslateCfg(claude_timeout_s=0.2)
+    t = Translator(cfg, load_glossary(LANGUAGES["wo"].glossary_file), Path("/tmp/ct-test"), LANGUAGES["wo"])
+    t.has_claude = True
+    t.active = FakeSession(delay=0.05, fail=True)
+    called = []
+
+    async def fake_ollama(*a, **k):
+        called.append(1)
+        return "nope"
+    t.ollama.translate = fake_ollama
+    r = await t.translate("hello")
+    assert r.engine == "none" and r.text is None and not called
+    t.active = FakeSession(delay=0.3)     # slower than the French deadline: Wolof still waits for Claude
+    r = await t.translate("hello")
+    assert r.engine == "claude"
+
+
+def test_mixer_never_plays_stale_audio():
+    sr = 44100
+    skipped, aired = [], []
+    m = Mixer(sr, on_air=lambda c, t: aired.append(c.seq), )
+    m.on_skip = lambda c, age: skipped.append(c.seq)
+    m.max_age_s = 30
+    tone = (np.sin(np.arange(sr) / 10) * 8000).astype(np.int16)
+    m.enqueue(Clip(1, tone.copy(), {"t_ref": time.monotonic() - 40}))   # too old
+    m.enqueue(Clip(2, tone.copy(), {"t_ref": time.monotonic() - 5}))
+    for _ in range(3):
+        m._next_frame()
+    assert skipped == [1] and aired == [2]

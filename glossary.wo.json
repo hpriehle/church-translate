@@ -1,0 +1,36 @@
+{
+  "_note": "Wolof terms for the translator. Starter list only — please have a Wolof-speaking member review and extend it on the operator page (Glossary → Wolof). 'fr' holds the Wolof form.",
+  "local_names": [],
+  "terms": [
+    {
+      "en": "God",
+      "fr": "Yàlla"
+    },
+    {
+      "en": "Jesus Christ",
+      "fr": "Yeesu Krist"
+    },
+    {
+      "en": "Holy Ghost",
+      "fr": "Xel mu Sell",
+      "review": true
+    },
+    {
+      "en": "Savior",
+      "fr": "Musalkat bi",
+      "review": true
+    },
+    {
+      "en": "sacrament",
+      "fr": "sakramaa",
+      "review": true
+    },
+    {
+      "en": "covenant",
+      "fr": "kóllëre",
+      "review": true
+    }
+  ],
+  "names": [],
+  "books": []
+}

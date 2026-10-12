@@ -1,57 +1,41 @@
-"""Orchestrates: capture → VAD chunks → STT → translation → TTS → mixer/stream, plus captions.
+"""Orchestrates: capture → VAD chunks → speech-to-text (once) → one Channel per output language.
 
-Each stage is one asyncio task working through its queue in order, so chunk N+1 can be
-transcribed while chunk N is being translated, but captions/audio always stay in order.
+Each Channel (see channel.py) translates, voices and streams its language on its own, in order.
+A chunk's record is complete when every language has finished with it (aired, dropped, skipped…).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
 from .audio_in import CaptureWorker, FileSource, MicSource, Source
 from .backlog import BacklogPolicy
-from .broadcast.hub import Hub
-from .broadcast.mixer import Clip, Mixer
-from .broadcast.stream import Mp3Broadcaster, encode_clip
+from .channel import Channel
 from .chunker import Chunk, Chunker, SileroVad
-from .config import LOG_DIR, Settings
-from .metrics import ChunkRecord, MetricsLog
+from .config import LOG_DIR, Settings, tts_for
+from .metrics import ChunkRecord, LangResult, MetricsLog
 from .stt import Transcriber, build_prompt
 from .translate.prompts import whisper_hints
-from .translate.router import Translator
-from .tts.engines import TtsRunner
-from .tts.speech_fr import speechify
 
 log = logging.getLogger("pipeline")
 
 
 class Pipeline:
-    def __init__(self, settings: Settings, glossary: dict[str, Any], listen: Hub, operator: Hub,
-                 mixer: Mixer, broadcaster: Mp3Broadcaster, translator: Translator,
-                 stt: Transcriber, tts: TtsRunner):
+    def __init__(self, settings: Settings, glossaries: dict[str, dict[str, Any]], operator, stt: Transcriber):
         self.settings = settings
-        self.glossary = glossary
-        self.listen = listen
+        self.glossaries = glossaries
         self.operator = operator
-        self.mixer = mixer
-        self.broadcaster = broadcaster
-        self.translator = translator
         self.stt = stt
-        self.tts = tts
-        self.backlog = BacklogPolicy(settings.backlog)
-        self.hints = whisper_hints(glossary)
+        self.channels: dict[str, Channel] = {}
+        self.hints = self._hints()
         self.vad = SileroVad()
 
         self.chunk_q: asyncio.Queue[Chunk] = asyncio.Queue()
-        self.mt_q: asyncio.Queue[ChunkRecord] = asyncio.Queue()
-        self.tts_q: asyncio.Queue[ChunkRecord] = asyncio.Queue()
         self.records: dict[int, ChunkRecord] = {}
-        self.clips: OrderedDict[int, bytes] = OrderedDict()
         self.stt_exec = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
         self.stt_ready = asyncio.Event()
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -63,25 +47,33 @@ class Pipeline:
         self.started_at = 0.0
         self.level_db = -90.0
         self.metrics: MetricsLog | None = None
-        self.recording = None
         self.prev_en = ""
-        self.avg_clip_s = 4.0
         self._seq = 0
-        self._caption_no = 0
         self.session_id: str | None = None  # one per run; listeners only ever see the current one
         self._tasks: list[asyncio.Task] = []
         self.last_error = ""
         self.last_report: Path | None = None
         self._caff = None
-        self._usage_at_start: dict[str, float] = {}
+        self._usage_at_start: dict[str, dict[str, float]] = {}
         self.on_drained: Callable[[], None] | None = None
+
+    def add_channel(self, ch: Channel) -> None:
+        self.channels[ch.code] = ch
+
+    def _hints(self) -> list[str]:
+        hints: list[str] = []
+        for g in self.glossaries.values():
+            for h in whisper_hints(g):
+                if h not in hints:
+                    hints.append(h)
+        return hints
 
     # ------------------------------------------------------------ lifecycle
     def start_tasks(self) -> None:
         self.loop = asyncio.get_running_loop()
-        self.mixer.on_air = self._on_air
-        self._tasks = [asyncio.create_task(self._stt_stage()), asyncio.create_task(self._mt_stage()),
-                       asyncio.create_task(self._tts_stage())]
+        self._tasks = [asyncio.create_task(self._stt_stage())]
+        for ch in self.channels.values():
+            ch.start_tasks()
 
     async def load_stt(self) -> None:
         try:
@@ -112,11 +104,13 @@ class Pipeline:
         if self.metrics:
             self.metrics.close()
         self.metrics = MetricsLog(LOG_DIR, "session")
-        if record:
-            self.recording = self.broadcaster.start_recording(self.metrics.path.with_name(self.metrics.path.stem + "-fr.mp3"))
-        self.backlog = BacklogPolicy(self.settings.backlog)
-        u = self.translator.usage()
-        self._usage_at_start = {k: getattr(u, k) for k in ("input", "cache_read", "cache_write", "output", "cost_usd", "turns")}
+        for ch in self.channels.values():
+            ch.backlog = BacklogPolicy(self.settings.backlog)
+            if record:
+                ch.recording = ch.broadcaster.start_recording(
+                    self.metrics.path.with_name(f"{self.metrics.path.stem}-{ch.code}.mp3"))
+            u = ch.translator.usage()
+            self._usage_at_start[ch.code] = {k: getattr(u, k) for k in ("input", "cache_read", "cache_write", "output", "cost_usd", "turns")}
         self.worker = CaptureWorker(source, chunker, a.input_gain, self._on_chunk_thread,
                                     self._on_level_thread, self._on_end_thread)
         self.capturing = True
@@ -126,12 +120,14 @@ class Pipeline:
         self.last_error = ""
         self.worker.start()
         self._hold_awake()
-        self.translator.prepare_fallback()
-        log.info("started: %s", source.label)
+        for ch in self.channels.values():
+            ch.translator.prepare_fallback()
+        log.info("started: %s → %s", source.label, ", ".join(self.channels))
         # New session: phones clear what they show, and nobody is sent captions from earlier runs.
         self.session_id = time.strftime("%Y%m%d-%H%M%S")
-        self.listen.history.clear()
-        self.listen.publish({"type": "session", "session": self.session_id, "live": True})
+        for ch in self.channels.values():
+            ch.hub.history.clear()
+            ch.hub.publish({"type": "session", "session": self.session_id, "live": True})
         self.operator.publish({"type": "log", "level": "info", "text": f"Started — {source.label}"})
 
     def stop(self) -> None:
@@ -159,10 +155,8 @@ class Pipeline:
         asyncio.create_task(self._wait_drained())
 
     async def _wait_drained(self) -> None:
-        # Let in-flight chunks finish, then mark the run as stopped.
-        while (not self.chunk_q.empty() or not self.mt_q.empty() or not self.tts_q.empty()
-               or any(r.status in ("pending", "captioned") for r in self.records.values())
-               or self.mixer.backlog_s > 0.05):
+        # Let in-flight chunks finish in every language, then mark the run as stopped.
+        while not self.chunk_q.empty() or self.records or not all(ch.idle for ch in self.channels.values()):
             if self.capturing:
                 return
             await asyncio.sleep(0.25)
@@ -172,12 +166,15 @@ class Pipeline:
         self.release_awake()
         # Session over: phones that are open keep their text, but nobody who opens the page later gets it.
         self.session_id = None
-        self.listen.history.clear()
-        self.listen.publish({"type": "status", "live": False})
-        if self.recording:
+        for ch in self.channels.values():
+            ch.hub.history.clear()
+            ch.hub.publish({"type": "status", "live": False})
+        if any(ch.recording for ch in self.channels.values()):
             await asyncio.sleep(1.0)  # tail of the last clip
-            self.broadcaster.stop_recording(self.recording)
-            self.recording = None
+            for ch in self.channels.values():
+                if ch.recording:
+                    ch.broadcaster.stop_recording(ch.recording)
+                    ch.recording = None
         if self.metrics:
             try:
                 self._write_report()
@@ -187,16 +184,21 @@ class Pipeline:
         if self.on_drained:
             self.on_drained()
 
-    # ------------------------------------------------------------ stages
-    def total_backlog(self) -> float:
-        waiting = self.mt_q.qsize() + self.tts_q.qsize()
-        return self.mixer.backlog_s + waiting * self.avg_clip_s
-
-    def _publish_rec(self, rec: ChunkRecord) -> None:
+    # ------------------------------------------------------------ records
+    def publish_rec(self, rec: ChunkRecord) -> None:
         self.operator.publish({"type": "chunk", **rec.public()})
 
+    def lang_done(self, rec: ChunkRecord) -> None:
+        """A language finished with this chunk (aired, dropped, skipped…); finalize once all have."""
+        if rec.complete:
+            self._finalize(rec)
+        else:
+            self.publish_rec(rec)
+
     def _finalize(self, rec: ChunkRecord) -> None:
-        self._publish_rec(rec)
+        if rec.status == "pending":
+            rec.status = "done"
+        self.publish_rec(rec)
         if self.metrics:
             self.metrics.write(rec)
         self.records.pop(rec.seq, None)
@@ -226,89 +228,10 @@ class Pipeline:
                 continue
             rec.en = res.text
             self.prev_en = res.text
-            self._publish_rec(rec)
-            await self.mt_q.put(rec)
-
-    async def _mt_stage(self) -> None:
-        while True:
-            rec = await self.mt_q.get()
-            # Falling behind? Translate the waiting chunks together in one request.
-            merged: list[ChunkRecord] = []
-            while not self.mt_q.empty() and len(merged) < 3:
-                merged.append(self.mt_q.get_nowait())
-            if merged:
-                rec.en = " ".join([rec.en] + [m.en for m in merged])
-                rec.merged = [m.seq for m in merged]
-                rec.t_speech_end = merged[-1].t_speech_end
-                rec.audio_dur_s = round(rec.audio_dur_s + sum(m.audio_dur_s for m in merged), 2)
-                for m in merged:
-                    m.status, m.note = "merged", f"merged into #{rec.seq}"
-                    self._finalize(m)
-            rec.condensed = self.backlog.update_condense(self.total_backlog())
-            try:
-                res = await self.translator.translate(rec.en, rec.condensed)
-            except Exception as e:  # pragma: no cover
-                log.exception("translate crashed")
-                rec.status, rec.note = "failed", f"translate: {e}"
-                self._finalize(rec)
-                continue
-            rec.mt_ms = round(res.ms, 1)
-            rec.engine = res.engine
-            rec.note = res.note
-            if not res.text:
-                rec.status = "failed" if res.engine == "none" else "skipped"
-                self._finalize(rec)
-                continue
-            rec.fr = res.text
-            rec.t_caption = time.monotonic()
-            rec.status = "captioned"
-            self._caption_no += 1
-            rec.caption_no = self._caption_no
-            self.listen.publish({"type": "caption", "seq": rec.caption_no, "session": self.session_id, "fr": rec.fr,
-                                 "ts": time.time()}, remember=True)
-            self._publish_rec(rec)
-            await self.tts_q.put(rec)
-
-    async def _tts_stage(self) -> None:
-        sr = self.mixer.sr
-        while True:
-            rec = await self.tts_q.get()
-            speed = self.backlog.speed_for(self.total_backlog())
-            try:
-                pcm, ms = await self.tts.synth(speechify(rec.fr), speed)
-            except Exception as e:
-                log.warning("tts failed: %s", e)
-                rec.status, rec.note = "failed", (rec.note + f" tts: {e}").strip()
-                self._finalize(rec)
-                continue
-            rec.tts_ms = round(ms, 1)
-            rec.speed = speed
-            rec.t_audio_ready = time.monotonic()
-            clip = Clip(rec.seq, pcm)
-            dropped = self.mixer.enqueue(clip, self.backlog.drop_above_s, self.backlog.drop_to_s)
-            rec.clip_s = round(clip.duration(sr), 2)
-            self.avg_clip_s = 0.8 * self.avg_clip_s + 0.2 * rec.clip_s
-            rec.backlog_at_enqueue = round(self.mixer.backlog_s, 2)
-            self._publish_rec(rec)
-            for d in dropped:
-                drec = self.records.get(d.seq)
-                if drec:
-                    drec.status, drec.note = "dropped", "audio dropped (more than %.0fs behind)" % self.backlog.drop_above_s
-                    self._finalize(drec)
-            # Clip-by-clip fallback mode for phones that use it.
-            mp3 = await asyncio.to_thread(encode_clip, clip.pcm, sr, self.settings.stream.bitrate_kbps)
-            self.clips[rec.seq] = mp3
-            while len(self.clips) > 80:
-                self.clips.popitem(last=False)
-            self.listen.publish({"type": "clip", "seq": rec.caption_no, "url": f"/clips/{rec.seq}.mp3"})
-
-    def _on_air(self, clip: Clip, t: float) -> None:
-        rec = self.records.get(clip.seq)
-        if rec:
-            self.listen.publish({"type": "onair", "seq": rec.caption_no})
-            rec.t_on_air = t
-            rec.status = "aired"
-            self._finalize(rec)
+            rec.out = {code: LangResult() for code in self.channels}
+            self.publish_rec(rec)
+            for ch in self.channels.values():
+                ch.mt_q.put_nowait(rec)
 
     # ------------------------------------------------------------ misc
     def _hold_awake(self) -> None:
@@ -328,17 +251,20 @@ class Pipeline:
 
     def _run_info(self) -> dict[str, Any]:
         st = self.settings
-        u = self.translator.usage()
-        u0 = self._usage_at_start
-        usage = {k: getattr(u, k) - u0.get(k, 0) for k in ("input", "cache_read", "cache_write", "output", "cost_usd", "turns")}
         stt_model = st.stt.model if st.stt.engine == "mlx" else st.stt.faster_whisper_model
+        langs = {}
+        for code, ch in self.channels.items():
+            u = ch.translator.usage()
+            u0 = self._usage_at_start.get(code, {})
+            usage = {k: getattr(u, k) - u0.get(k, 0) for k in ("input", "cache_read", "cache_write", "output", "cost_usd", "turns")}
+            langs[code] = {"name": ch.lang.name, "tts": f"{ch.tts.cfg.engine} voice={ch.tts.voice}",
+                           "fallback": ch.lang.fallback, "usage": usage}
         return {
             "source": self.source_label,
             "stt": f"{st.stt.engine} {stt_model}",
-            "translator": (f"mode={st.translate.mode}, Claude {st.translate.claude_model} (effort {st.translate.claude_effort}, "
-                           f"fallback after {st.translate.claude_timeout_s:g}s), Ollama {st.translate.ollama_model}"),
-            "tts": f"{st.tts.engine} voice={self.tts.voice} rate={st.tts.rate}",
-            "usage": usage,
+            "translator": (f"Claude {st.translate.claude_model} (effort {st.translate.claude_effort}), French fallback "
+                           f"after {st.translate.claude_timeout_s:g}s to Ollama {st.translate.ollama_model}"),
+            "languages": langs,
         }
 
     def _write_report(self) -> None:
@@ -355,37 +281,35 @@ class Pipeline:
         self.last_report = out
         self.operator.publish({"type": "log", "level": "info", "text": f"Report written: logs/{out.name}"})
 
-    async def say_test(self, text: str) -> None:
-        pcm, _ = await self.tts.synth(speechify(text), 1.0)
-        self.mixer.enqueue(Clip(0, pcm))
+    async def say_test(self) -> None:
+        await asyncio.gather(*(ch.say_test() for ch in self.channels.values()), return_exceptions=True)
 
-    def apply_settings(self, settings: Settings, glossary: dict[str, Any]) -> None:
-        old = self.settings
+    def apply_settings(self, settings: Settings, glossaries: dict[str, dict[str, Any]]) -> None:
         self.settings = settings
-        self.glossary = glossary
-        self.hints = whisper_hints(glossary)
-        self.backlog.cfg = settings.backlog
-        self.mixer.volume = settings.tts.volume
-        if settings.tts.model_dump() != old.tts.model_dump():
-            self.tts.reload(settings.tts)
-        self.translator.reload(settings.translate, glossary)
+        self.glossaries = glossaries
+        self.hints = self._hints()
+        for code, ch in self.channels.items():
+            ch.backlog.cfg = settings.backlog
+            ch.mixer.max_age_s = settings.backlog.drop_above_s + 5
+            ch.mixer.volume = settings.tts.volume
+            new_tts = tts_for(settings, code)
+            if new_tts.model_dump() != ch.tts.cfg.model_dump():
+                ch.tts.reload(new_tts)
+            ch.translator.reload(settings.translate, glossaries.get(code, {}))
 
     def status(self) -> dict[str, Any]:
+        chans = {code: ch.status() for code, ch in self.channels.items()}
         return {
             "running": self.running,
             "capturing": self.capturing,
             "source": self.source_label,
             "started_at": self.started_at,
             "level_db": round(self.level_db, 1),
-            "backlog_s": round(self.mixer.backlog_s, 1),
-            "pipeline_backlog_s": round(self.total_backlog(), 1),
-            "queues": {"stt": self.chunk_q.qsize(), "translate": self.mt_q.qsize(), "tts": self.tts_q.qsize()},
-            "speed": self.backlog.speed_for(self.total_backlog()),
-            "condense": self.backlog.condense,
+            "backlog_s": max((c["backlog_s"] for c in chans.values()), default=0.0),
+            "queues": {"stt": self.chunk_q.qsize()},
             "stt_ready": self.stt.ready,
             "stt_engine": self.stt.engine,
-            "tts": {"engine": self.settings.tts.engine, "voice": self.tts.voice, "error": self.tts.error},
+            "channels": chans,
             "metrics_file": str(self.metrics.path.name) if self.metrics else "",
-            "recording": bool(self.recording),
             "last_error": self.last_error,
         }
