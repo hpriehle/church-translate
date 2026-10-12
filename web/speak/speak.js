@@ -6,6 +6,10 @@
   const params = new URLSearchParams(location.search);
   const KEY = params.get("key") || params.get("pin");
   const q = KEY ? "?key=" + encodeURIComponent(KEY) : "";
+  // Opened through a public address (tunnel)? Then show that address, not the server's LAN one.
+  const VIA_PUBLIC = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[|[\d.]+$)/.test(location.hostname);
+  const shownUrl = (serverUrl) => (VIA_PUBLIC ? location.origin + "/" : serverUrl);
+  const qrFor = (url) => "/api/qr?text=" + encodeURIComponent(url) + (KEY ? "&key=" + encodeURIComponent(KEY) : "");
   const wsUrl = (path) => (location.protocol === "https:" ? "wss://" : "ws://") + location.host + path + q;
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -132,10 +136,11 @@
     $("backlog").textContent = st.pipeline.backlog_s.toFixed(1) + " s";
     $("claude").textContent = st.translate.claude.state + " · " + st.translate.claude.model;
     $("stt").textContent = st.pipeline.stt_ready ? "ready" : "loading…";
-    if (st.listener_url && st.listener_url !== urlShown) {
-      urlShown = st.listener_url;
+    const url = shownUrl(st.listener_url);
+    if (url && url !== urlShown) {
+      urlShown = url;
       $("url").textContent = urlShown; $("url").href = urlShown;
-      $("qr").src = "/qr.svg?t=" + Date.now();
+      $("qr").src = qrFor(urlShown);
     }
   }
 

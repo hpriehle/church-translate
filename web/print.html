@@ -40,7 +40,7 @@
     </div>
     <div class="code">
       <div class="step" id="pageStep">Scannez ce code</div>
-      <img src="/qr.svg" alt="">
+      <img id="pageQr" alt="">
       <div class="sub">puis touchez « Écouter »</div>
     </div>
   </div>
@@ -53,7 +53,12 @@
   </ol>
 </div>
 <script>
-  fetch("/api/state").then(r => r.json()).then(s => { document.getElementById("url").textContent = s.listener_url; });
+  const VIA_PUBLIC = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[|[\d.]+$)/.test(location.hostname);
+  fetch("/api/state").then(r => r.json()).then(s => {
+    const url = VIA_PUBLIC ? location.origin + "/" : s.listener_url;
+    document.getElementById("url").textContent = url;
+    document.getElementById("pageQr").src = "/api/qr?text=" + encodeURIComponent(url);
+  });
   const ssid = document.getElementById("ssid"), pass = document.getElementById("pass");
   const esc = (v) => v.replace(/([\\;,:"])/g, "\\$1");
   function update() {

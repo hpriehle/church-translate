@@ -2,6 +2,10 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const PIN = new URLSearchParams(location.search).get("pin") || new URLSearchParams(location.search).get("key");
+  // Opened through a public address (tunnel)? Then show that address, not the server's LAN one.
+  const VIA_PUBLIC = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[|[\d.]+$)/.test(location.hostname);
+  const shownUrl = (serverUrl) => (VIA_PUBLIC ? location.origin + "/" : serverUrl);
+  const qrFor = (url) => "/api/qr?text=" + encodeURIComponent(url) + (PIN ? "&key=" + encodeURIComponent(PIN) : "");
   const withPin = (url) => PIN ? url + (url.includes("?") ? "&" : "?") + "pin=" + encodeURIComponent(PIN) : url;
   const api = async (path, body, method) => {
     const opts = body instanceof FormData ? { method: "POST", body }
@@ -78,11 +82,12 @@
     updateStatus(state.status);
   }
 
-  function setUrl(url) {
+  function setUrl(serverUrl) {
+    const url = shownUrl(serverUrl);
     if (url === listenerUrl) return;
     listenerUrl = url;
     $("url").textContent = url; $("url").href = url;
-    $("qr").src = "/qr.svg?t=" + Date.now();
+    $("qr").src = qrFor(url);
   }
 
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
