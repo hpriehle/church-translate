@@ -16,22 +16,15 @@
   <span id="conn" class="pill wait">Connexion…</span>
 </header>
 
-<main id="captions" aria-live="polite" aria-label="Sous-titres en français"></main>
+<main id="captions" aria-live="polite" aria-label="Sous-titres en direct"></main>
 <p id="waiting" class="waiting">La traduction commencera au début de la réunion.</p>
-<button id="jump" class="jump" hidden>↓ Revenir au direct</button>
 
 <footer>
-  <button id="listen" class="listen" type="button">
-    <span class="icon" aria-hidden="true">▶</span><span id="listenLabel">Écouter</span>
+  <button id="mute" class="mute" type="button" aria-pressed="false">
+    <span class="icon" aria-hidden="true">🔇</span>
+    <span class="label"><b id="muteLabel">Son coupé</b><small id="muteHint">Touchez pour écouter</small></span>
   </button>
-  <div class="row">
-    <button id="smaller" type="button" aria-label="Texte plus petit">A−</button>
-    <span id="audioState" class="state">🎧 Utilisez des écouteurs</span>
-    <button id="bigger" type="button" aria-label="Texte plus grand">A+</button>
-  </div>
-  <div class="row small">
-    <label class="toggle"><input id="awake" type="checkbox"> Garder l'écran allumé</label>
-  </div>
+  <div id="audioState" class="state">🎧 Utilisez des écouteurs</div>
 </footer>
 <script src="/static/listener/listener.js"></script>
 </body>

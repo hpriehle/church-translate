@@ -1,43 +1,29 @@
-/* Listener page: live French captions over WebSocket + French audio.
+/* Listener page: live only. French captions over WebSocket + the live French voice.
+ *
+ * The one control is mute / unmute. The first tap starts the live stream (phones only allow
+ * sound after a tap). Muting just silences it while it keeps running, so unmuting is instant
+ * and always at the live point. There is no history to scroll back through.
  *
  * Audio modes
- *   stream (default): one never-ending <audio src="/stream.mp3">, like internet radio. iOS keeps
- *                     playing it with the screen locked. The server fills gaps with silence.
- *   clips (?mode=clips): fallback that plays each translated clip in turn on the same element.
+ *   stream (default): one never-ending /stream.mp3 (like internet radio; iOS keeps playing it
+ *                     with the screen locked). The server fills gaps with silence.
+ *   clips (?mode=clips): fallback that plays each new clip as it arrives (never old ones).
  *
- * Everything reconnects by itself: captions resume from the last one seen, audio restarts
- * at "live" (never replays old audio).
+ * Everything reconnects by itself; captions resume within the current session only.
  */
 (() => {
   "use strict";
   const MODE = new URLSearchParams(location.search).get("mode") === "clips" ? "clips" : "stream";
+  const KEEP_LINES = 6;
   const $ = (id) => document.getElementById(id);
-  const captionsEl = $("captions"), waitingEl = $("waiting"), jumpEl = $("jump");
-  const connEl = $("conn"), listenBtn = $("listen"), listenLabel = $("listenLabel"), stateEl = $("audioState");
-  const awakeBox = $("awake");
+  const captionsEl = $("captions"), waitingEl = $("waiting"), connEl = $("conn"), stateEl = $("audioState");
+  const muteBtn = $("mute");
 
-  // ------------------------------------------------------------------ text size
-  let scale = parseFloat(localStorage.getItem("scale") || "1");
-  const applyScale = () => document.documentElement.style.setProperty("--scale", String(scale));
-  applyScale();
-  $("smaller").onclick = () => { scale = Math.max(0.7, +(scale - 0.1).toFixed(2)); localStorage.setItem("scale", scale); applyScale(); };
-  $("bigger").onclick = () => { scale = Math.min(2.2, +(scale + 0.1).toFixed(2)); localStorage.setItem("scale", scale); applyScale(); };
-
-  // ------------------------------------------------------------------ captions
+  // ------------------------------------------------------------------ captions (live only)
   let lastSeq = 0;
   let boot = null;          // server instance; caption numbers restart when it changes
   let session = null;       // translation run; only the current one is ever shown
   let live = false;
-  let followLive = true;
-
-  function nearBottom() {
-    return captionsEl.scrollHeight - captionsEl.scrollTop - captionsEl.clientHeight < 80;
-  }
-  captionsEl.addEventListener("scroll", () => {
-    followLive = nearBottom();
-    jumpEl.hidden = followLive;
-  }, { passive: true });
-  jumpEl.onclick = () => { followLive = true; jumpEl.hidden = true; captionsEl.scrollTop = captionsEl.scrollHeight; };
 
   function addCaption(c) {
     if (!c || typeof c.seq !== "number" || c.seq <= lastSeq) return;
@@ -46,11 +32,10 @@
     p.dataset.seq = String(c.seq);
     p.textContent = c.fr;
     captionsEl.appendChild(p);
+    while (captionsEl.children.length > KEEP_LINES) captionsEl.removeChild(captionsEl.firstChild);
     const all = captionsEl.querySelectorAll("p");
     all.forEach((el, i) => el.classList.toggle("recent", i >= all.length - 2));
-    while (captionsEl.children.length > 250) captionsEl.removeChild(captionsEl.firstChild);
     updateWaiting();
-    if (followLive) captionsEl.scrollTop = captionsEl.scrollHeight;
   }
 
   function markOnAir(seq) {
@@ -60,21 +45,17 @@
     if (el) el.classList.add("onair");
   }
 
-  function updateWaiting() {
-    waitingEl.hidden = live || captionsEl.children.length > 0;
-    if (!live && captionsEl.children.length > 0) {
-      waitingEl.hidden = false;
-      waitingEl.textContent = "La traduction est terminée.";
-    } else {
-      waitingEl.textContent = "La traduction commencera au début de la réunion.";
-    }
-  }
-
   function clearCaptions() {
     captionsEl.innerHTML = "";
     lastSeq = 0;
-    followLive = true;
-    jumpEl.hidden = true;
+  }
+
+  function updateWaiting() {
+    const any = captionsEl.children.length > 0;
+    waitingEl.hidden = live && any;
+    if (live) waitingEl.textContent = "En direct — la traduction va s'afficher ici.";
+    else if (any) waitingEl.textContent = "La traduction est terminée.";
+    else waitingEl.textContent = "La traduction commencera au début de la réunion.";
   }
 
   // ------------------------------------------------------------------ websocket
@@ -99,33 +80,37 @@
     };
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
+      lastPong = Date.now();
       switch (m.type) {
         case "init":
           // Different server or different run than what's on screen: start clean.
           if (m.boot !== boot || m.session !== session) clearCaptions();
           boot = m.boot;
           session = m.session;
-          live = !!m.live; (m.history || []).forEach(addCaption); updateWaiting(); break;
+          live = !!m.live;
+          (m.history || []).forEach(addCaption);
+          updateWaiting();
+          break;
         case "session":
-          // A new run started: wipe the previous one everywhere.
+          // A new run started: wipe the previous one.
           if (m.session !== session) clearCaptions();
           session = m.session;
-          live = true; updateWaiting(); break;
+          live = true;
+          updateWaiting();
+          break;
         case "caption":
-          if (m.session && session && m.session !== session) { clearCaptions(); }
+          if (m.session && session && m.session !== session) clearCaptions();
           if (m.session) session = m.session;
-          addCaption(m); break;
+          addCaption(m);
+          break;
         case "onair": markOnAir(m.seq); break;
         case "status":
           live = !!m.live;
-          // Run over: keep the text for people still reading, but forget the session, so a
-          // reconnect after the end doesn't treat it as current.
-          if (!live) session = null;
-          updateWaiting(); break;
+          if (!live) session = null;  // run over: a reconnect after this must not treat it as current
+          updateWaiting();
+          break;
         case "clip": if (MODE === "clips") enqueueClip(m); break;
-        case "pong": lastPong = Date.now(); break;
       }
-      lastPong = Date.now();
     };
     ws.onclose = () => { setConn("bad"); scheduleReconnect(); };
     ws.onerror = () => { try { ws.close(); } catch {} };
@@ -141,168 +126,156 @@
       if (Date.now() - lastPong > 45000) { try { ws.close(); } catch {} }
     }
   }, 15000);
-  window.addEventListener("online", () => { wsDelay = 500; connect(); if (listening) restartAudio("online"); });
+  window.addEventListener("online", () => { wsDelay = 500; connect(); if (soundOn) restartAudio(); });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     connect();
-    if (listening) { ensureAudio(); if (awakeBox.checked) requestWakeLock(); }
+    if (soundOn) ensureAudio();
   });
 
-  // ------------------------------------------------------------------ audio
+  // ------------------------------------------------------------------ audio: mute / unmute
   const audio = new Audio();
   audio.preload = "none";
   audio.setAttribute("playsinline", "");
   audio.setAttribute("webkit-playsinline", "");
-  let listening = false;
+  let soundOn = false;          // what the listener chose
   let audioDelay = 1000, audioTimer = null;
   let lastTime = 0, stuckSince = 0;
-  let ignorePauseUntil = 0;   // our own src changes also fire "pause"
+  let ignorePauseUntil = 0;     // our own src changes also fire "pause"
 
   function setState(text, cls) {
     stateEl.textContent = text;
     stateEl.className = "state" + (cls ? " " + cls : "");
   }
-  function updateButton() {
-    listenBtn.classList.toggle("on", listening);
-    listenBtn.querySelector(".icon").textContent = listening ? "■" : "▶";
-    listenLabel.textContent = listening ? "Arrêter le son" : "Écouter";
-    if (!listening) setState("🎧 Utilisez des écouteurs");
+  function showMute() {
+    muteBtn.classList.toggle("on", soundOn);
+    muteBtn.setAttribute("aria-pressed", soundOn ? "true" : "false");
+    muteBtn.querySelector(".icon").textContent = soundOn ? "🔊" : "🔇";
+    $("muteLabel").textContent = soundOn ? "Son activé" : "Son coupé";
+    $("muteHint").textContent = soundOn ? "Touchez pour couper le son" : "Touchez pour écouter";
+    if (!soundOn) setState("🎧 Utilisez des écouteurs");
   }
 
   function startStream() {
     ignorePauseUntil = Date.now() + 1500;
-    audio.src = "/stream.mp3?t=" + Date.now();
+    audio.src = "/stream.mp3?t=" + Date.now();   // always join at the live point
     lastTime = 0; stuckSince = 0;
     const p = audio.play();
     if (p) p.catch((err) => {
       if (err && err.name === "NotAllowedError") {
-        listening = false; updateButton();
-        setState("Touchez « Écouter » pour activer le son", "warn");
+        soundOn = false; showMute();
+        setState("Touchez le bouton pour activer le son", "warn");
       } else {
-        restartAudio("play failed");
+        restartAudio();
       }
     });
   }
 
-  function stopAudio() {
-    clearTimeout(audioTimer);
-    audio.pause();
-    audio.removeAttribute("src");
-    audio.load();
-    clipQueue.length = 0;
-    clipPlaying = false;
-  }
-
-  function restartAudio(why) {
-    if (!listening) return;
+  function restartAudio() {
+    if (!soundOn) return;
     clearTimeout(audioTimer);
     setState("Reconnexion du son…", "warn");
-    audioTimer = setTimeout(() => {
-      if (!listening) return;
-      if (MODE === "stream") startStream(); else playNextClip();
-    }, audioDelay);
+    audioTimer = setTimeout(() => { if (soundOn) (MODE === "stream" ? startStream() : playNextClip()); }, audioDelay);
     audioDelay = Math.min(audioDelay * 2, 8000);
   }
 
   function ensureAudio() {
-    if (MODE === "stream" && (audio.paused || audio.ended || audio.error)) restartAudio("ensure");
+    if (MODE === "stream" && (audio.paused || audio.ended || audio.error)) restartAudio();
   }
 
-  audio.addEventListener("playing", () => { audioDelay = 1000; setState("● En direct", "live"); });
-  audio.addEventListener("waiting", () => { if (listening) setState("Chargement…"); });
-  audio.addEventListener("error", () => { if (listening && MODE === "stream") restartAudio("error"); });
+  function unmute() {
+    soundOn = true;
+    audio.muted = false;
+    audioDelay = 1000;
+    showMute();
+    if (MODE === "stream") {
+      if (audio.paused || !audio.src) { setState("Chargement…"); startStream(); }
+      else setState("● En direct", "live");
+    } else {
+      unlockForClips();
+      requestWakeLock();
+    }
+  }
+
+  function mute() {
+    soundOn = false;
+    audio.muted = true;              // the stream keeps running silently, so unmuting is instantly live
+    clipQueue.length = 0;            // clips mode: never play what was said while muted
+    showMute();
+    releaseWakeLock();
+  }
+
+  muteBtn.onclick = () => (soundOn ? mute() : unmute());
+
+  audio.addEventListener("playing", () => { audioDelay = 1000; if (soundOn) setState("● En direct", "live"); });
+  audio.addEventListener("waiting", () => { if (soundOn) setState("Chargement…"); });
+  audio.addEventListener("error", () => { if (soundOn && MODE === "stream") restartAudio(); });
   audio.addEventListener("ended", () => {
-    if (!listening) return;
-    if (MODE === "stream") restartAudio("ended"); else playNextClip();
+    if (MODE === "stream") { if (soundOn) restartAudio(); } else playNextClip();
   });
   audio.addEventListener("pause", () => {
-    // Paused by the system (phone call, headphones unplugged) rather than by us.
-    if (!listening || MODE !== "stream" || audio.ended || Date.now() < ignorePauseUntil) return;
-    listening = false;
-    updateButton();
-    setState("En pause — touchez « Écouter »", "warn");
+    // Paused by the phone (call, headphones unplugged, lock-screen control): treat as muted.
+    if (MODE !== "stream" || audio.ended || Date.now() < ignorePauseUntil || !soundOn) return;
+    soundOn = false;
+    showMute();
   });
 
-  // Watchdog: a dropped Wi-Fi often stalls the stream without an error event.
+  // Keep the stream at the live point: restart if it stalls (Wi-Fi drop) or drifts behind.
   setInterval(() => {
-    if (!listening || MODE !== "stream" || audio.paused) return;
+    if (MODE !== "stream" || !audio.src || audio.paused) return;
     const t = audio.currentTime;
     if (t > lastTime + 0.05) { lastTime = t; stuckSince = 0; }
     else if (!stuckSince) stuckSince = Date.now();
-    else if (Date.now() - stuckSince > 7000) { stuckSince = 0; restartAudio("stalled"); }
-    // If this phone has drifted behind (buffered audio piling up), jump back to live.
+    else if (Date.now() - stuckSince > 7000) { stuckSince = 0; if (soundOn) restartAudio(); else startStream(); }
     try {
       const b = audio.buffered;
-      if (b.length && b.end(b.length - 1) - t > 8) restartAudio("drift");
+      if (b.length && b.end(b.length - 1) - t > 6) { if (soundOn) restartAudio(); else startStream(); }
     } catch {}
   }, 2000);
 
-  // ------------------------------------------------------------------ clip mode
+  // ------------------------------------------------------------------ clip mode (fallback)
   const clipQueue = [];
   let clipPlaying = false;
   function enqueueClip(m) {
-    if (!listening) return;
+    if (!soundOn) return;
     clipQueue.push(m.url);
-    if (clipQueue.length > 3) clipQueue.splice(0, clipQueue.length - 2); // fell behind: skip ahead
+    if (clipQueue.length > 2) clipQueue.splice(0, clipQueue.length - 1);  // behind: jump to the newest
     if (!clipPlaying) playNextClip();
   }
   function playNextClip() {
-    const url = clipQueue.shift();
-    if (!url) { clipPlaying = false; if (listening) setState("● En direct", "live"); return; }
+    const url = soundOn ? clipQueue.shift() : null;
+    if (!url) { clipPlaying = false; if (soundOn) setState("● En direct", "live"); return; }
     clipPlaying = true;
     ignorePauseUntil = Date.now() + 1500;
     audio.src = url;
-    audio.play().catch(() => { clipPlaying = false; setState("Touchez « Écouter » pour activer le son", "warn"); });
+    audio.play().catch(() => { clipPlaying = false; setState("Touchez le bouton pour activer le son", "warn"); });
   }
   function unlockForClips() {
-    // iOS only lets a page play audio after a tap; play a short silence on this element now.
+    // Phones only allow sound after a tap: play a short silence on this element now.
     ignorePauseUntil = Date.now() + 1500;
     audio.src = "/static/listener/silence.mp3";
     audio.play().then(() => setState("● En direct", "live")).catch(() => {});
   }
-
-  // ------------------------------------------------------------------ wake lock + media session
-  let wakeLock = null;
+  let wakeLock = null;   // clips mode only: clip-by-clip playback needs the screen on
   async function requestWakeLock() {
-    try {
-      if ("wakeLock" in navigator) {
-        wakeLock = await navigator.wakeLock.request("screen");
-        wakeLock.addEventListener("release", () => { wakeLock = null; });
-      }
-    } catch { /* unsupported or refused */ }
+    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch {}
   }
   function releaseWakeLock() { if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; } }
-  awakeBox.checked = MODE === "clips" || localStorage.getItem("awake") === "1";
-  awakeBox.onchange = () => {
-    localStorage.setItem("awake", awakeBox.checked ? "1" : "0");
-    if (awakeBox.checked && listening) requestWakeLock(); else releaseWakeLock();
-  };
 
+  // ------------------------------------------------------------------ lock screen
   if ("mediaSession" in navigator) {
     try {
       navigator.mediaSession.metadata = new MediaMetadata({ title: "Traduction en direct", artist: "Français" });
-      navigator.mediaSession.setActionHandler("play", () => { listening = true; updateButton(); startListening(); });
-      navigator.mediaSession.setActionHandler("pause", () => { listening = false; stopAudio(); updateButton(); });
-      navigator.mediaSession.setActionHandler("stop", () => { listening = false; stopAudio(); updateButton(); });
+      navigator.mediaSession.setActionHandler("play", () => unmute());
+      navigator.mediaSession.setActionHandler("pause", () => { mute(); audio.pause(); });
+      navigator.mediaSession.setActionHandler("stop", () => { mute(); audio.pause(); });
     } catch {}
   }
 
-  function startListening() {
-    audioDelay = 1000;
-    setState("Chargement…");
-    if (MODE === "stream") startStream(); else unlockForClips();
-    if (awakeBox.checked) requestWakeLock();
-  }
-
-  listenBtn.onclick = () => {
-    listening = !listening;
-    updateButton();
-    if (listening) startListening(); else { stopAudio(); releaseWakeLock(); }
-  };
-
   // Read-only hook for automated browser tests (scripts/browser_check.mjs).
-  window.__listener = { audio, get lastSeq() { return lastSeq; }, get listening() { return listening; }, mode: MODE };
+  window.__listener = { audio, get lastSeq() { return lastSeq; }, get listening() { return soundOn; }, mode: MODE };
 
+  showMute();
   updateWaiting();
   connect();
 })();

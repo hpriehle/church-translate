@@ -1,8 +1,8 @@
 # Live French translation for church meetings
 
 English talks in → French captions and French audio out to phones on the church Wi-Fi.
-Listeners scan a QR code, tap **Écouter**, and hear the French voice (with earphones)
-while the captions scroll. Everything runs on one Apple Silicon Mac. The phones don't need internet.
+Listeners scan a QR code, tap the sound button, and hear the French voice (with earphones)
+while live captions appear. It's live only: the one control is mute/unmute, and there's no history to scroll back through. Everything runs on one Apple Silicon Mac. The phones don't need internet.
 
 ```
  mic / soundboard ─► VAD chunks (3–8 s, cut on pauses) ─► Whisper large-v3-turbo (mlx)
@@ -68,7 +68,7 @@ Without the background service, `./start.sh` in Terminal works as before.
    there to add a "join Wi-Fi" code too.
 8. Press **Stop** at the end. A report and a log for the meeting are saved in `logs/`.
 
-Listeners: scan → tap **Écouter** → earphones. A+ / A− change the text size.
+Listeners: scan → tap **Son coupé / Touchez pour écouter** → earphones. That button is the only control: it mutes and unmutes, and unmuting is always at the live point. Only the latest lines show; starting a new run clears every phone.
 
 ## Testing with a recording
 
@@ -144,7 +144,8 @@ a session with the new glossary in the background.
 
 - **Audio is one continuous stream** (`/stream.mp3`, like internet radio; silence between
   sentences), not clip-by-clip. On iPhone this should keep playing with the screen locked, because
-  Safari treats it like a podcast. The fallback `/?mode=clips` plays clip by clip and keeps the
+  Safari treats it like a podcast. Muting keeps the stream running silently, so unmuting is instantly
+  live. The fallback `/?mode=clips` plays each new clip as it arrives (never old ones) and keeps the
   screen on.
 - **Reconnects:** if a phone loses Wi-Fi, the page reconnects by itself (captions resume from
   where they stopped, audio restarts at *live*). Tested by cutting all connections for 10 s.
@@ -156,14 +157,14 @@ a session with the new glossary in the background.
 
 ### iPhone lock-screen test (please do this once)
 
-1. Phone on the same Wi-Fi; open the link; tap **Écouter**; earphones in.
+1. Open the link; tap the sound button; earphones in.
 2. On the Mac, run a test recording (or press *Play a test sentence* every few seconds).
 3. Lock the iPhone. You should keep hearing French for several minutes, and the lock screen
    should show *Traduction en direct* with a play/pause control.
 4. Turn Wi-Fi off for 10 s and back on while unlocked: the page should say *Reconnexion…* and
    then resume.
-5. If the audio stops when locked, use `/?mode=clips` with *Garder l'écran allumé*, and tell
-   people to keep their screens on.
+5. If the audio stops when locked, use `/?mode=clips` (it keeps the screen on while unmuted), and
+   tell people to keep their screens on.
 
 ## Configuration
 

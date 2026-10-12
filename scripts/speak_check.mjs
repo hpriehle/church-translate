@@ -14,7 +14,7 @@ const browser = await chromium.launch({ args: [
 const ctx = await browser.newContext({ permissions: ["microphone"] });
 const listener = await ctx.newPage();
 await listener.goto(base + "/");
-await listener.click("#listen");
+await listener.click("#mute");
 const speak = await ctx.newPage();
 speak.on("console", (m) => { if (m.type() === "error") console.log("[speak error]", m.text()); });
 await speak.goto(`${base}/speak?key=${encodeURIComponent(key)}`);

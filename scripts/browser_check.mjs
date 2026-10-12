@@ -27,7 +27,7 @@ const progressing = async () => { const a = await audioState(); await sleep(3000
 await page.goto(base + "/");
 await page.screenshot({ path: "logs/listener-before.png" });
 const tClick = Date.now();
-await page.click("#listen");
+await page.click("#mute");
 await page.waitForFunction(() => window.__listener.audio.currentTime > 0, null, { timeout: 30000 });
 out.seconds_to_first_audio = (Date.now() - tClick) / 1000;
 await page.waitForFunction(() => document.querySelectorAll("#captions p").length >= 3, null, { timeout: 90000 });
