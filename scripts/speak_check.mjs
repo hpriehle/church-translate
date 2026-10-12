@@ -8,6 +8,7 @@ const { chromium } = require("playwright");
 const [base, key, wav, secs = "60"] = process.argv.slice(2);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await chromium.launch({ args: [
+  "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
   "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${wav}`,
   "--autoplay-policy=no-user-gesture-required"] });
 const ctx = await browser.newContext({ permissions: ["microphone"] });

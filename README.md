@@ -38,10 +38,26 @@ while the captions scroll. Everything runs on one Apple Silicon Mac. The phones 
 To pull the fallback model by hand: `ollama pull mistral-small3.2:24b`. A lighter option is
 `ollama pull gemma3:12b`; set it on the operator page or in `config.toml`.
 
+## Keeping it running (Mac)
+
+Run `scripts/autostart.sh install` once. The server then runs in the background of your Mac
+login: it starts when you log in, restarts itself if it crashes, and keeps the keychain access
+that Claude Code needs (which it doesn't have when started over SSH). After that:
+
+- **Restart server** on the operator page restarts it in place: it picks up code and dependency
+  updates and new settings, and phones reconnect by themselves. Or run `scripts/autostart.sh restart`.
+- `scripts/autostart.sh status` / `remove`. The log is `logs/launchd.log`.
+- The Mac is only kept awake while a run is active, and the Ollama fallback model is loaded when
+  a run starts, so an idle server uses little memory.
+- The first time the server uses the Mac's microphone from the background service, macOS asks
+  whether "python3" may use the microphone. Click Allow on the Mac (once).
+
+Without the background service, `./start.sh` in Terminal works as before.
+
 ## Sunday checklist
 
 1. Plug the Mac into power and join the **church Wi-Fi** (the same network the phones will use).
-2. `./start.sh`. The operator page opens at <http://localhost:8000/operator>.
+2. If the background service isn't installed, run `./start.sh`. Open <http://localhost:8000/operator>.
 3. The first time, macOS asks whether Python may **accept incoming connections** (allow it) and
    whether Terminal may use the **microphone** (allow it).
 4. Wait until the top bar shows *Speech-to-text: ready*, *Claude: ready* and *Ollama: ready*.
