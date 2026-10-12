@@ -8,13 +8,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import wave
 from pathlib import Path
 
 import numpy as np
 
-from ..config import TtsCfg
+from ..config import MODELS_DIR, TtsCfg
 
 log = logging.getLogger("tts")
 
@@ -102,30 +103,76 @@ class SayTts:
 
 # ------------------------------------------------------------------ Piper
 
+PIPER_DIR = MODELS_DIR / "piper"
+DEFAULT_PIPER_VOICE = "fr_FR-tom-medium"
+_PIPER_NAMES = {"tom": "Tom (male)", "siwis": "Siwis (female)", "upmc": "UPMC (female)",
+                "gilles": "Gilles (male)", "mls": "MLS"}
+_PIPER_LOADED: dict[str, object] = {}
+
+
+def list_piper_voices() -> list[dict]:
+    out = []
+    for p in sorted(PIPER_DIR.glob("*.onnx")):
+        if not Path(str(p) + ".json").exists():
+            continue
+        parts = p.stem.split("-")  # fr_FR-tom-medium
+        if not parts[0].startswith("fr"):
+            continue
+        nice = _PIPER_NAMES.get(parts[1], parts[1].capitalize()) if len(parts) > 1 else p.stem
+        out.append({"id": f"piper:{p.stem}", "engine": "piper", "voice": p.stem, "label": f"Piper — {nice}", "lang": parts[0]})
+    # Default first.
+    return sorted(out, key=lambda v: v["voice"] != DEFAULT_PIPER_VOICE)
+
+
+def list_voices() -> list[dict]:
+    """Every French voice the operator can pick, across engines."""
+    voices = list_piper_voices()
+    for v in french_voices():
+        voices.append({"id": f"say:{v['name']}", "engine": "say", "voice": v["name"],
+                       "label": f"{v['name']} (macOS) · {v['lang']}", "lang": v["lang"]})
+    return voices
+
+
 class PiperTts:
+    """Piper running in-process: the voice model is loaded once, a sentence takes ~0.1–0.2 s."""
+
     name = "piper"
 
     def __init__(self, cfg: TtsCfg, out_sr: int):
+        from piper import PiperVoice
+
         self.cfg = cfg
         self.out_sr = out_sr
-        self.binary = shutil.which("piper") or str(Path("~/.local/bin/piper").expanduser())
-        self.model = Path(cfg.piper_model).expanduser()
-        if not Path(self.binary).exists():
-            raise RuntimeError("piper is not installed (pip install piper-tts)")
-        if not self.model.exists():
-            raise RuntimeError(f"Piper voice not found: {self.model}")
-        self.voice = self.model.stem
+        voice = cfg.voice if (PIPER_DIR / f"{cfg.voice}.onnx").exists() else ""
+        if not voice:
+            available = [v["voice"] for v in list_piper_voices()]
+            if not available:
+                raise RuntimeError("no Piper voice in models/piper — run ./start.sh --setup")
+            voice = available[0]
+            if cfg.voice:
+                log.warning("Piper voice %r not found; using %s", cfg.voice, voice)
+        self.voice = voice
+        path = str(PIPER_DIR / f"{voice}.onnx")
+        if path not in _PIPER_LOADED:
+            _PIPER_LOADED[path] = PiperVoice.load(path)
+        self._pv = _PIPER_LOADED[path]
+        self._lock = threading.Lock()
 
     def synth(self, text: str, speed: float = 1.0) -> np.ndarray:
-        # Piper's length_scale: <1 is faster. cfg.rate is relative to ~175 wpm.
+        from piper import SynthesisConfig
+
+        # length_scale < 1 speaks faster. cfg.rate is in words per minute, relative to ~175.
         length = 1.0 / max(0.5, speed * self.cfg.rate / 175.0)
-        with tempfile.TemporaryDirectory() as td:
-            wav = Path(td) / "o.wav"
-            subprocess.run([self.binary, "--model", str(self.model), "--output_file", str(wav),
-                            "--length_scale", f"{length:.3f}", "--sentence_silence", "0.15"],
-                           input=text.encode("utf-8"), check=True, capture_output=True, timeout=60)
-            pcm, sr = _read_wav(wav)
-        return _resample(pcm, sr, self.out_sr)
+        with self._lock:
+            chunks = list(self._pv.synthesize(text, syn_config=SynthesisConfig(length_scale=length)))
+        if not chunks:
+            return np.zeros(0, dtype=np.int16)
+        sr = chunks[0].sample_rate
+        gap = np.zeros(int(0.12 * sr), dtype=np.int16)  # Piper yields one chunk per sentence
+        parts = []
+        for c in chunks:
+            parts += [c.audio_int16_array.reshape(-1), gap]
+        return _resample(np.concatenate(parts[:-1]), sr, self.out_sr)
 
 
 def make_tts(cfg: TtsCfg, out_sr: int):

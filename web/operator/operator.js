@@ -62,9 +62,11 @@
     fillSelect($("sample"), state.samples.map((x) => ({ value: x.name, label: `${x.name} (${x.mb} MB)` })), "");
     if (!state.samples.length) fillSelect($("sample"), [{ value: "", label: "No recordings in samples/ — upload one" }], "");
 
-    const voices = state.voices.map((v) => ({ value: v.name, label: `${v.name} · ${v.lang}` }));
-    if (!voices.length) voices.push({ value: "", label: s.tts.engine === "piper" ? "Piper voice" : "No French voices installed" });
-    fillSelect($("voice"), voices, s.tts.voice || (state.status.pipeline.tts || {}).voice);
+    // Voices from every engine, as "engine:voice" (older servers sent macOS voices only).
+    const voices = state.voices.map((v) => v.id ? { value: v.id, label: v.label } : { value: "say:" + v.name, label: `${v.name} · ${v.lang}` });
+    if (!voices.length) voices.push({ value: "", label: "No French voices installed" });
+    const curVoice = (state.status.pipeline.tts || {}).voice || s.tts.voice;
+    fillSelect($("voice"), voices, `${s.tts.engine}:${curVoice}`);
     $("rate").value = s.tts.rate; $("rateVal").textContent = s.tts.rate + " wpm";
     $("volume").value = s.tts.volume; $("volVal").textContent = Math.round(s.tts.volume * 100) + "%";
     $("mode").value = s.translate.mode === "ollama" ? "ollama" : "auto";
@@ -100,7 +102,10 @@
   $("device").onchange = () => { updateChannels(); saveSetting("audio", { input_device: $("device").value }); };
   $("channel").onchange = () => saveSetting("audio", { input_channel: +$("channel").value });
   $("gain").onchange = () => saveSetting("audio", { input_gain: +$("gain").value });
-  $("voice").onchange = () => saveSetting("tts", { voice: $("voice").value });
+  $("voice").onchange = () => {
+    const [engine, ...rest] = $("voice").value.split(":");
+    saveSetting("tts", { engine, voice: rest.join(":") });
+  };
   $("rate").oninput = () => { $("rateVal").textContent = $("rate").value + " wpm"; saveSlow("tts", { rate: +$("rate").value }); };
   $("volume").oninput = () => { $("volVal").textContent = Math.round($("volume").value * 100) + "%"; saveSlow("tts", { volume: +$("volume").value }); };
   $("mode").onchange = () => saveSetting("translate", { mode: $("mode").value });

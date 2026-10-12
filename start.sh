@@ -25,6 +25,20 @@ start_ollama() {
   fi
 }
 
+# Open-source Piper voices (Tom = male, Siwis = female), ~63 MB each, kept in models/piper.
+ensure_piper_voices() {
+  mkdir -p models/piper
+  for v in tom siwis; do
+    f="fr_FR-$v-medium"
+    for ext in onnx onnx.json; do
+      [ -s "models/piper/$f.$ext" ] && continue
+      echo "Downloading Piper voice $f.$ext…"
+      curl -fsSL -o "models/piper/$f.$ext.part" "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/$v/medium/$f.$ext" \
+        && mv "models/piper/$f.$ext.part" "models/piper/$f.$ext" || { rm -f "models/piper/$f.$ext.part"; echo "  (offline? skipped)"; }
+    done
+  done
+}
+
 if [[ "${1:-}" == "--setup" ]]; then
   echo "== 1/6 Homebrew packages"
   if need brew; then
@@ -48,7 +62,8 @@ print('ok')"
   MODEL="$(cfg 's.translate.ollama_model')"
   ollama pull "$MODEL"
 
-  echo "== 5/6 French voices installed for 'say'"
+  echo "== 5/6 French voices (Piper, plus any installed for 'say')"
+  ensure_piper_voices
   say -v '?' | grep -E 'fr_(FR|CA|BE|CH)' || true
   if ! say -v '?' | grep -E 'fr_' | grep -qiE 'premium|enhanced|améliorée'; then
     echo "  → No Premium/Enhanced French voice yet. Install one: System Settings → Accessibility →"
@@ -74,5 +89,6 @@ fi
 need uv || { echo "uv is missing — run ./start.sh --setup"; exit 1; }
 need ffmpeg || echo "warning: ffmpeg missing (needed for test recordings): brew install ffmpeg"
 uv sync --quiet
+ensure_piper_voices
 start_ollama
 exec uv run --quiet python -m app "$@"

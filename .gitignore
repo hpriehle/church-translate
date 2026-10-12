@@ -8,3 +8,4 @@ samples/*
 .pytest_cache/
 .DS_Store
 web/voices/*.mp3
+models/piper/

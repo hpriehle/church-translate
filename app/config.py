@@ -67,10 +67,9 @@ class TranslateCfg(BaseModel):
 
 
 class TtsCfg(BaseModel):
-    engine: str = "say"
-    voice: str = ""
+    engine: str = "piper"
+    voice: str = "fr_FR-tom-medium"
     rate: int = 190
-    piper_model: str = "~/.local/share/piper-voices/fr_FR-siwis-medium.onnx"
     volume: float = 1.0
 
 

@@ -234,3 +234,26 @@ async def test_router_ollama_only_mode():
     t.cfg = TranslateCfg(mode="ollama")
     r = await t.translate("hello")
     assert r.engine == "ollama"
+
+
+# ------------------------------------------------------------------ Piper voices
+
+def test_piper_voices_and_synthesis():
+    from app.config import TtsCfg
+    from app.tts.engines import PIPER_DIR, PiperTts, list_voices
+
+    if not (PIPER_DIR / "fr_FR-tom-medium.onnx").exists():
+        pytest.skip("Piper voices not downloaded (./start.sh --setup)")
+    voices = list_voices()
+    assert voices[0]["id"] == "piper:fr_FR-tom-medium"
+    assert any(v["voice"] == "fr_FR-siwis-medium" for v in voices)
+    tts = PiperTts(TtsCfg(engine="piper", voice="fr_FR-siwis-medium"), 44100)
+    assert tts.voice == "fr_FR-siwis-medium"
+    t0 = time.monotonic()
+    pcm = tts.synth("Frères et sœurs, je suis reconnaissant d'être avec vous. Bonne journée.")
+    assert time.monotonic() - t0 < 3
+    assert 2.0 < len(pcm) / 44100 < 8.0
+    faster = tts.synth("Frères et sœurs, je suis reconnaissant d'être avec vous. Bonne journée.", speed=1.3)
+    assert len(faster) < len(pcm)
+    # Unknown voice falls back to an installed one instead of failing.
+    assert PiperTts(TtsCfg(engine="piper", voice="nope"), 44100).voice.startswith("fr_FR-")

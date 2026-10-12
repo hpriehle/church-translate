@@ -25,7 +25,7 @@ from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, load_glossary, load_s
 from .pipeline import Pipeline
 from .stt import Transcriber
 from .translate.router import Translator
-from .tts.engines import TtsRunner, french_voices
+from .tts.engines import TtsRunner, list_voices
 
 log = logging.getLogger("app")
 
@@ -33,7 +33,7 @@ AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".mp4", ".mov"}
 EDITABLE = {
     "audio": {"input_device", "input_channel", "input_gain"},
     "translate": {"mode", "claude_model", "claude_effort", "claude_timeout_s", "ollama_model", "claude_session_turns"},
-    "tts": {"engine", "voice", "rate", "volume", "piper_model"},
+    "tts": {"engine", "voice", "rate", "volume"},
     "backlog": {"speedup_start_s", "speedup_full_s", "max_speed", "condense_on_s", "condense_off_s", "drop_above_s"},
     "server": {"lan_ip"},
 }
@@ -355,7 +355,7 @@ async def api_state(request: Request):
     return {
         "settings": st.model_dump(),
         "devices": list_input_devices(),
-        "voices": french_voices(),
+        "voices": list_voices(),
         "samples": _samples(),
         "glossary": S.glossary,
         "listener_url": listener_url(),

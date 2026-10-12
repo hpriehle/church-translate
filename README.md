@@ -12,16 +12,16 @@ while the captions scroll. Everything runs on one Apple Silicon Mac. The phones 
                        └─ falls back to Ollama (local) if Claude errors or takes > 6 s
                                                               │ French text ──► captions (WebSocket)
                                                               ▼
-                       macOS `say` French voice ─► mixer ─► one continuous MP3 stream ──► phones
+                       Piper French voice ─────► mixer ─► one continuous MP3 stream ──► phones
 ```
 
 ## One-time setup (on the Mac, with internet)
 
 1. Install Homebrew from <https://brew.sh> if it isn't installed yet.
-2. Install a good French voice:
-   **System Settings → Accessibility → Spoken Content → System voice → Manage Voices… → Français**.
-   Download **Thomas** or **Audrey** in the *Premium* or *Enhanced* version (France French, which
-   Senegalese listeners are used to). If the menu names differ on your macOS, search "voices" in System Settings.
+2. Voices: the default French voices are open-source Piper voices, **Tom** (male, default) and
+   **Siwis** (female). `./start.sh` downloads them into `models/piper` (~63 MB each). The operator
+   page also lists any macOS voices; Premium/Enhanced ones (System Settings → Accessibility →
+   Spoken Content → Manage Voices) are optional.
 3. Make sure Claude Code is installed and logged in: run `claude` once in Terminal and log in.
 4. Run:
 
@@ -32,7 +32,8 @@ while the captions scroll. Everything runs on one Apple Silicon Mac. The phones 
 
    This installs `uv`, `ffmpeg` and `ollama` with Homebrew, then the Python packages. It also
    downloads the speech model (~1.6 GB) and the Ollama fallback model `mistral-small3.2:24b`
-   (~15 GB), lists your French voices, and sends Claude one test line.
+   (~15 GB on download; Ollama keeps a converted copy too, ~30 GB in all), the Piper voices, and
+  sends Claude one test line.
 
 To pull the fallback model by hand: `ollama pull mistral-small3.2:24b`. A lighter option is
 `ollama pull gemma3:12b`; set it on the operator page or in `config.toml`.
@@ -157,8 +158,10 @@ Changes made on the operator page are saved to `data/overrides.<platform>.json`
 - `[server] port = 80` gives a shorter link without `:8000`.
 - `[server] operator_pin = "1234"` opens the operator page from a tablet:
   `http://<mac-ip>:8000/operator?pin=1234`. Without a PIN, it only opens on the Mac itself.
-- `[tts] engine = "piper"` uses Piper instead of `say` (`pip install piper-tts` plus a French voice
-  such as `fr_FR-siwis-medium`).
+- `[tts]` picks the voice: `engine = "piper"` with `voice = "fr_FR-tom-medium"` or
+  `"fr_FR-siwis-medium"`, or `engine = "say"` with a macOS voice name. The **French voice** menu on
+  the operator page switches voices live (the next sentence uses the new one). Samples of the
+  candidates we compared are on `/static/voices/index.html`.
 
 ## Files
 
@@ -171,7 +174,7 @@ app/audio_in.py        input devices, test-file playback, capture thread
 app/chunker.py         Silero VAD (ONNX) + pause-based chunking
 app/stt.py             mlx-whisper (faster-whisper for non-Mac development)
 app/translate/         Claude session, Ollama client, router (timeout/fallback), prompts
-app/tts/               say / Piper, French speech normalisation (scripture references)
+app/tts/               Piper (in-process) / macOS say, French speech normalisation (scripture references)
 app/broadcast/         mixer (real-time clock), MP3 stream fan-out, caption hub
 app/backlog.py         speed-up / condense / drop policy
 app/report.py          markdown run reports
