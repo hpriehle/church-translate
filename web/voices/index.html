@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Compare French voices</title>
+<style>
+  body { margin:0; background:#0e1013; color:#e4e6ea; font:16px/1.45 -apple-system, system-ui, sans-serif; }
+  .wrap { max-width:640px; margin:0 auto; padding:1rem; }
+  h1 { font-size:1.25rem; margin:.4rem 0 .2rem; }
+  p.lead { color:#8b93a1; margin:0 0 1rem; font-size:.95rem; }
+  .v { background:#161a1f; border:1px solid #262b33; border-radius:.8rem; padding:.8rem; margin-bottom:.8rem; }
+  .v h2 { font-size:1.05rem; margin:0 0 .15rem; }
+  .v .m { color:#8b93a1; font-size:.85rem; margin-bottom:.5rem; }
+  audio { width:100%; }
+  .tag { font-size:.75rem; font-weight:700; padding:.1rem .45rem; border-radius:4px; margin-left:.3rem; }
+  .now { background:#2b3a52; color:#a8c8ff; } .fast { background:#1d3a26; color:#8fe0a6; }
+  blockquote { margin:.4rem 0 1rem; padding:.6rem .8rem; background:#11161c; border-left:3px solid #f0c46c; color:#c9ccd2; font-size:.9rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎧 Compare French voices</h1>
+  <p class="lead">Every sample reads the same three sentences. All are free and run on the Mac with no internet.
+    "Speed" is how long the Mac takes to make one sentence (it must stay well under a second to keep up live).</p>
+  <blockquote>Frères et sœurs, je suis reconnaissant d'être avec vous ce matin. · Le Seigneur a déclaré aux Néphites : regardez vers moi et persévérez jusqu'à la fin, et vous vivrez. · Comme nous le lisons dans Doctrine et Alliances, chapitre 88, verset 118 : cherchez la connaissance par l'étude et aussi par la foi.</blockquote>
+  <div id="list"></div>
+</div>
+<script>
+const voices = [
+  ["1-macos-thomas-current", "macOS Thomas (standard)", "male · France · what you hear now", "0.5 s", "now"],
+  ["2-piper-siwis", "Piper — Siwis", "female · France · open-source", "0.1 s", "fast"],
+  ["2-piper-tom", "Piper — Tom", "male · France · open-source", "0.2 s", "fast"],
+  ["2-piper-upmc", "Piper — UPMC", "female · France · open-source", "0.1 s", "fast"],
+  ["3-kokoro-ff_siwis", "Kokoro — Siwis", "female · France · open-source neural", "0.3 s", "fast"],
+  ["4-chatterbox-female", "Chatterbox — female", "open-source neural · voice copied from the Kokoro sample · too slow for live: adds 3–5 s", "3–5.6 s", ""],
+  ["4-chatterbox-male", "Chatterbox — male", "open-source neural · voice copied from the Piper Tom sample · too slow for live: adds 3–5 s", "2.7–5.4 s", ""],
+  ["5-qwen3tts-ryan", "Qwen3-TTS — Ryan", "male · open-source neural · far too slow for live, odd timing", "2.8–7.9 s", ""],
+];
+const list = document.getElementById("list");
+for (const [file, name, desc, speed, tag] of voices) {
+  fetch(file + ".mp3", { method: "HEAD" }).then((r) => {
+    if (!r.ok) return;
+    const d = document.createElement("div");
+    d.className = "v";
+    d.innerHTML = `<h2>${name}${tag === "now" ? '<span class="tag now">current</span>' : ""}</h2>
+      <div class="m">${desc}${speed ? " · speed " + speed + " per sentence" : ""}</div>
+      <audio controls preload="none" src="${file}.mp3"></audio>`;
+    list.appendChild(d);
+  });
+}
+</script>
+</body>
+</html>

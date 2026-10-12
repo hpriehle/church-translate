@@ -165,6 +165,15 @@ app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
+@app.middleware("http")
+async def revalidate_static(request: Request, call_next):
+    # Without this, a CDN/tunnel in front (Cloudflare adds a 4 h browser cache) keeps phones on old JS.
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # ------------------------------------------------------------------ access control
 
 _PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "x-forwarded-for", "x-real-ip", "forwarded")

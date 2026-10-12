@@ -7,3 +7,4 @@ samples/*
 !samples/.gitkeep
 .pytest_cache/
 .DS_Store
+web/voices/*.mp3
