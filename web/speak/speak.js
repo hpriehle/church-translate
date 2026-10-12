@@ -8,7 +8,7 @@
   const q = KEY ? "?key=" + encodeURIComponent(KEY) : "";
   // Opened through a public address (tunnel)? Then show that address, not the server's LAN one.
   const VIA_PUBLIC = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[|[\d.]+$)/.test(location.hostname);
-  const shownUrl = (serverUrl) => (VIA_PUBLIC ? location.origin + "/" : serverUrl);
+  const shownUrl = (serverUrl) => (VIA_PUBLIC && !/^https:/.test(serverUrl || "") ? location.origin + "/" : serverUrl);
   const qrFor = (url) => "/api/qr?text=" + encodeURIComponent(url) + (KEY ? "&key=" + encodeURIComponent(KEY) : "");
   const wsUrl = (path) => (location.protocol === "https:" ? "wss://" : "ws://") + location.host + path + q;
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

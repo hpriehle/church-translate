@@ -26,6 +26,7 @@
   // ------------------------------------------------------------------ captions
   let lastSeq = 0;
   let boot = null;          // server instance; caption numbers restart when it changes
+  let session = null;       // translation run; only the current one is ever shown
   let live = false;
   let followLive = true;
 
@@ -63,10 +64,17 @@
     waitingEl.hidden = live || captionsEl.children.length > 0;
     if (!live && captionsEl.children.length > 0) {
       waitingEl.hidden = false;
-      waitingEl.textContent = "La traduction est en pause.";
+      waitingEl.textContent = "La traduction est terminée.";
     } else {
       waitingEl.textContent = "La traduction commencera au début de la réunion.";
     }
+  }
+
+  function clearCaptions() {
+    captionsEl.innerHTML = "";
+    lastSeq = 0;
+    followLive = true;
+    jumpEl.hidden = true;
   }
 
   // ------------------------------------------------------------------ websocket
@@ -86,23 +94,34 @@
     ws.onopen = () => {
       wsDelay = 1000;
       lastPong = Date.now();
-      ws.send(JSON.stringify({ type: "hello", last_seq: lastSeq, boot, mode: MODE }));
+      ws.send(JSON.stringify({ type: "hello", last_seq: lastSeq, boot, session, mode: MODE }));
       setConn("ok");
     };
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       switch (m.type) {
         case "init":
-          if (boot !== null && m.boot !== boot) {
-            // Server restarted: keep the text on screen, but its numbering starts again.
-            lastSeq = 0;
-            captionsEl.querySelectorAll("p[data-seq]").forEach((p) => p.removeAttribute("data-seq"));
-          }
+          // Different server or different run than what's on screen: start clean.
+          if (m.boot !== boot || m.session !== session) clearCaptions();
           boot = m.boot;
+          session = m.session;
           live = !!m.live; (m.history || []).forEach(addCaption); updateWaiting(); break;
-        case "caption": addCaption(m); break;
+        case "session":
+          // A new run started: wipe the previous one everywhere.
+          if (m.session !== session) clearCaptions();
+          session = m.session;
+          live = true; updateWaiting(); break;
+        case "caption":
+          if (m.session && session && m.session !== session) { clearCaptions(); }
+          if (m.session) session = m.session;
+          addCaption(m); break;
         case "onair": markOnAir(m.seq); break;
-        case "status": live = !!m.live; updateWaiting(); break;
+        case "status":
+          live = !!m.live;
+          // Run over: keep the text for people still reading, but forget the session, so a
+          // reconnect after the end doesn't treat it as current.
+          if (!live) session = null;
+          updateWaiting(); break;
         case "clip": if (MODE === "clips") enqueueClip(m); break;
         case "pong": lastPong = Date.now(); break;
       }

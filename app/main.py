@@ -35,7 +35,7 @@ EDITABLE = {
     "translate": {"mode", "claude_model", "claude_effort", "claude_timeout_s", "ollama_model", "claude_session_turns"},
     "tts": {"engine", "voice", "rate", "volume"},
     "backlog": {"speedup_start_s", "speedup_full_s", "max_speed", "condense_on_s", "condense_off_s", "drop_above_s"},
-    "server": {"lan_ip"},
+    "server": {"lan_ip", "use_public_url"},
 }
 
 
@@ -62,7 +62,7 @@ S = State()
 
 
 def listener_url() -> str:
-    if S.settings.server.public_url:
+    if S.settings.server.public_url and S.settings.server.use_public_url:
         return S.settings.server.public_url
     ip = netinfo.best_lan_ip(S.settings.server.lan_ip)
     port = S.settings.server.port
@@ -267,10 +267,13 @@ async def ws_listen(ws: WebSocket):
         hello = await asyncio.wait_for(ws.receive_json(), timeout=10)
     except Exception:
         hello = {}
-    # Caption numbers restart when the server restarts; a phone from a previous boot starts over.
-    last = int(hello.get("last_seq") or 0) if hello.get("boot") == S.started else 0
-    init = {"type": "init", "boot": S.started, "live": S.pipeline.running, "server_time": time.time(),
-            "history": S.listen.replay_after(last)}
+    # Only the current session is ever shown. A phone reconnecting within the same session and
+    # server boot gets what it missed; anyone else gets the current session from its start.
+    session = S.pipeline.session_id
+    same = hello.get("boot") == S.started and hello.get("session") == session
+    last = int(hello.get("last_seq") or 0) if same else 0
+    init = {"type": "init", "boot": S.started, "session": session, "live": S.pipeline.running,
+            "server_time": time.time(), "history": S.listen.replay_after(last) if session else []}
     await S.listen.serve(ws, [init])
 
 
@@ -391,7 +394,8 @@ async def api_start(request: Request):
             name = Path(body.get("file", "")).name
             path = SAMPLES_DIR / name
             S.pipeline.start("file", file=path, speed=float(body.get("speed", 1.0)),
-                             start_s=float(body.get("start_s", 0)), record=bool(body.get("record", False)))
+                             start_s=float(body.get("start_s", 0)), record=bool(body.get("record", False)),
+                             max_s=float(body["duration"]) if body.get("duration") else None)
         else:
             S.pipeline.start("mic", device=body.get("device"), record=bool(body.get("record", False)))
     except Exception as e:

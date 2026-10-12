@@ -4,7 +4,7 @@
   const PIN = new URLSearchParams(location.search).get("pin") || new URLSearchParams(location.search).get("key");
   // Opened through a public address (tunnel)? Then show that address, not the server's LAN one.
   const VIA_PUBLIC = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[|[\d.]+$)/.test(location.hostname);
-  const shownUrl = (serverUrl) => (VIA_PUBLIC ? location.origin + "/" : serverUrl);
+  const shownUrl = (serverUrl) => (VIA_PUBLIC && !/^https:/.test(serverUrl || "") ? location.origin + "/" : serverUrl);
   const qrFor = (url) => "/api/qr?text=" + encodeURIComponent(url) + (PIN ? "&key=" + encodeURIComponent(PIN) : "");
   const withPin = (url) => PIN ? url + (url.includes("?") ? "&" : "?") + "pin=" + encodeURIComponent(PIN) : url;
   const api = async (path, body, method) => {
@@ -74,9 +74,12 @@
     $("timeout").value = s.translate.claude_timeout_s;
     $("ollamaModel").value = s.translate.ollama_model;
 
-    const ips = state.lan_candidates.map((c) => ({ value: c.ip, label: `${c.ip} (${c.iface})` }));
-    ips.unshift({ value: "", label: "Automatic" });
-    fillSelect($("lanIp"), ips, s.server.lan_ip);
+    const links = [];
+    if (s.server.public_url) links.push({ value: "public", label: `Public — ${s.server.public_url}` });
+    links.push({ value: "lan:", label: "Local network (automatic)" });
+    state.lan_candidates.forEach((c) => links.push({ value: "lan:" + c.ip, label: `Local network — ${c.ip} (${c.iface})` }));
+    const usePublic = s.server.public_url && s.server.use_public_url !== false;
+    fillSelect($("lanIp"), links, usePublic ? "public" : "lan:" + (s.server.lan_ip || ""));
 
     glossary = state.glossary;
     renderGlossary();
@@ -112,7 +115,11 @@
   $("claudeModel").onchange = () => saveSetting("translate", { claude_model: $("claudeModel").value });
   $("timeout").onchange = () => saveSetting("translate", { claude_timeout_s: +$("timeout").value });
   $("ollamaModel").onchange = () => saveSetting("translate", { ollama_model: $("ollamaModel").value.trim() });
-  $("lanIp").onchange = async () => { await saveSetting("server", { lan_ip: $("lanIp").value }); listenerUrl = ""; };
+  $("lanIp").onchange = async () => {
+    const v = $("lanIp").value;
+    await saveSetting("server", v === "public" ? { use_public_url: true } : { use_public_url: false, lan_ip: v.slice(4) });
+    listenerUrl = "";
+  };
 
   document.querySelectorAll("input[name=src]").forEach((r) => r.onchange = () => {
     const file = document.querySelector("input[name=src]:checked").value === "file";

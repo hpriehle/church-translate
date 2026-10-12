@@ -26,7 +26,8 @@ class ServerCfg(BaseModel):
     port: int = 8000
     operator_pin: str = ""
     lan_ip: str = ""
-    public_url: str = ""          # e.g. https://traduction.example.com/ when served through a tunnel
+    public_url: str = ""          # e.g. https://transcription.example.com/ when served through a tunnel
+    use_public_url: bool = True   # listener link/QR: the public URL (if set) or the local-network address
     open_browser: bool = True
 
 

@@ -68,6 +68,7 @@ class Pipeline:
         self.avg_clip_s = 4.0
         self._seq = 0
         self._caption_no = 0
+        self.session_id: str | None = None  # one per run; listeners only ever see the current one
         self._tasks: list[asyncio.Task] = []
         self.last_error = ""
         self.last_report: Path | None = None
@@ -127,7 +128,10 @@ class Pipeline:
         self._hold_awake()
         self.translator.prepare_fallback()
         log.info("started: %s", source.label)
-        self.listen.publish({"type": "status", "live": True})
+        # New session: phones clear what they show, and nobody is sent captions from earlier runs.
+        self.session_id = time.strftime("%Y%m%d-%H%M%S")
+        self.listen.history.clear()
+        self.listen.publish({"type": "session", "session": self.session_id, "live": True})
         self.operator.publish({"type": "log", "level": "info", "text": f"Started — {source.label}"})
 
     def stop(self) -> None:
@@ -166,6 +170,9 @@ class Pipeline:
             return
         self.running = False
         self.release_awake()
+        # Session over: phones that are open keep their text, but nobody who opens the page later gets it.
+        self.session_id = None
+        self.listen.history.clear()
         self.listen.publish({"type": "status", "live": False})
         if self.recording:
             await asyncio.sleep(1.0)  # tail of the last clip
@@ -257,7 +264,8 @@ class Pipeline:
             rec.status = "captioned"
             self._caption_no += 1
             rec.caption_no = self._caption_no
-            self.listen.publish({"type": "caption", "seq": rec.caption_no, "fr": rec.fr, "ts": time.time()}, remember=True)
+            self.listen.publish({"type": "caption", "seq": rec.caption_no, "session": self.session_id, "fr": rec.fr,
+                                 "ts": time.time()}, remember=True)
             self._publish_rec(rec)
             await self.tts_q.put(rec)
 
