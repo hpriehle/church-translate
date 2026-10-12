@@ -50,6 +50,7 @@ def main() -> None:
     appmod.S.exit_when_done = args.exit_when_done
     appmod.S.port_override = args.port
     appmod.S.mode_override = args.translator
+    appmod.S.argv = sys.argv[1:]
 
     if settings.server.open_browser and not args.no_browser and not args.exit_when_done:
         def _open():

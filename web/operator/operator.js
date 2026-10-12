@@ -170,8 +170,16 @@
     cls($("claudeState"), c.state === "ready" || c.state === "busy" ? "ok" : c.state === "disabled" ? "" : c.state === "starting" ? "warn" : "bad");
 
     const o = t.ollama;
-    $("ollamaState").textContent = o.warm ? "ready" : !o.available ? "not running" : !o.model_present ? "model missing" : "loading…";
-    cls($("ollamaState"), o.warm ? "ok" : o.available ? "warn" : "bad");
+    $("ollamaState").textContent = o.warm ? "ready" : !o.available ? "not running" : !o.model_present ? "model missing"
+      : o.warming ? "loading…" : "standby (loads on Start)";
+    cls($("ollamaState"), o.warm ? "ok" : o.available && o.model_present ? (o.warming ? "warn" : "") : "bad");
+
+    if (st.server) {
+      const sv = st.server;
+      if (bootSeen === null) bootSeen = sv.started;
+      const since = new Date(sv.started * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      $("serverInfo").textContent = `Running since ${since} · code ${sv.version || "?"} · started by ${sv.managed_by}`;
+    }
 
     const u = t.usage;
     const kin = ((u.input + u.cache_read + u.cache_write) / 1000).toFixed(0);
@@ -189,6 +197,32 @@
     if (p.tts && p.tts.error) $("voice").title = p.tts.error;
     if (st.listener_url) setUrl(st.listener_url);
   }
+
+  // ------------------------------------------------------------------ restart
+  let bootSeen = null;
+  function waitForRestart() {
+    $("overlay").hidden = false;
+    const t0 = Date.now();
+    const poll = async () => {
+      try {
+        const h = await (await fetch("/health", { cache: "no-store" })).json();
+        if (h.started && h.started !== bootSeen) { location.reload(); return; }
+      } catch {}
+      $("overlayText").textContent = `Restarting the server… ${Math.round((Date.now() - t0) / 1000)} s`;
+      setTimeout(poll, 1000);
+    };
+    setTimeout(poll, 1500);
+  }
+  $("restart").onclick = async () => {
+    if (!confirm("Restart the translation server?\n\nA run in progress stops. Phones reconnect by themselves in about 15 seconds.")) return;
+    try {
+      const h = await (await fetch("/health", { cache: "no-store" })).json();
+      bootSeen = h.started ?? bootSeen;
+      await api("/api/restart", {});
+      waitForRestart();
+    }
+    catch (e) { log("Restart failed: " + e.message, "error"); }
+  };
 
   // ------------------------------------------------------------------ chunk table
   const rows = new Map();
@@ -235,7 +269,8 @@
     ws.onopen = () => { wsDelay = 1000; log("Connected to server"); };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
-      if (m.type === "status") updateStatus(m);
+      if (m.type === "restarting") { if ($("overlay").hidden) waitForRestart(); }
+      else if (m.type === "status") updateStatus(m);
       else if (m.type === "chunk") upsertChunk(m);
       else if (m.type === "log") log(m.text, m.level);
     };

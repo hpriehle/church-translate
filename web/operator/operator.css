@@ -61,3 +61,8 @@ table { width:100%; border-collapse:collapse; }
 #log { font:12px/1.5 ui-monospace, Menlo, monospace; max-height:420px; overflow:auto; color:var(--mute); }
 #log .error { color:var(--bad); } #log .warn { color:var(--warn); }
 @media (max-width: 1000px) { .layout { grid-template-columns:1fr; } .split { grid-template-columns:1fr; } .summary { grid-template-columns:repeat(2,1fr); } }
+.small { font-size:12px; margin-top:.4rem; }
+#overlay { position:fixed; inset:0; background:rgba(8,10,12,.82); display:flex; align-items:center; justify-content:center; z-index:50; font-size:18px; text-align:center; }
+#overlay[hidden] { display:none; }
+#overlay .spin { font-size:44px; animation:spin 1.2s linear infinite; margin-bottom:.5rem; }
+@keyframes spin { to { transform:rotate(360deg); } }

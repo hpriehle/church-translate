@@ -79,10 +79,16 @@ class OllamaClient:
             self.last_error = f"warm-up failed: {e}"
             log.warning("ollama warm-up failed: %s", e)
 
-    async def keep_warm(self, system: str, idle_s: float = 1200) -> None:
-        """While Claude does the work, touch Ollama now and then so a fallback never starts cold."""
+    async def keep_warm(self, system: str, idle_s: float = 1200, active=lambda: True) -> None:
+        """While Claude does the work, touch Ollama now and then so a fallback never starts cold.
+
+        Only while translation is in use (`active()`); otherwise Ollama unloads the model by itself.
+        """
         while True:
             await asyncio.sleep(60)
+            if not active():
+                self.warm = False if time.monotonic() - self.last_used > 3 * 3600 else self.warm
+                continue
             if time.monotonic() - self.last_used > idle_s:
                 try:
                     await self.translate(system, [], "Thank you, brothers and sisters.", timeout_s=180)

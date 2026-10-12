@@ -60,10 +60,17 @@ class Translator:
         self.last_error = ""
         self.has_claude = claude_binary() is not None
         self.sessions_started = 0
+        self.last_activity = 0.0
 
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
-        asyncio.create_task(self.ollama.warm_up(self.system_prompt))
+        # The 15 GB fallback model is loaded when a run starts (or now, if Ollama is the translator),
+        # so an idle server doesn't hold it in memory.
+        self.last_activity = 0.0
+        if self.cfg.mode == "ollama":
+            self.prepare_fallback()
+        else:
+            asyncio.create_task(self.ollama.check())
         self._keep_warm = asyncio.create_task(self._ollama_keep_warm())
         if self.cfg.mode != "ollama":
             if not self.has_claude:
@@ -72,10 +79,23 @@ class Translator:
             else:
                 self._maintain()
 
+    def prepare_fallback(self) -> None:
+        """A run is starting: make sure the fallback model is loaded and its prompt cached."""
+        self.last_activity = time.monotonic()
+        if not self.ollama.warm and not getattr(self, "_warming", False):
+            async def _warm():
+                self._warming = True
+                try:
+                    await self.ollama.warm_up(self.system_prompt)
+                finally:
+                    self._warming = False
+            asyncio.create_task(_warm())
+
     async def _ollama_keep_warm(self) -> None:
         while True:
             try:
-                await self.ollama.keep_warm(self.system_prompt)
+                await self.ollama.keep_warm(self.system_prompt,
+                                            active=lambda: time.monotonic() - self.last_activity < 7200)
             except asyncio.CancelledError:
                 raise
             except Exception:  # pragma: no cover
@@ -159,6 +179,7 @@ class Translator:
     # ------------------------------------------------------------ translate
     async def translate(self, english: str, condense: bool = False) -> TranslationResult:
         t0 = time.monotonic()
+        self.last_activity = t0
         self._maintain()
         note = ""
         claude_task: asyncio.Task | None = None
@@ -270,6 +291,7 @@ class Translator:
                 "rate_limit": a.rate_limit if a else None,
             },
             "ollama": {
+                "warming": getattr(self, "_warming", False),
                 "model": self.ollama.model,
                 "available": self.ollama.available,
                 "model_present": self.ollama.model_present,

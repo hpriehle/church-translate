@@ -54,6 +54,8 @@ class State:
     exit_when_done: bool = False
     port_override: int | None = None
     mode_override: str | None = None
+    argv: list[str] = []
+    version: str = ""
 
 
 S = State()
@@ -67,10 +69,33 @@ def listener_url() -> str:
     return f"http://{ip}/" if port == 80 else f"http://{ip}:{port}/"
 
 
+def _code_version() -> str:
+    try:
+        return subprocess.run(["git", "-C", str(ROOT), "log", "-1", "--format=%h · %cd", "--date=format:%b %d %H:%M"],
+                              capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return ""
+
+
+def _managed_by() -> str:
+    import os
+
+    if os.environ.get("XPC_SERVICE_NAME", "").startswith("com.clntacq."):
+        return "launchd (starts at login)"
+    if os.environ.get("INVOCATION_ID"):
+        return "systemd"
+    return "terminal"
+
+
+def server_info() -> dict[str, Any]:
+    return {"started": S.started, "version": S.version, "managed_by": _managed_by()}
+
+
 def full_status() -> dict[str, Any]:
     return {
         "type": "status",
         "time": time.time(),
+        "server": server_info(),
         "pipeline": S.pipeline.status(),
         "translate": S.translator.status(),
         "listeners": {"stream": S.broadcaster.listeners, "captions": S.listen.count,
@@ -87,15 +112,6 @@ async def status_loop() -> None:
             S.operator.publish(full_status())
 
 
-def _caffeinate() -> subprocess.Popen | None:
-    """Keep the Mac awake while the server runs (closing the lid still sleeps it)."""
-    if sys.platform == "darwin" and shutil.which("caffeinate"):
-        import os
-
-        return subprocess.Popen(["caffeinate", "-ims", "-w", str(os.getpid())])
-    return None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     S.settings = load_settings()
@@ -105,6 +121,7 @@ async def lifespan(app: FastAPI):
         S.settings.translate.mode = S.mode_override
     S.glossary = load_glossary()
     S.started = time.time()
+    S.version = _code_version()
     S.local_addrs = netinfo.local_addresses()
     st = S.settings
     S.listen = Hub("listen", history=300, queue_size=400)
@@ -118,7 +135,6 @@ async def lifespan(app: FastAPI):
     S.pipeline = Pipeline(st, S.glossary, S.listen, S.operator, S.mixer, S.broadcaster, S.translator, stt, tts)
     S.pipeline.start_tasks()
     S.mixer.start()
-    caff = _caffeinate()
     bg = [asyncio.create_task(status_loop()), asyncio.create_task(S.translator.start()),
           asyncio.create_task(S.pipeline.load_stt())]
 
@@ -134,7 +150,8 @@ async def lifespan(app: FastAPI):
             while time.monotonic() - t0 < 120:
                 ts = S.translator.status()
                 claude_ok = ts["claude"]["state"] in ("ready", "disabled", "missing")
-                ollama_ok = S.translator.ollama.warm or not S.translator.ollama.available
+                ollama_ok = (S.settings.translate.mode != "ollama" or S.translator.ollama.warm
+                             or not S.translator.ollama.available)
                 if S.pipeline.stt.ready and claude_ok and ollama_ok:
                     break
                 await asyncio.sleep(0.5)
@@ -149,9 +166,8 @@ async def lifespan(app: FastAPI):
     for t in bg:
         t.cancel()
     S.pipeline.stop()
+    S.pipeline.release_awake()
     await S.translator.close()
-    if caff:
-        caff.terminate()
 
 
 def _shutdown() -> None:
@@ -272,7 +288,7 @@ async def api_qr(request: Request, text: str):
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "listeners": S.broadcaster.listeners, "running": S.pipeline.running}
+    return {"ok": True, "listeners": S.broadcaster.listeners, "running": S.pipeline.running, "started": S.started}
 
 
 # ------------------------------------------------------------------ operator side
@@ -454,6 +470,52 @@ async def api_test_voice(request: Request):
     except Exception as e:
         raise HTTPException(400, str(e))
     return {"ok": True}
+
+
+_restarting = False
+
+
+async def _restart_in_place() -> None:
+    """Replace this process with a fresh copy of the server (same PID, same login session).
+
+    Staying in the same process keeps whatever started it (Terminal, launchd, systemd) and
+    therefore keeps access to the macOS keychain that Claude Code needs.
+    """
+    import os
+
+    S.operator.publish({"type": "restarting"})
+    S.listen.publish({"type": "status", "live": False})
+    await asyncio.sleep(0.5)  # let the HTTP reply and the notices go out
+    try:
+        S.pipeline.stop()
+        S.pipeline.release_awake()
+        await asyncio.wait_for(S.translator.close(), 8)
+    except Exception:
+        log.exception("cleanup before restart failed (continuing)")
+    uv = shutil.which("uv")
+    if uv and (ROOT / "uv.lock").exists():
+        # Pick up new dependencies; --inexact never removes packages (e.g. dev extras).
+        proc = await asyncio.create_subprocess_exec(uv, "sync", "--quiet", "--inexact", cwd=str(ROOT))
+        try:
+            await asyncio.wait_for(proc.wait(), 300)
+        except asyncio.TimeoutError:
+            proc.kill()
+    args = [a for a in S.argv if a != "--no-browser"] + ["--no-browser"]
+    log.info("restarting: %s -m app %s", sys.executable, " ".join(args))
+    logging.shutdown()
+    os.chdir(ROOT)
+    os.execv(sys.executable, [sys.executable, "-m", "app", *args])
+
+
+@app.post("/api/restart")
+async def api_restart(request: Request):
+    global _restarting
+    require_operator(request)
+    if _restarting:
+        return {"ok": True, "message": "already restarting"}
+    _restarting = True
+    asyncio.create_task(_restart_in_place())
+    return {"ok": True, "message": "Restarting — back in about 15 seconds."}
 
 
 @app.get("/api/report")

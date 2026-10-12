@@ -53,6 +53,13 @@
     </section>
 
     <section>
+      <h2>Server</h2>
+      <div id="serverInfo" class="muted small">…</div>
+      <button id="restart" class="ghost">⟳ Restart server</button>
+      <div class="muted small">Picks up code and setting updates. Phones reconnect by themselves.</div>
+    </section>
+
+    <section>
       <h2>Voice &amp; translation</h2>
       <label>French voice <select id="voice"></select></label>
       <a class="ghost button" href="/static/voices/index.html" target="_blank">🎧 Compare voice samples</a>
@@ -122,6 +129,7 @@
     </section>
   </main>
 </div>
+<div id="overlay" hidden><div><div class="spin">⟳</div><div id="overlayText">Restarting the server…</div></div></div>
 <script src="/static/operator/operator.js"></script>
 </body>
 </html>

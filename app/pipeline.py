@@ -71,6 +71,7 @@ class Pipeline:
         self._tasks: list[asyncio.Task] = []
         self.last_error = ""
         self.last_report: Path | None = None
+        self._caff = None
         self._usage_at_start: dict[str, float] = {}
         self.on_drained: Callable[[], None] | None = None
 
@@ -123,6 +124,8 @@ class Pipeline:
         self.started_at = time.time()
         self.last_error = ""
         self.worker.start()
+        self._hold_awake()
+        self.translator.prepare_fallback()
         log.info("started: %s", source.label)
         self.listen.publish({"type": "status", "live": True})
         self.operator.publish({"type": "log", "level": "info", "text": f"Started — {source.label}"})
@@ -162,6 +165,7 @@ class Pipeline:
         if self.capturing:
             return
         self.running = False
+        self.release_awake()
         self.listen.publish({"type": "status", "live": False})
         if self.recording:
             await asyncio.sleep(1.0)  # tail of the last clip
@@ -299,6 +303,21 @@ class Pipeline:
             self._finalize(rec)
 
     # ------------------------------------------------------------ misc
+    def _hold_awake(self) -> None:
+        """Keep the Mac from idle-sleeping while a run is active (not while the server just waits)."""
+        import os
+        import shutil
+        import subprocess
+        import sys
+
+        if self._caff is None and sys.platform == "darwin" and shutil.which("caffeinate"):
+            self._caff = subprocess.Popen(["caffeinate", "-ims", "-w", str(os.getpid())])
+
+    def release_awake(self) -> None:
+        if self._caff is not None:
+            self._caff.terminate()
+            self._caff = None
+
     def _run_info(self) -> dict[str, Any]:
         st = self.settings
         u = self.translator.usage()
