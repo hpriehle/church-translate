@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -192,6 +193,23 @@ async def revalidate_static(request: Request, call_next):
 
 # ------------------------------------------------------------------ access control
 
+_ASSET = re.compile(r'((?:src|href)=")(/static/([^"?]+\.(?:js|css)))(")')
+
+
+def page(path: Path) -> HTMLResponse:
+    """Serve an HTML page with its JS/CSS links stamped with the file's version.
+
+    Cloudflare rewrites static files to a 4-hour browser cache; versioned links mean a phone can
+    never mix a new page with an old cached script.
+    """
+    def stamp(m: re.Match) -> str:
+        f = WEB_DIR / m.group(3)
+        v = int(f.stat().st_mtime) if f.exists() else 0
+        return f"{m.group(1)}{m.group(2)}?v={v}{m.group(4)}"
+
+    return HTMLResponse(_ASSET.sub(stamp, path.read_text(encoding="utf-8")), headers={"Cache-Control": "no-cache"})
+
+
 _PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "x-forwarded-for", "x-real-ip", "forwarded")
 
 
@@ -226,7 +244,7 @@ def _remember_key(request: Request, resp: Response) -> Response:
 
 @app.get("/", response_class=HTMLResponse)
 async def listener_page():
-    return FileResponse(WEB_DIR / "listener" / "index.html", headers={"Cache-Control": "no-cache"})
+    return page(WEB_DIR / "listener" / "index.html")
 
 
 @app.get("/stream.mp3")
@@ -299,13 +317,13 @@ async def health():
 @app.get("/operator", response_class=HTMLResponse)
 async def operator_page(request: Request):
     require_operator(request)
-    return _remember_key(request, FileResponse(WEB_DIR / "operator" / "index.html", headers={"Cache-Control": "no-cache"}))
+    return _remember_key(request, page(WEB_DIR / "operator" / "index.html"))
 
 
 @app.get("/speak", response_class=HTMLResponse)
 async def speak_page(request: Request):
     require_operator(request)
-    return _remember_key(request, FileResponse(WEB_DIR / "speak" / "index.html", headers={"Cache-Control": "no-cache"}))
+    return _remember_key(request, page(WEB_DIR / "speak" / "index.html"))
 
 
 @app.websocket("/ws/speak")
@@ -349,7 +367,7 @@ async def ws_speak(ws: WebSocket):
 @app.get("/print", response_class=HTMLResponse)
 async def print_page(request: Request):
     require_operator(request)
-    return FileResponse(WEB_DIR / "print.html", headers={"Cache-Control": "no-cache"})
+    return page(WEB_DIR / "print.html")
 
 
 @app.websocket("/ws/operator")
