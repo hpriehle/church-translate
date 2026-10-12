@@ -111,6 +111,28 @@ French audio are waiting, and reacts in steps:
 If translation itself falls behind, waiting chunks are merged into one request. All thresholds
 are in `config.toml` under `[backlog]`.
 
+## Languages (French + Wolof)
+
+`languages = ["fr", "wo"]` in `config.toml` (or the checkboxes on the operator page, then
+**Restart server**) chooses which languages are offered. The English is transcribed once; each
+language then runs on its own: its own Claude session, voice, live stream (`/stream/fr.mp3`,
+`/stream/wo.mp3`) and captions. Listeners pick **Français / Wolof** at the top of the listen page
+(remembered on the phone; `/?lang=wo` links straight to Wolof).
+
+- **Wolof translation:** Claude only. The local fallback model's Wolof is poor, so if Claude
+  doesn't answer within 15 s that sentence has no Wolof rather than a wrong one. Numbers are
+  written and spoken as Wolof words. `glossary.wo.json` is a small starter list; a Wolof-speaking
+  member should review and extend it (operator page → Glossary → Wolof).
+- **Wolof voice:** SpeechT5 fine-tuned on recordings of native Wolof speakers
+  (`bilalfaye/speecht5_tts-wolof`, MIT), male or female (`models/wolof/speaker-*.npy`). Needs PyTorch
+  (installed automatically on the Mac; on Linux use `--extra wolof`). About 0.5–1 s per sentence on
+  the M4 Pro. Samples are on `/static/voices/index.html`.
+- **Load with both languages** (measured on the M4 Pro, 3 minutes of a talk): captions 3.0 s (French)
+  and 3.4 s (Wolof) after each pause, audio 4.4 s / 5.0 s, nothing dropped. The server process uses
+  under half a CPU core on average, with short bursts of 1–3 cores, and about 6 GB of memory
+  (Whisper + Wolof voice); each Claude session is ~120 MB. Claude usage roughly doubles (one session
+  per language).
+
 ## Claude and the fallback
 
 - One `claude -p --input-format stream-json --output-format stream-json` process stays alive, so
@@ -186,7 +208,9 @@ Changes made on the operator page are saved to `data/overrides.<platform>.json`
 start.sh               one start command (+ --setup)
 config.toml            defaults          glossary.json   names & terms
 app/main.py            FastAPI routes, WebSockets, operator API
-app/pipeline.py        capture → STT → translate → TTS → mixer, per-chunk timing
+app/pipeline.py        capture → STT (once) → one Channel per language, per-chunk timing
+app/channel.py         per language: translator → voice → mixer → MP3 stream + captions
+app/languages.py       the output languages (French, Wolof)
 app/audio_in.py        input devices, test-file playback, capture thread
 app/chunker.py         Silero VAD (ONNX) + pause-based chunking
 app/stt.py             mlx-whisper (faster-whisper for non-Mac development)

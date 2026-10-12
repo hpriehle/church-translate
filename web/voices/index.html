@@ -26,17 +26,25 @@
     All of these are fast enough for live use. "Speed" is how long the Mac takes to make one sentence.</p>
   <blockquote>Frères et sœurs, je suis reconnaissant d'être avec vous ce matin. · Le Seigneur a déclaré aux Néphites : regardez vers moi et persévérez jusqu'à la fin, et vous vivrez. · Comme nous le lisons dans Doctrine et Alliances, chapitre 88, verset 118 : cherchez la connaissance par l'étude et aussi par la foi.</blockquote>
   <div id="list"></div>
+  <h1 style="margin-top:2rem">Wolof</h1>
+  <p class="lead">SpeechT5 trained on native Senegalese Wolof speakers. Translation by Claude — please have a Wolof speaker judge both the wording and the voice.</p>
+  <blockquote>Bokk yi, góor ak jigéen, maa ngi sant Yàlla ci li ma ànd ak yeen tey ci suba si. · Musalkat bi wax na ne: Yeen ñépp ñi coono, te yen yu diis yenu leen, ñëwleen ci man, dinaa leen may noflaay. · Ayu-bés bu nekk, bu nuy bokk ci sakramaa bi, danuy fàttaliku Yeesu Krist te yeesal sunuy kóllëre ak Yàlla.</blockquote>
+  <div id="wolof"></div>
 </div>
 <script>
 const voices = [
-  ["1-macos-thomas-current", "macOS Thomas (standard)", "male · France · what you hear now", "0.5 s", "now"],
+  ["1-macos-thomas-current", "macOS Thomas (standard)", "male · France · the earlier voice", "0.5 s", ""],
   ["2-piper-siwis", "Piper — Siwis", "female · France · open-source", "0.1 s", "fast"],
-  ["2-piper-tom", "Piper — Tom", "male · France · open-source", "0.2 s", "fast"],
+  ["2-piper-tom", "Piper — Tom", "male · France · open-source · in use now", "0.2 s", "now"],
   ["2-piper-upmc", "Piper — UPMC", "female · France · open-source", "0.1 s", "fast"],
   ["3-kokoro-ff_siwis", "Kokoro — Siwis", "female · France · open-source neural", "0.3 s", "fast"],
 ];
+const wolof = [
+  ["6-wolof-male", "Wolof — male", "SpeechT5 · native Wolof training data · in use now", "≈0.5–1 s", "now"],
+  ["6-wolof-female", "Wolof — female", "SpeechT5 · native Wolof training data", "≈0.5–1 s", ""],
+];
 const list = document.getElementById("list");
-for (const [file, name, desc, speed, tag] of voices) {
+for (const [file, name, desc, speed, tag, target] of [...voices, ...wolof.map((w) => [...w, "wolof"])]) {
   fetch(file + ".mp3", { method: "HEAD" }).then((r) => {
     if (!r.ok) return;
     const d = document.createElement("div");
@@ -44,7 +52,7 @@ for (const [file, name, desc, speed, tag] of voices) {
     d.innerHTML = `<h2>${name}${tag === "now" ? '<span class="tag now">current</span>' : ""}</h2>
       <div class="m">${desc}${speed ? " · speed " + speed + " per sentence" : ""}</div>
       <audio controls preload="none" src="${file}.mp3"></audio>`;
-    list.appendChild(d);
+    (target === "wolof" ? document.getElementById("wolof") : list).appendChild(d);
   });
 }
 </script>

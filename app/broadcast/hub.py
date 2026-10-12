@@ -60,8 +60,11 @@ class Hub:
     async def serve(self, ws: WebSocket, hello: list[dict], on_message=None) -> None:
         """Run one connection until it closes. `hello` messages are sent first."""
         client = _Client(ws, self.queue_size)
-        for m in hello:
-            await ws.send_text(json.dumps(m, ensure_ascii=False))
+        try:
+            for m in hello:
+                await ws.send_text(json.dumps(m, ensure_ascii=False))
+        except (WebSocketDisconnect, RuntimeError, OSError):
+            return  # the phone left while connecting
         self.clients.add(client)
 
         async def sender():
