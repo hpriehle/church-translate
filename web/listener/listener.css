@@ -42,20 +42,24 @@ main p.onair { color: #fff; border-left: 3px solid var(--accent); padding-left: 
 .waiting { text-align: center; color: var(--dim); font-size: 1.2rem; padding: 0 1.5rem; margin: 0 0 1rem; }
 
 footer {
-  padding: .8rem 1rem calc(.8rem + env(safe-area-inset-bottom));
-  border-top: 1px solid #1a1a1a; background: #050505;
+  display: flex; flex-direction: column; align-items: center;
+  padding: .7rem 1rem calc(.7rem + env(safe-area-inset-bottom));
 }
 .mute {
-  width: 100%; min-height: 4.6rem; border: 0; border-radius: 1rem;
-  background: var(--off); color: #fff;
-  display: flex; align-items: center; justify-content: center; gap: .9rem;
+  width: 64px; height: 64px; border-radius: 50%; padding: 0;
+  border: 1px solid #3a3a3a; background: #141414; color: #bdbab6;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background .2s, color .2s, border-color .2s;
 }
-.mute:active { filter: brightness(1.25); }
-.mute .icon { font-size: 2rem; }
-.mute .label { display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
-.mute b { font-size: 1.5rem; }
-.mute small { font-size: .95rem; opacity: .75; }
-.mute.on { background: var(--on); color: #cfe8cf; }
-.state { color: var(--dim); font-size: 1rem; text-align: center; margin-top: .6rem; min-height: 1.3em; }
+.mute:active { transform: scale(.96); }
+.mute .ico { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.8;
+             stroke-linecap: round; stroke-linejoin: round; }
+.mute .ico-on { display: none; }
+.mute.on { background: #142017; color: #9fd8ab; border-color: #4f8f5c; }
+.mute.on .ico-on { display: block; }
+.mute.on .ico-off { display: none; }
+.state { color: var(--dim); font-size: .85rem; text-align: center; margin-top: .55rem; min-height: 1.2em; }
 .state.live { color: #8fd18f; }
+.state.live::before { content: ""; display: inline-block; width: .5em; height: .5em; border-radius: 50%;
+                      background: currentColor; margin-right: .4em; vertical-align: .1em; }
 .state.warn { color: var(--accent); }

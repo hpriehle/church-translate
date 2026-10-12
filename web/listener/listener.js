@@ -150,10 +150,8 @@
   function showMute() {
     muteBtn.classList.toggle("on", soundOn);
     muteBtn.setAttribute("aria-pressed", soundOn ? "true" : "false");
-    muteBtn.querySelector(".icon").textContent = soundOn ? "🔊" : "🔇";
-    $("muteLabel").textContent = soundOn ? "Son activé" : "Son coupé";
-    $("muteHint").textContent = soundOn ? "Touchez pour couper le son" : "Touchez pour écouter";
-    if (!soundOn) setState("🎧 Utilisez des écouteurs");
+    muteBtn.setAttribute("aria-label", soundOn ? "Couper le son" : "Activer le son");
+    if (!soundOn) setState("Touchez pour écouter · utilisez des écouteurs");
   }
 
   function startStream() {
@@ -190,7 +188,7 @@
     showMute();
     if (MODE === "stream") {
       if (audio.paused || !audio.src) { setState("Chargement…"); startStream(); }
-      else setState("● En direct", "live");
+      else setState("En direct", "live");
     } else {
       unlockForClips();
       requestWakeLock();
@@ -207,7 +205,7 @@
 
   muteBtn.onclick = () => (soundOn ? mute() : unmute());
 
-  audio.addEventListener("playing", () => { audioDelay = 1000; if (soundOn) setState("● En direct", "live"); });
+  audio.addEventListener("playing", () => { audioDelay = 1000; if (soundOn) setState("En direct", "live"); });
   audio.addEventListener("waiting", () => { if (soundOn) setState("Chargement…"); });
   audio.addEventListener("error", () => { if (soundOn && MODE === "stream") restartAudio(); });
   audio.addEventListener("ended", () => {
@@ -244,7 +242,7 @@
   }
   function playNextClip() {
     const url = soundOn ? clipQueue.shift() : null;
-    if (!url) { clipPlaying = false; if (soundOn) setState("● En direct", "live"); return; }
+    if (!url) { clipPlaying = false; if (soundOn) setState("En direct", "live"); return; }
     clipPlaying = true;
     ignorePauseUntil = Date.now() + 1500;
     audio.src = url;
@@ -254,7 +252,7 @@
     // Phones only allow sound after a tap: play a short silence on this element now.
     ignorePauseUntil = Date.now() + 1500;
     audio.src = "/static/listener/silence.mp3";
-    audio.play().then(() => setState("● En direct", "live")).catch(() => {});
+    audio.play().then(() => setState("En direct", "live")).catch(() => {});
   }
   let wakeLock = null;   // clips mode only: clip-by-clip playback needs the screen on
   async function requestWakeLock() {

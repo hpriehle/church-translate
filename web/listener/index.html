@@ -20,11 +20,11 @@
 <p id="waiting" class="waiting">La traduction commencera au début de la réunion.</p>
 
 <footer>
-  <button id="mute" class="mute" type="button" aria-pressed="false">
-    <span class="icon" aria-hidden="true">🔇</span>
-    <span class="label"><b id="muteLabel">Son coupé</b><small id="muteHint">Touchez pour écouter</small></span>
+  <button id="mute" class="mute" type="button" aria-pressed="false" aria-label="Activer le son">
+    <svg class="ico ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>
+    <svg class="ico ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>
   </button>
-  <div id="audioState" class="state">🎧 Utilisez des écouteurs</div>
+  <div id="audioState" class="state">Touchez pour écouter · utilisez des écouteurs</div>
 </footer>
 <script src="/static/listener/listener.js"></script>
 </body>
