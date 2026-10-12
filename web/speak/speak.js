@@ -104,6 +104,53 @@
 
   $("btn").onclick = () => (sending ? stop() : start());
 
+  // ------------------------------------------------------------------ voices (same settings as the operator page)
+  const withKey = (path) => KEY ? path + (path.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(KEY) : path;
+  async function post(path, body) {
+    const r = await fetch(withKey(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    return d;
+  }
+  const voiceMsg = (t) => { $("voiceMsg").textContent = t; if (t) setTimeout(() => { if ($("voiceMsg").textContent === t) $("voiceMsg").textContent = ""; }, 4000); };
+
+  async function loadVoices() {
+    let st;
+    try { st = await (await fetch(withKey("/api/state"))).json(); } catch { return; }
+    const box = $("voiceSelects");
+    box.innerHTML = "";
+    const chans = (st.status && st.status.pipeline && st.status.pipeline.channels) || {};
+    for (const l of st.languages || []) {
+      const label = document.createElement("label");
+      label.textContent = `${({ fr: "French", wo: "Wolof" })[l.code] || l.name} voice`;
+      const sel = document.createElement("select");
+      const list = (st.voices[l.code] || []).map((v) => ({ value: v.id, label: v.label }));
+      if (!list.length) list.push({ value: "", label: "No voice installed" });
+      const ch = (chans[l.code] || {}).tts || {};
+      const cur = `${ch.engine}:${ch.voice}`;
+      for (const v of list) {
+        const o = document.createElement("option");
+        o.value = v.value; o.textContent = v.label; o.selected = v.value === cur;
+        sel.appendChild(o);
+      }
+      sel.onchange = async () => {
+        const [engine, ...rest] = sel.value.split(":");
+        const voice = rest.join(":");
+        try {
+          await post("/api/settings", l.code === "fr" ? { tts: { engine, voice } } : { voices: { [l.code]: { engine, voice } } });
+          voiceMsg(`${l.name}: ${sel.options[sel.selectedIndex].textContent}`);
+        } catch (e) { voiceMsg("Could not change voice: " + e.message); }
+      };
+      label.appendChild(sel);
+      box.appendChild(label);
+    }
+  }
+  $("testVoice").onclick = async () => {
+    try { await post("/api/test-voice", {}); voiceMsg("Playing on the listening page…"); }
+    catch (e) { voiceMsg("Test failed: " + e.message); }
+  };
+  loadVoices();
+
   // ------------------------------------------------------------------ results feed (operator stream)
   const cards = new Map();
   const lags = {};

@@ -33,6 +33,15 @@
   .card .fr { font-size:1.1rem; margin-top:.3rem; }
   .card .meta { color:var(--mute); font-size:.78rem; margin-top:.35rem; }
   .card.skipped, .card.merged { opacity:.5; }
+  .voices { background:var(--panel); border:1px solid var(--line); border-radius:.8rem; padding:.8rem; margin-bottom:1rem; }
+  .vhead { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:.4rem; }
+  .vhead a { color:#7fb2ff; font-size:.9rem; }
+  .voices label { display:block; color:var(--mute); font-size:.85rem; margin:.5rem 0 0; }
+  .voices select { display:block; width:100%; margin-top:.25rem; background:#0b0d10; color:var(--fg);
+                   border:1px solid var(--line); border-radius:.5rem; padding:.5rem; font:inherit; font-size:1rem; }
+  button.small { margin-top:.8rem; background:#252b33; color:var(--fg); border:1px solid var(--line); border-radius:.5rem;
+                 padding:.55rem .9rem; font:inherit; font-weight:600; }
+  .vmsg { color:var(--mute); font-size:.85rem; margin-left:.6rem; }
   .lc { font-size:.72rem; font-weight:800; color:#8b93a1; border:1px solid #333; border-radius:4px; padding:0 .3rem; margin-right:.2rem; }
   .eng { font-weight:700; } .eng.claude { color:#c9a8ff; } .eng.ollama { color:#ffc76b; }
 </style>
@@ -56,7 +65,14 @@
   </div>
 
   <div class="tip">Open the listening page on <b>another device with headphones</b>. If its speaker
-    is near this microphone, the French voice gets picked up and translated again.</div>
+    is near this microphone, the translated voice gets picked up and translated again.</div>
+
+  <div class="voices">
+    <div class="vhead"><b>Voices</b><a href="/static/voices/index.html" target="_blank">Compare voice samples</a></div>
+    <div id="voiceSelects"></div>
+    <button id="testVoice" type="button" class="small">Hear the voice now</button>
+    <span id="voiceMsg" class="vmsg"></span>
+  </div>
 
   <div class="listen">
     <img id="qr" alt="QR code for the listening page">
