@@ -47,6 +47,11 @@ that Claude Code needs (which it doesn't have when started over SSH). After that
 - **Restart server** on the operator page restarts it in place: it picks up code and dependency
   updates and new settings, and phones reconnect by themselves. Or run `scripts/autostart.sh restart`.
 - `scripts/autostart.sh status` / `remove`. The log is `logs/launchd.log`.
+- **Public link:** if `~/.cloudflared/church-translate.yml` exists, `install` also runs the Cloudflare
+  tunnel on the Mac (`scripts/autostart.sh tunnel` installs just that). The public link then needs
+  nothing but this Mac and an internet connection: no VPN, no other computer. The operator page
+  shows **Public link: connected / offline**. If a building's network blocks it, set **Listener
+  link → Local network** (phones on the same Wi-Fi) or use a hotspot / travel router.
 - The Mac is only kept awake while a run is active, and the Ollama fallback model is loaded when
   a run starts, so an idle server uses little memory.
 - The first time the server uses the Mac's microphone from the background service, macOS asks

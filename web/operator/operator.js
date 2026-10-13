@@ -259,6 +259,10 @@
       ttsErrs[c] = err;
     }
     if (st.listener_url) setUrl(st.listener_url);
+    const tn = st.tunnel || {};
+    $("tunnelState").textContent = tn.state === "connected" ? `connected (${tn.connections})`
+      : tn.state === "offline" ? "offline — use Local network" : tn.state === "not running" ? "not on this machine" : "–";
+    cls($("tunnelState"), tn.state === "connected" ? "ok" : tn.state === "offline" ? "bad" : "");
   }
 
   // ------------------------------------------------------------------ restart

@@ -53,6 +53,7 @@ class State:
     exit_when_done: bool = False
     port_override: int | None = None
     mode_override: str | None = None
+    tunnel: dict = {"state": "unknown"}
     argv: list[str] = []
     version: str = ""
 
@@ -111,7 +112,24 @@ def full_status() -> dict[str, Any]:
         "listeners": {"stream": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
                       "captions": sum(ch.hub.count for ch in S.pipeline.channels.values())},
         "listener_url": listener_url(),
+        "tunnel": S.tunnel,
     }
+
+
+async def tunnel_loop() -> None:
+    """Is the public link up? Asks the Cloudflare tunnel running on this machine (if any)."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=2) as c:
+        while True:
+            try:
+                r = await c.get("http://127.0.0.1:20241/ready")
+                n = int((r.json() or {}).get("readyConnections") or 0)
+                S.tunnel = {"state": "connected" if r.status_code == 200 and n else "offline", "connections": n}
+            except Exception:
+                # No tunnel on this machine (local-network only, or the tunnel runs elsewhere).
+                S.tunnel = {"state": "not running", "connections": 0}
+            await asyncio.sleep(5)
 
 
 async def status_loop() -> None:
@@ -146,7 +164,8 @@ async def lifespan(app: FastAPI):
         tts = TtsRunner(tts_for(st, lang.code), sr, lazy=True)
         S.pipeline.add_channel(Channel(S.pipeline, lang, tr, tts, m, b, Hub(f"listen-{lang.code}", history=300, queue_size=400)))
     S.pipeline.start_tasks()
-    bg = [asyncio.create_task(status_loop()), asyncio.create_task(S.pipeline.load_stt())]
+    bg = [asyncio.create_task(status_loop()), asyncio.create_task(S.pipeline.load_stt()),
+          asyncio.create_task(tunnel_loop())]
     for ch in S.pipeline.channels.values():
         ch.mixer.start()
         bg.append(asyncio.create_task(ch.translator.start()))
