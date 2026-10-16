@@ -22,10 +22,15 @@ _HELP_CACHE: str | None = None
 
 
 def claude_binary() -> str | None:
+    # Prefer the native, self-updating install in the user's home: an older npm copy elsewhere on
+    # PATH (e.g. a root-owned /opt/homebrew one that can no longer update) must not win.
+    native = Path("~/.local/bin/claude").expanduser()
+    if native.exists():
+        return str(native)
     found = shutil.which("claude")
     if found:
         return found
-    for p in ("~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"):
+    for p in ("~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"):
         pp = Path(p).expanduser()
         if pp.exists():
             return str(pp)
