@@ -9,6 +9,7 @@ import logging
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -26,9 +27,24 @@ except (OSError, ImportError):  # pragma: no cover
     sd = None
 
 
+_active_streams = 0  # PortAudio may only be re-initialised while no stream is open
+
+
+def refresh_devices() -> None:
+    """PortAudio reads the device list once; re-read it so a mic plugged in later shows up."""
+    if sd is None or _active_streams:
+        return
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception as e:  # pragma: no cover
+        log.warning("could not refresh audio devices: %s", e)
+
+
 def list_input_devices() -> list[dict]:
     if sd is None:
         return []
+    refresh_devices()
     try:
         devices = sd.query_devices()
         default_in = sd.default.device[0] if sd.default.device else -1
@@ -81,6 +97,7 @@ class MicSource(Source):
     def __init__(self, device_name: str = "", channel: int = 0):
         if sd is None:
             raise RuntimeError("sounddevice/PortAudio is not available on this machine")
+        refresh_devices()
         dev = resolve_device(device_name)
         if dev is None:
             raise RuntimeError("no audio input device found")
@@ -108,12 +125,22 @@ class MicSource(Source):
         import soxr
 
         # To read input channel N we must open N channels; otherwise mix down up to 2.
+        global _active_streams
         channels = min(self.device["channels"], self.channel) if self.channel else min(self.device["channels"], 2)
-        self._stream = sd.InputStream(device=self.device["index"], channels=channels,
-                                      samplerate=self.native_sr, dtype="float32",
-                                      blocksize=int(self.native_sr * 0.05), callback=self._callback)
+        try:
+            self._stream = sd.InputStream(device=self.device["index"], channels=channels,
+                                          samplerate=self.native_sr, dtype="float32",
+                                          blocksize=int(self.native_sr * 0.05), callback=self._callback)
+            self._stream.start()
+        except Exception as e:
+            hint = ""
+            if sys.platform == "darwin":
+                hint = (" — on a Mac this usually means the server isn't allowed to use the microphone: System "
+                        "Settings → Privacy & Security → Microphone (turn on python3 / uv), or record from the "
+                        "speak page (http://localhost:8000/speak) instead.")
+            raise RuntimeError(f"cannot open {self.device['name']}: {e}{hint}") from e
+        _active_streams += 1
         rs = soxr.ResampleStream(self.native_sr, SR, 1, dtype="float32", quality="HQ")
-        self._stream.start()
         log.info("capturing from %s @ %d Hz", self.device["name"], self.native_sr)
         try:
             while not self._stop.is_set():
@@ -127,6 +154,7 @@ class MicSource(Source):
         finally:
             self._stream.stop()
             self._stream.close()
+            _active_streams = max(0, _active_streams - 1)
 
     def stop(self):
         self._stop.set()
