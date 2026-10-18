@@ -68,32 +68,39 @@ On a server, the speaker opens **/speak** on a phone (its own microphone, or one
 and keeps that page open with the screen on. Listeners use the public link as usual.
 
 ```bash
-git clone https://github.com/hpriehle/church-translate && cd church-translate
-sudo apt install -y ffmpeg && curl -LsSf https://astral.sh/uv/install.sh | sh
+sudo apt install -y ffmpeg git
+curl -LsSf https://astral.sh/uv/install.sh | sh                # Python package manager
 curl -fsSL https://claude.ai/install.sh | bash                 # Claude Code
-uv sync --extra linux --extra wolof                        # CPU Whisper + Wolof voice
-./start.sh --setup                                             # models and voices (skips Mac-only steps)
-cp secrets.env.example data/secrets.env && nano data/secrets.env
+git clone https://github.com/hpriehle/church-translate && cd church-translate
+./start.sh --setup                                             # packages, Whisper, voices (about a minute)
 ```
 
-Then create `data/overrides.linux.json`:
+Then create `data/overrides.linux.json` (pick your own password and address):
 
 ```json
 {"server": {"host": "127.0.0.1", "port": 8420, "operator_pin": "choose-a-password",
-            "public_url": "https://your.domain/", "open_browser": false},
- "stt": {"engine": "faster-whisper", "faster_whisper_model": "small.en"},
- "tts": {"engine": "piper", "voice": "fr_FR-tom-medium"}}
+            "public_url": "https://your.domain/", "open_browser": false, "update_from_git": true},
+ "translate": {"mode": "claude"}}
 ```
 
-Run it with systemd (`scripts/church-translate.service.example`), and publish it with a Cloudflare
-tunnel pointing at `http://127.0.0.1:8420`. The **password** (`operator_pin`) protects the speaker
-and operator pages: people go to `/speak` or `/operator` and type it once.
+- Run it with systemd (`scripts/church-translate.service.example`) and publish it with a Cloudflare
+  tunnel pointing at `http://127.0.0.1:8420` (`scripts/church-translate-tunnel.service.example`). If another cloudflared already uses metrics port
+  20241, give this tunnel another one (`--metrics 127.0.0.1:20242`) and set
+  `"tunnel_metrics": "127.0.0.1:20242"` so the operator page can show the Public link status.
+- The **password** (`operator_pin`) protects the speaker and operator pages: people go to `/speak` or
+  `/operator`, type it once, and the phone stays signed in for 30 days.
+- Add Claude access on the operator page (**Claude access**, see above).
+- With `update_from_git`, **Restart server** on the operator page first pulls the latest code from
+  GitHub, so updates need no SSH.
 
 Notes for servers without a GPU:
-- Speech recognition uses a smaller Whisper on the processor, so there are a few more mistakes
-  with names than on a Mac.
-- The local Ollama fallback is too slow without a GPU, so leave it off: French then relies on Claude
-  like Wolof does.
+- Speech recognition uses Whisper `small.en` on the processor (about 1.7 s per 6 s of speech on 8
+  cores). It makes a few more mistakes with names than the Mac's large model; add names to the
+  glossary.
+- The local Ollama fallback is too slow without a GPU, so `"mode": "claude"` turns it off: French then
+  relies on Claude like Wolof does.
+- At church, the speaker's phone (or a mic plugged into it) must keep the speak page open **with the
+  screen on**: phones stop the microphone when they lock. Plug it in to charge.
 
 ## Keeping it running (Mac)
 

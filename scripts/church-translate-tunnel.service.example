@@ -1,0 +1,25 @@
+# systemd unit for the public link (a Cloudflare tunnel) on a Linux server.
+# 1. cloudflared tunnel login; cloudflared tunnel create church-translate
+#    cloudflared tunnel route dns church-translate live.example.org
+# 2. ~/.cloudflared/church-translate.yml:
+#      tunnel: <tunnel id>
+#      credentials-file: /home/translate/.cloudflared/<tunnel id>.json
+#      ingress:
+#        - hostname: live.example.org
+#          service: http://127.0.0.1:8420
+#        - service: http_status:404
+# 3. Copy this file to /etc/systemd/system/church-translate-tunnel.service, then:
+#      sudo systemctl daemon-reload && sudo systemctl enable --now church-translate-tunnel
+[Unit]
+Description=Public link for the live church translation (Cloudflare tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=translate
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --config /home/translate/.cloudflared/church-translate.yml --metrics 127.0.0.1:20241 run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

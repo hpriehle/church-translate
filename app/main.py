@@ -671,6 +671,14 @@ async def _restart_in_place() -> None:
         await asyncio.wait_for(asyncio.gather(*(ch.translator.close() for ch in S.pipeline.channels.values())), 8)
     except Exception:
         log.exception("cleanup before restart failed (continuing)")
+    git = shutil.which("git")
+    if S.settings.server.update_from_git and git and (ROOT / ".git").exists():
+        proc = await asyncio.create_subprocess_exec(git, "pull", "--ff-only", "--quiet", cwd=str(ROOT))
+        try:
+            await asyncio.wait_for(proc.wait(), 60)
+        except asyncio.TimeoutError:
+            proc.kill()
+        log.info("git pull before restart: exit %s", proc.returncode)
     uv = shutil.which("uv")
     if uv and (ROOT / "uv.lock").exists():
         # Pick up new dependencies; --inexact never removes packages (e.g. dev extras).
@@ -694,7 +702,8 @@ async def api_restart(request: Request):
         return {"ok": True, "message": "already restarting"}
     _restarting = True
     asyncio.create_task(_restart_in_place())
-    return {"ok": True, "message": "Restarting — back in about 15 seconds."}
+    update = " Getting the latest code first." if S.settings.server.update_from_git else ""
+    return {"ok": True, "message": f"Restarting — back in about 15 seconds.{update}"}
 
 
 @app.get("/api/report")
