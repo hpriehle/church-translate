@@ -371,3 +371,10 @@ def test_save_secrets_keeps_other_lines_and_is_private(tmp_path):
     assert claude_access(f) == "api_key"
     save_secrets({}, f)
     assert claude_access(f) == "login"
+
+
+def test_mms_wolof_spelling():
+    from app.tts.engines import mms_wolof_text
+
+    assert mms_wolof_text("Xam naa ñu dëkk ci Yàlla, Mbóotaay") == "kham naa nu dekk ci yalla, mbootaay"
+    assert mms_wolof_text("naqari") == "nakari"

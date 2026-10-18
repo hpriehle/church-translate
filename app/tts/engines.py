@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import wave
 from pathlib import Path
 
@@ -183,22 +184,40 @@ SPEECHT5_VOCODER = "microsoft/speecht5_hifigan"
 _SPEECHT5_LOADED: dict[str, object] = {}
 
 
-def speecht5_available() -> bool:
+# Meta's MMS Wolof voice (CC BY-NC 4.0): one voice, about 4x faster than SpeechT5 on a plain CPU.
+MMS_WOLOF_MODEL = "rnjema-unima/mms-tts-wol-baseline"
+_MMS_LOADED: dict = {}
+
+
+def _torch_available() -> bool:
     try:
         import torch  # noqa: F401
         import transformers  # noqa: F401
     except ImportError:
         return False
-    return any(WOLOF_DIR.glob("speaker-*.npy"))
+    return True
+
+
+def speecht5_available() -> bool:
+    return _torch_available() and any(WOLOF_DIR.glob("speaker-*.npy"))
 
 
 def list_wolof_voices() -> list[dict]:
-    if not speecht5_available():
+    if not _torch_available():
         return []
     names = {"male": "male", "female": "female"}
-    return [{"id": f"speecht5:{p.stem[8:]}", "engine": "speecht5", "voice": p.stem[8:],
-             "label": f"Wolof — {names.get(p.stem[8:], p.stem[8:])}", "lang": "wo"}
-            for p in sorted(WOLOF_DIR.glob("speaker-*.npy"))]
+    voices = [{"id": f"speecht5:{p.stem[8:]}", "engine": "speecht5", "voice": p.stem[8:],
+               "label": f"Wolof — {names.get(p.stem[8:], p.stem[8:])}", "lang": "wo"}
+              for p in sorted(WOLOF_DIR.glob("speaker-*.npy"))]
+    voices.append({"id": "mms:default", "engine": "mms", "voice": "default",
+                   "label": "Wolof — MMS (fast, for servers)", "lang": "wo"})
+    return voices
+
+
+def mms_wolof_text(text: str) -> str:
+    """The MMS voice learned Wolof written without accents, x or q (x as "kh"): spell it the same way."""
+    t = text.lower().replace("x", "kh").replace("q", "k")
+    return "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c))
 
 
 class SpeechT5Tts:
@@ -253,6 +272,47 @@ class SpeechT5Tts:
         return _resample(pcm, self.SR, self.out_sr)
 
 
+class MmsTts:
+    """Wolof voice from Meta's MMS project (one voice). Fast enough for a server without a GPU."""
+
+    name = "mms"
+
+    def __init__(self, cfg: TtsCfg, out_sr: int):
+        import torch
+        from transformers import AutoTokenizer, VitsModel
+
+        self.cfg = cfg
+        self.out_sr = out_sr
+        self.voice = "default"
+        if "model" not in _MMS_LOADED:
+            torch.set_num_threads(4)
+            _MMS_LOADED["tokenizer"] = AutoTokenizer.from_pretrained(MMS_WOLOF_MODEL)
+            _MMS_LOADED["model"] = VitsModel.from_pretrained(MMS_WOLOF_MODEL).eval()
+        self._tok = _MMS_LOADED["tokenizer"]
+        self._model = _MMS_LOADED["model"]
+        self._chars = {k for k in self._tok.get_vocab() if len(k) == 1}
+        self.SR = self._model.config.sampling_rate
+        self._lock = threading.Lock()
+
+    def synth(self, text: str, speed: float = 1.0) -> np.ndarray:
+        import torch
+
+        # The voice ignores punctuation, so pause between sentences and clauses ourselves.
+        parts = ["".join(c for c in mms_wolof_text(p) if c in self._chars).strip()
+                 for p in re.split(r"(?<=[.!?;:,])\s+", text)]
+        gap = np.zeros(int(0.12 * self.SR), dtype=np.float32)
+        out = []
+        with self._lock, torch.inference_mode():
+            self._model.speaking_rate = max(0.5, speed * self.cfg.rate / 175.0)
+            for p in parts:
+                if p:
+                    ids = self._tok(p, return_tensors="pt")
+                    out += [self._model(**ids).waveform[0].float().numpy(), gap]
+        audio = np.concatenate(out[:-1]) if out else np.zeros(0, np.float32)
+        pcm = (np.clip(audio / max(1e-6, float(np.abs(audio).max())) * 0.9, -1, 1) * 32767).astype(np.int16)
+        return _resample(pcm, self.SR, self.out_sr)
+
+
 def list_voices_for(code: str) -> list[dict]:
     if code == "wo":
         return list_wolof_voices()
@@ -266,6 +326,8 @@ def make_tts(cfg: TtsCfg, out_sr: int):
         return PiperTts(cfg, out_sr)
     if cfg.engine == "speecht5":
         return SpeechT5Tts(cfg, out_sr)
+    if cfg.engine == "mms":
+        return MmsTts(cfg, out_sr)
     return SayTts(cfg, out_sr)
 
 

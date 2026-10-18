@@ -70,7 +70,7 @@ else:
     WhisperModel(s.stt.faster_whisper_model, device='cpu', compute_type='int8')
 try:
     import torch  # noqa: F401  (only if the Wolof voice is installed)
-    for m in ('bilalfaye/speecht5_tts-wolof', 'microsoft/speecht5_hifigan'):
+    for m in ('bilalfaye/speecht5_tts-wolof', 'microsoft/speecht5_hifigan', 'rnjema-unima/mms-tts-wol-baseline'):
         snapshot_download(m)
 except ImportError:
     pass

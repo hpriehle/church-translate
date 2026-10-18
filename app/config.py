@@ -87,7 +87,9 @@ class VoiceCfg(BaseModel):
 
 
 # Voices for languages other than French (French uses [tts]).
-DEFAULT_VOICES: dict[str, VoiceCfg] = {"wo": VoiceCfg(engine="speecht5", voice="male")}
+# Wolof: SpeechT5 (male/female) is fast on Apple Silicon; elsewhere the faster MMS voice keeps up better.
+DEFAULT_VOICES: dict[str, VoiceCfg] = {
+    "wo": VoiceCfg(engine="speecht5", voice="male") if sys.platform == "darwin" else VoiceCfg(engine="mms", voice="default")}
 
 
 class BacklogCfg(BaseModel):
