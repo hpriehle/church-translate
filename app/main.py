@@ -594,7 +594,9 @@ async def api_claude_access(request: Request):
     elif kind in CLAUDE_CREDENTIALS:
         var, prefix, name = CLAUDE_CREDENTIALS[kind]
         if not value.startswith(prefix) or not re.fullmatch(r"sk-ant-[A-Za-z0-9_-]{20,400}", value):
-            raise HTTPException(400, f"That doesn't look like a {name} (it starts with {prefix}…).")
+            hint = (" If you copied a code from the browser, paste that code into Terminal where claude "
+                    "setup-token is waiting; Terminal then prints the token.") if kind == "token" else ""
+            raise HTTPException(400, f"That isn't the {name}: it should start with {prefix}….{hint}")
         save_secrets({var: value})  # one credential at a time
         message = f"Saved the {name}. Claude restarts with it in a few seconds."
     else:
