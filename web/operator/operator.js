@@ -161,10 +161,104 @@
     listenerUrl = "";
   };
 
-  document.querySelectorAll("input[name=src]").forEach((r) => r.onchange = () => {
-    const file = document.querySelector("input[name=src]:checked").value === "file";
-    $("fileBox").hidden = !file; $("micBox").hidden = file;
-  });
+  function showSource() {
+    const v = document.querySelector("input[name=src]:checked").value;
+    $("fileBox").hidden = v !== "file"; $("micBox").hidden = v !== "mic"; $("browserBox").hidden = v !== "browser";
+    if (v === "browser") listBrowserMics(false);
+  }
+  document.querySelectorAll("input[name=src]").forEach((r) => r.onchange = showSource);
+
+  // ------------------------------------------------------------------ microphone recorded by this browser
+  // The browser has its own microphone permission, so this works even when the server runs as a
+  // background service that macOS won't give the microphone to. Audio goes to /ws/speak.
+  const bm = { ctx: null, stream: null, node: null, ws: null, pending: [], n: 0, active: false };
+
+  async function listBrowserMics(ask) {
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      $("bhint").textContent = "The browser microphone needs this page at http://localhost:8000/operator (on the Mac) or the https link.";
+      return;
+    }
+    try {
+      if (ask) (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop());
+      const mics = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+      const saved = localStorage.getItem("bmic") || "";
+      const items = mics.map((d, i) => ({ value: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
+      if (!items.length) items.push({ value: "", label: "Default microphone" });
+      fillSelect($("bdevice"), items, items.some((x) => x.value === saved) ? saved : items[0].value);
+      if (!ask && mics.length && !mics[0].label) {
+        // Names stay hidden until the page is allowed to use the microphone once.
+        const o = document.createElement("option"); o.value = "__ask"; o.textContent = "Show microphone names…";
+        $("bdevice").appendChild(o);
+      }
+    } catch (e) { log("Microphone list: " + e.message, "warn"); }
+  }
+  $("bdevice").onchange = () => {
+    if ($("bdevice").value === "__ask") { listBrowserMics(true); return; }
+    localStorage.setItem("bmic", $("bdevice").value);
+  };
+  navigator.mediaDevices && navigator.mediaDevices.addEventListener && navigator.mediaDevices.addEventListener("devicechange", () => listBrowserMics(false));
+
+  function bmFlush() {
+    if (!bm.n || !bm.ws || bm.ws.readyState !== WebSocket.OPEN) { bm.pending = []; bm.n = 0; return; }
+    const out = new Int16Array(bm.n);
+    let o = 0;
+    for (const f of bm.pending) for (let i = 0; i < f.length; i++) {
+      const v = Math.max(-1, Math.min(1, f[i]));
+      out[o++] = v < 0 ? v * 0x8000 : v * 0x7fff;
+    }
+    bm.pending = []; bm.n = 0;
+    bm.ws.send(out.buffer);
+  }
+
+  async function startBrowserMic(record) {
+    const id = $("bdevice").value;
+    const proc = $("bproc").checked;
+    const constraints = { channelCount: 1, echoCancellation: proc, noiseSuppression: proc, autoGainControl: proc };
+    if (id && id !== "__ask") constraints.deviceId = { exact: id };
+    bm.stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    listBrowserMics(false);
+    bm.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await bm.ctx.audioWorklet.addModule("/static/speak/capture-worklet.js");
+    const src = bm.ctx.createMediaStreamSource(bm.stream);
+    bm.node = new AudioWorkletNode(bm.ctx, "capture", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+    const mute = bm.ctx.createGain(); mute.gain.value = 0;
+    src.connect(bm.node); bm.node.connect(mute); mute.connect(bm.ctx.destination);
+    bm.node.port.onmessage = (e) => {
+      if (!bm.active) return;
+      bm.pending.push(e.data); bm.n += e.data.length;
+      if (bm.n >= bm.ctx.sampleRate * 0.1) bmFlush();
+    };
+    const label = (bm.stream.getAudioTracks()[0] || {}).label || "browser";
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    await new Promise((resolve, reject) => {
+      bm.ws = new WebSocket(withPin(`${proto}://${location.host}/ws/speak`));
+      bm.ws.binaryType = "arraybuffer";
+      bm.ws.onopen = () => bm.ws.send(JSON.stringify({ type: "hello", sample_rate: bm.ctx.sampleRate, device: label, record }));
+      bm.ws.onmessage = (ev) => {
+        const m = JSON.parse(ev.data);
+        if (m.type === "started") { bm.active = true; log(`Recording from ${label} (this browser)`); resolve(); }
+        else if (m.type === "error") reject(new Error(m.message));
+      };
+      bm.ws.onclose = (ev) => {
+        if (bm.active) log("Browser microphone connection closed — press Start to continue", "warn");
+        stopBrowserMic(false);
+        reject(new Error(ev.code === 4403 ? "not allowed (key missing)" : "connection closed"));
+      };
+    });
+  }
+
+  function stopBrowserMic(sendStop = true) {
+    if (sendStop && bm.ws && bm.ws.readyState === WebSocket.OPEN) {
+      bmFlush();
+      try { bm.ws.send(JSON.stringify({ type: "stop" })); bm.ws.close(); } catch {}
+    }
+    bm.active = false;
+    try { bm.node && bm.node.disconnect(); } catch {}
+    try { bm.stream && bm.stream.getTracks().forEach((t) => t.stop()); } catch {}
+    try { bm.ctx && bm.ctx.close(); } catch {}
+    bm.node = bm.stream = bm.ctx = null;
+  }
+  window.addEventListener("pagehide", () => { if (bm.active) stopBrowserMic(); });
 
   $("upload").onchange = async () => {
     const f = $("upload").files[0];
@@ -180,12 +274,26 @@
 
   $("start").onclick = async () => {
     const src = document.querySelector("input[name=src]:checked").value;
+    if (src === "browser") {
+      $("start").disabled = true;
+      try { await startBrowserMic($("record").checked); }
+      catch (e) {
+        stopBrowserMic(false);
+        log("Start failed: " + (e.name === "NotAllowedError" ? "the browser was not allowed to use the microphone" : e.message), "error");
+        alert(e.name === "NotAllowedError" ? "Allow this page to use the microphone (browser address bar), then press Start again." : e.message);
+        $("start").disabled = false;
+      }
+      return;
+    }
     const body = { source: src, record: $("record").checked };
     if (src === "file") Object.assign(body, { file: $("sample").value, speed: +$("fileSpeed").value, start_s: +$("fileStart").value });
     else body.device = $("device").value;
     try { await api("/api/start", body); } catch (e) { log("Start failed: " + e.message, "error"); alert(e.message); }
   };
-  $("stop").onclick = () => api("/api/stop", {}).catch((e) => log(e.message, "error"));
+  $("stop").onclick = () => {
+    if (bm.active) stopBrowserMic();
+    api("/api/stop", {}).catch((e) => log(e.message, "error"));
+  };
   $("testVoice").onclick = () => api("/api/test-voice", {}).then(() => log("Test sentence sent")).catch((e) => log(e.message, "error"));
 
   // ------------------------------------------------------------------ status
@@ -422,5 +530,6 @@
     catch (e) { $("gMsg").textContent = e.message; log(e.message, "error"); }
   };
 
+  showSource();
   load().then(connect).catch((e) => { log("Could not load state: " + e.message, "error"); connect(); });
 })();

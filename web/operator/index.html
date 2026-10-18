@@ -27,10 +27,16 @@
     <section>
       <h2>Source</h2>
       <div class="seg">
-        <label><input type="radio" name="src" value="mic" checked> Microphone / interface</label>
+        <label><input type="radio" name="src" value="browser" checked> Microphone (this browser)</label>
+        <label><input type="radio" name="src" value="mic"> Microphone (server)</label>
         <label><input type="radio" name="src" value="file"> Test recording</label>
       </div>
-      <div id="micBox">
+      <div id="browserBox">
+        <label>Input device <select id="bdevice"><option value="">Default microphone</option></select></label>
+        <label class="check"><input id="bproc" type="checkbox" checked> Noise reduction &amp; auto level (room microphone)</label>
+        <div class="muted small" id="bhint">Recorded by this browser, so it works whichever way the server was started. Keep this tab open while translating. Turn noise reduction off for a direct sound-system feed.</div>
+      </div>
+      <div id="micBox" hidden>
         <label>Input device <select id="device"></select></label>
         <div class="two">
           <label>Channel <select id="channel"><option value="0">Mix all</option></select></label>
