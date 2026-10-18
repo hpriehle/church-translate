@@ -67,11 +67,15 @@ voice = "fr_FR-tom-medium"
 rate = 190
 volume = 1.0
 
-# Voices for languages other than French. Wolof: SpeechT5 trained on native Wolof speakers
-# ("male" or "female"); needs torch + transformers (installed on macOS by default).
-[voices.wo]
-engine = "speecht5"
-voice = "male"
+# Voices for languages other than French (or pick one on the operator page). Wolof:
+#   engine = "speecht5", voice = "male" | "female"  — trained on native Wolof speakers; the default
+#                                                      on Apple Silicon Macs
+#   engine = "mms", voice = "default"                — one voice, about 4x faster on a plain CPU; the
+#                                                      default on Linux servers
+# Both need the "wolof" extra on Linux (torch + transformers; installed on macOS by default).
+# [voices.wo]
+# engine = "speecht5"
+# voice = "male"
 
 [backlog]
 # Seconds of French audio waiting to be played.
