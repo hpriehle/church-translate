@@ -82,6 +82,14 @@
         <label>Fallback after (s) <input id="timeout" type="number" min="2" max="20" step="0.5"></label>
       </div>
       <label>Ollama model <input id="ollamaModel" type="text"></label>
+      <div class="access"><span class="k">Claude access</span>
+        <div id="claudeAccess" class="small">…</div>
+        <label>Kind <select id="credKind"><option value="token">Subscription token</option><option value="api_key">API key</option></select></label>
+        <label>Paste it here <input id="credValue" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
+        <div class="two"><button id="credSave">Save</button><button id="credForget">Remove saved</button></div>
+        <div class="muted small">A subscription token comes from <code>claude setup-token</code> on any computer with Claude Code (uses
+          your Claude plan); an API key from console.anthropic.com (pay per use). It stays on this server and is never shown again.</div>
+      </div>
     </section>
 
     <section class="qr">

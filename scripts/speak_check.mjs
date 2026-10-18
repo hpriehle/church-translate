@@ -1,6 +1,7 @@
 // Speak page test: Chromium's fake microphone plays a WAV into /speak while a second page
 // listens on /. Prints what was heard/translated and whether the listener got captions + audio.
 //   node scripts/speak_check.mjs <base-url> <key> <file.wav> [seconds]
+// With LOGIN=1 the speak page is opened without the key and signed in through /login instead.
 import { createRequire } from "module";
 import path from "path";
 const require = createRequire(path.join(process.env.PLAYWRIGHT_DIR || process.cwd(), "noop.js"));
@@ -17,7 +18,14 @@ await listener.goto(base + "/");
 await listener.click("#mute");
 const speak = await ctx.newPage();
 speak.on("console", (m) => { if (m.type() === "error") console.log("[speak error]", m.text()); });
-await speak.goto(`${base}/speak?key=${encodeURIComponent(key)}`);
+if (process.env.LOGIN) {
+  await speak.goto(`${base}/speak`);
+  if (!speak.url().includes("/login")) throw new Error("speak page did not ask for the password: " + speak.url());
+  await speak.fill("input[name=password]", key);
+  await Promise.all([speak.waitForURL(/\/speak/), speak.click("button[type=submit]")]);
+} else {
+  await speak.goto(`${base}/speak?key=${encodeURIComponent(key)}`);
+}
 await sleep(1500);
 await speak.click("#btn");
 await sleep(+secs * 1000);

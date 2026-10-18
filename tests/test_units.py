@@ -357,3 +357,17 @@ def test_secrets_file(tmp_path):
     f = tmp_path / "secrets.env"
     f.write_text("# comment\nCLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-abc'\nOTHER=ignored\nANTHROPIC_API_KEY=\n")
     assert load_secrets(f) == {"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-abc"}
+
+
+def test_save_secrets_keeps_other_lines_and_is_private(tmp_path):
+    from app.config import claude_access, load_secrets, save_secrets
+
+    f = tmp_path / "secrets.env"
+    f.write_text("# comment\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-old\nOTHER=1\n")
+    save_secrets({"ANTHROPIC_API_KEY": "sk-ant-api03-new"}, f)
+    assert load_secrets(f) == {"ANTHROPIC_API_KEY": "sk-ant-api03-new"}
+    assert "# comment" in f.read_text() and "OTHER=1" in f.read_text()
+    assert f.stat().st_mode & 0o777 == 0o600
+    assert claude_access(f) == "api_key"
+    save_secrets({}, f)
+    assert claude_access(f) == "login"

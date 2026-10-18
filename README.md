@@ -56,8 +56,11 @@ Each installation needs its own Claude access. Pick one:
   caching). Put it in `data/secrets.env` as `ANTHROPIC_API_KEY=sk-ant-…`. This is the better choice
   for an organisation, or when several buildings run their own copy.
 
-`data/secrets.env` is never committed (see `secrets.env.example`). If both lines are present,
-Claude Code uses the API key. The operator page shows which sign-in the translator is using.
+The easiest way to add either one is the operator page: **Voice & translation → Claude access**.
+Paste the token or key and press Save. It is written to `data/secrets.env` on the server, Claude
+restarts with it right away, and the page never shows it again. You can also edit the file yourself
+(see `secrets.env.example`); it is never committed. If both lines are present, Claude Code uses the
+API key. The operator page shows which sign-in the translator is using.
 
 ## Running on a Linux server (no laptop at church)
 

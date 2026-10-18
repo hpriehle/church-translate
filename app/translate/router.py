@@ -140,6 +140,19 @@ class Translator:
                 self.standby = None
         self._maintain()
 
+    def restart_claude(self) -> None:
+        """The Claude credentials changed: start a fresh session now (it reads data/secrets.env as it starts)."""
+        self._restart_after = 0.0
+        self._spawn_failures = 0
+        self._paused_until = 0.0
+        self._consecutive_errors = 0
+        self.last_error = ""
+        self._reload_pending = True
+        if self.standby:
+            asyncio.create_task(self._retire(self.standby))
+            self.standby = None
+        self._maintain()
+
     # ------------------------------------------------------------ sessions
     def _maintain(self) -> None:
         if (self.cfg.mode == "ollama" and self.uses_ollama) or not self.has_claude:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tomllib
 from pathlib import Path
@@ -139,6 +140,25 @@ def load_secrets(path: Path = SECRETS_PATH) -> dict[str, str]:
         if k in SECRET_KEYS and v:
             out[k] = v
     return out
+
+
+def save_secrets(values: dict[str, str], path: Path = SECRETS_PATH) -> None:
+    """Replace the Claude credentials in data/secrets.env (other lines are kept). Only this user can read it."""
+    keep = []
+    if path.exists():
+        keep = [line for line in path.read_text().splitlines() if line.split("=", 1)[0].strip() not in SECRET_KEYS]
+    keep += [f"{k}={v}" for k, v in values.items() if k in SECRET_KEYS and v]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        f.write("\n".join(keep) + "\n")
+    os.replace(tmp, path)
+
+
+def claude_access(path: Path = SECRETS_PATH) -> str:
+    """Which credential the translator uses: "api_key", "token" (subscription) or "login" (this computer's)."""
+    s = load_secrets(path)
+    return "api_key" if "ANTHROPIC_API_KEY" in s else "token" if "CLAUDE_CODE_OAUTH_TOKEN" in s else "login"
 
 
 def _deep_merge(base: dict, extra: dict) -> dict:

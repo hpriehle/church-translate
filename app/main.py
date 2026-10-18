@@ -22,8 +22,8 @@ from .broadcast.hub import Hub
 from .broadcast.mixer import Mixer
 from .broadcast.stream import Mp3Broadcaster
 from .channel import Channel
-from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, load_glossary, load_settings, save_glossary,
-                     save_override, tts_for, validate_glossary)
+from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
+                     save_glossary, save_override, save_secrets, tts_for, validate_glossary)
 from .languages import LANGUAGES, enabled
 from .pipeline import Pipeline
 from .stt import Transcriber
@@ -113,6 +113,7 @@ def full_status() -> dict[str, Any]:
                       "captions": sum(ch.hub.count for ch in S.pipeline.channels.values())},
         "listener_url": listener_url(),
         "tunnel": S.tunnel,
+        "claude_access": claude_access(),
     }
 
 
@@ -573,6 +574,35 @@ async def api_settings(request: Request):
     S.settings = new
     S.pipeline.apply_settings(new, S.glossaries)
     return {"ok": True, "settings": new.model_dump(), "message": note}
+
+
+CLAUDE_CREDENTIALS = {  # kind → (variable in data/secrets.env, how it starts, name for messages)
+    "token": ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat", "subscription token"),
+    "api_key": ("ANTHROPIC_API_KEY", "sk-ant-api", "API key"),
+}
+
+
+@app.post("/api/claude-access")
+async def api_claude_access(request: Request):
+    """Save a Claude subscription token or API key for the translator. Write-only: it is never sent back."""
+    require_operator(request)
+    body: dict[str, Any] = await request.json()
+    kind, value = body.get("kind"), str(body.get("value") or "").strip()
+    if kind == "login":  # forget saved credentials; use this computer's own Claude login
+        save_secrets({})
+        message = "Removed. Claude uses this computer's own login again."
+    elif kind in CLAUDE_CREDENTIALS:
+        var, prefix, name = CLAUDE_CREDENTIALS[kind]
+        if not value.startswith(prefix) or not re.fullmatch(r"sk-ant-[A-Za-z0-9_-]{20,400}", value):
+            raise HTTPException(400, f"That doesn't look like a {name} (it starts with {prefix}…).")
+        save_secrets({var: value})  # one credential at a time
+        message = f"Saved the {name}. Claude restarts with it in a few seconds."
+    else:
+        raise HTTPException(400, "unknown kind")
+    for ch in S.pipeline.channels.values():
+        ch.translator.restart_claude()
+    log.info("Claude credentials changed: %s", claude_access())
+    return {"ok": True, "access": claude_access(), "message": message}
 
 
 @app.get("/api/glossary")

@@ -106,6 +106,20 @@
   }
   const saveSlow = debounce(saveSetting, 400);
 
+  // Claude credentials are write-only: the page only learns which kind is in use.
+  const ACCESS = { token: "Subscription token (saved on this server)", api_key: "API key (saved on this server)",
+                   login: "This computer's own Claude login" };
+  async function saveAccess(kind, value) {
+    try {
+      const r = await api("/api/claude-access", { kind, value });
+      $("credValue").value = "";
+      $("claudeAccess").textContent = ACCESS[r.access] || r.access;
+      log(r.message);
+    } catch (e) { log("Claude access: " + e.message, "error"); }
+  }
+  $("credSave").onclick = () => { const v = $("credValue").value.trim(); if (v) saveAccess($("credKind").value, v); };
+  $("credForget").onclick = () => { if (confirm("Remove the saved token or key and use this computer's own Claude login?")) saveAccess("login", ""); };
+
   $("device").onchange = () => { updateChannels(); saveSetting("audio", { input_device: $("device").value }); };
   $("channel").onchange = () => saveSetting("audio", { input_channel: +$("channel").value });
   $("gain").onchange = () => saveSetting("audio", { input_gain: +$("gain").value });
@@ -329,6 +343,12 @@
       return `${many ? `<small>${SHORT(code)}</small> ` : ""}${c.state}${c.state === "busy" && c.busy_for > 3 ? ` ${c.busy_for}s` : ""}`;
     });
     $("claudeState").innerHTML = parts.join(" · ") + ` <small>${esc((tl[0] || {}).claude?.model || "")}</small>`;
+    if (st.claude_access) {
+      const signedOut = tl.some((x) => /not logged in|invalid api key|authentication|oauth token/i.test(x.last_error || ""));
+      $("claudeAccess").textContent = (ACCESS[st.claude_access] || st.claude_access)
+        + (signedOut ? " — Claude is not signed in: paste a token or key below" : "");
+      cls($("claudeAccess"), signedOut ? "bad" : "");
+    }
     const states = tl.map((x) => x.claude.state);
     cls($("claudeState"), states.every((x) => x === "ready" || x === "busy") ? "ok" : states.some((x) => x === "starting") ? "warn"
       : states.every((x) => x === "disabled") ? "" : "bad");
