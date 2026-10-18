@@ -11,7 +11,9 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 mkdir -p logs samples data
 
 need() { command -v "$1" >/dev/null 2>&1; }
-cfg() { uv run --quiet python -c "from app.config import load_settings as l; s=l(); print($1)"; }
+# On Linux the CPU speech recognition and the Wolof voice come from optional package groups.
+if [[ "$(uname)" == "Darwin" ]]; then EXTRAS=(); else EXTRAS=(--extra linux --extra wolof); fi
+cfg() { uv run --quiet "${EXTRAS[@]}" python -c "from app.config import load_settings as l; s=l(); print($1)"; }
 ollama_up() { curl -s --max-time 1 "$(cfg 's.translate.ollama_url')/api/tags" >/dev/null 2>&1; }
 
 start_ollama() {
@@ -40,46 +42,62 @@ ensure_piper_voices() {
 }
 
 if [[ "${1:-}" == "--setup" ]]; then
-  echo "== 1/6 Homebrew packages"
-  if need brew; then
-    for pkg in uv ffmpeg ollama; do need "$pkg" || brew install "$pkg"; done
+  echo "== 1/6 System packages"
+  if [[ "$(uname)" == "Darwin" ]]; then
+    if need brew; then
+      for pkg in uv ffmpeg ollama; do need "$pkg" || brew install "$pkg"; done
+    else
+      echo "Homebrew not found — install it from https://brew.sh, then re-run ./start.sh --setup"; exit 1
+    fi
   else
-    echo "Homebrew not found — install it from https://brew.sh, then re-run ./start.sh --setup"; exit 1
+    need ffmpeg || { echo "Install ffmpeg first (e.g. sudo apt install -y ffmpeg)"; exit 1; }
+    need uv || { echo "Install uv first: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
   fi
 
   echo "== 2/6 Python packages"
-  uv sync
+  uv sync "${EXTRAS[@]}"
 
-  echo "== 3/6 Speech recognition model (Whisper large-v3-turbo, ~1.6 GB)"
-  uv run python -c "
+  echo "== 3/6 Speech recognition and Wolof voice models"
+  uv run "${EXTRAS[@]}" python -c "
+import sys
 from huggingface_hub import snapshot_download
 from app.config import load_settings
-snapshot_download(load_settings().stt.model)
+s = load_settings()
+if sys.platform == 'darwin':
+    snapshot_download(s.stt.model)
+else:
+    from faster_whisper import WhisperModel
+    WhisperModel(s.stt.faster_whisper_model, device='cpu', compute_type='int8')
+try:
+    import torch  # noqa: F401  (only if the Wolof voice is installed)
+    for m in ('bilalfaye/speecht5_tts-wolof', 'microsoft/speecht5_hifigan'):
+        snapshot_download(m)
+except ImportError:
+    pass
 print('ok')"
 
-  echo "== 4/6 Ollama fallback model"
-  start_ollama
-  MODEL="$(cfg 's.translate.ollama_model')"
-  ollama pull "$MODEL"
-
-  echo "== 5/6 French voices (Piper, plus any installed for 'say')"
-  ensure_piper_voices
-  say -v '?' | grep -E 'fr_(FR|CA|BE|CH)' || true
-  if ! say -v '?' | grep -E 'fr_' | grep -qiE 'premium|enhanced|améliorée'; then
-    echo "  → No Premium/Enhanced French voice yet. Install one: System Settings → Accessibility →"
-    echo "    Spoken Content → System voice → Manage Voices… → Français → Thomas or Audrey (Premium/Enhanced)."
+  echo "== 4/6 Ollama fallback model (optional)"
+  if need ollama; then
+    start_ollama
+    MODEL="$(cfg 's.translate.ollama_model')"
+    ollama pull "$MODEL"
+  else
+    echo "  Ollama not installed — skipping (French will rely on Claude only)."
   fi
+
+  echo "== 5/6 French voices"
+  ensure_piper_voices
+  if need say; then say -v '?' | grep -E 'fr_(FR|CA|BE|CH)' || true; fi
 
   echo "== 6/6 Claude Code"
   if need claude; then
     claude --version
-    echo "  Testing a one-line translation…"
-    echo '{"type":"user","message":{"role":"user","content":"Good morning, brothers and sisters."}}' | \
-      claude -p --input-format stream-json --output-format stream-json --verbose --tools "" \
-        --system-prompt "Translate to French. Output only the translation." 2>/dev/null | \
-      grep -o '"result":"[^"]*"' | head -1 || echo "  → claude did not answer. Run 'claude' once in Terminal to log in."
+    if [[ -s data/secrets.env ]]; then echo "  Using credentials from data/secrets.env"; else
+      echo "  No data/secrets.env — the translator uses this machine's Claude login (run 'claude' once)."
+      echo "  On a server: cp secrets.env.example data/secrets.env and add a token or API key."
+    fi
   else
-    echo "  → Claude Code is not installed (https://claude.com/claude-code). The server will use Ollama only."
+    echo "  → Claude Code is not installed: curl -fsSL https://claude.ai/install.sh | bash"
   fi
   echo
   echo "Setup done. Start with ./start.sh"
@@ -88,7 +106,7 @@ fi
 
 need uv || { echo "uv is missing — run ./start.sh --setup"; exit 1; }
 need ffmpeg || echo "warning: ffmpeg missing (needed for test recordings): brew install ffmpeg"
-uv sync --quiet
+uv sync --quiet "${EXTRAS[@]}"
 ensure_piper_voices
 start_ollama
-exec uv run --quiet python -m app "$@"
+exec uv run --quiet "${EXTRAS[@]}" python -m app "$@"

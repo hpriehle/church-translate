@@ -1,0 +1,18 @@
+# systemd unit for running the translation server on a Linux machine.
+# Copy to /etc/systemd/system/church-translate.service, adjust User/paths, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now church-translate
+[Unit]
+Description=Live church translation server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=translate
+WorkingDirectory=/home/translate/church-translate
+Environment=PATH=/home/translate/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/translate/.local/bin/uv run --extra linux --extra wolof python -m app --no-browser
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

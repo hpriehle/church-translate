@@ -308,6 +308,7 @@ class Translator:
                 "rotate_at": self.cfg.claude_session_turns,
                 "busy_for": round(a.busy_for, 1) if a else 0,
                 "rate_limit": a.rate_limit if a else None,
+                "auth": a.auth if a else "",
             },
             "lang": self.lang.code,
             "fallback": self.lang.fallback,

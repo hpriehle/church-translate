@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Sign in · Live translation</title>
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:#0e1013; color:#e4e6ea;
+         font:16px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; }
+  form { width:min(92vw, 360px); background:#161a1f; border:1px solid #262b33; border-radius:14px; padding:1.4rem; }
+  h1 { font-size:1.15rem; margin:0 0 .2rem; }
+  p { color:#8b93a1; font-size:.9rem; margin:0 0 1rem; }
+  input[type=password] { width:100%; box-sizing:border-box; font:inherit; font-size:1.1rem; padding:.7rem .8rem; border-radius:10px;
+         border:1px solid #333a44; background:#0b0d10; color:#e4e6ea; }
+  button { width:100%; margin-top:.9rem; font:inherit; font-weight:700; font-size:1.05rem; padding:.75rem; border:0; border-radius:10px;
+           background:#1d5a33; color:#fff; }
+  .err { color:#ff8a8a; font-size:.9rem; min-height:1.2em; margin-top:.6rem; }
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <h1>Live translation</h1>
+  <p>Password for the speaker and operator pages · Mot de passe</p>
+  <input type="password" name="password" autocomplete="current-password" autofocus required aria-label="Password">
+  <input type="hidden" name="next" id="next" value="/operator">
+  <button type="submit">Sign in</button>
+  <div class="err" id="err"></div>
+</form>
+<script>
+  const q = new URLSearchParams(location.search);
+  if (q.get("next") && q.get("next").startsWith("/")) document.getElementById("next").value = q.get("next");
+  if (q.get("error")) document.getElementById("err").textContent = q.get("error") === "busy"
+    ? "Too many attempts — wait a few minutes." : "Wrong password.";
+</script>
+</body>
+</html>

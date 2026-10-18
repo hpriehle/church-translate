@@ -89,6 +89,7 @@ class ClaudeSession:
         self.ready = False
         self.last_error = ""
         self.rate_limit: dict | None = None
+        self.auth = ""          # how Claude Code signed in, as it reports it (e.g. ANTHROPIC_API_KEY)
         self._last_cost_total = 0.0
         self._reader: asyncio.Task | None = None
         self._stderr: asyncio.Task | None = None
@@ -120,6 +121,10 @@ class ClaudeSession:
             raise RuntimeError("the `claude` CLI is not installed")
         self.workdir.mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE") and k != "CLAUDE_CODE_ENTRYPOINT"}
+        # A token or API key in data/secrets.env takes precedence over the machine's Claude login.
+        from ..config import load_secrets
+
+        env.update(load_secrets())
         self.proc = await asyncio.create_subprocess_exec(
             *self._command(binary), cwd=str(self.workdir), env=env,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -188,6 +193,8 @@ class ClaudeSession:
                 except json.JSONDecodeError:
                     continue
                 etype = ev.get("type")
+                if etype == "system" and ev.get("subtype") == "init":
+                    self.auth = ev.get("apiKeySource") or self.auth
                 if etype == "result":
                     self._on_result(ev)
                 elif etype == "rate_limit_event":

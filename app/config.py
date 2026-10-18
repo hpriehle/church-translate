@@ -14,6 +14,10 @@ CONFIG_PATH = ROOT / "config.toml"
 # Per platform, because the project folder may be synced between a Mac and a Linux box
 # (e.g. Syncthing) and each needs its own engines/voices: overrides.darwin.json, overrides.linux.json.
 OVERRIDES_PATH = ROOT / "data" / f"overrides.{sys.platform}.json"
+# Claude credentials for the translator (never committed): CLAUDE_CODE_OAUTH_TOKEN (from
+# `claude setup-token`, uses a Claude subscription) or ANTHROPIC_API_KEY (pay per use).
+SECRETS_PATH = ROOT / "data" / "secrets.env"
+SECRET_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 GLOSSARY_PATH = ROOT / "glossary.json"
 LOG_DIR = ROOT / "logs"
 SAMPLES_DIR = ROOT / "samples"
@@ -118,6 +122,22 @@ def tts_for(settings: "Settings", code: str) -> TtsCfg:
         return settings.tts
     v = settings.voices.get(code) or DEFAULT_VOICES.get(code) or VoiceCfg(engine="piper", voice="")
     return TtsCfg(engine=v.engine, voice=v.voice, rate=settings.tts.rate, volume=settings.tts.volume)
+
+
+def load_secrets(path: Path = SECRETS_PATH) -> dict[str, str]:
+    """KEY=value lines from data/secrets.env (only the Claude credential keys are used)."""
+    out: dict[str, str] = {}
+    if not path.exists():
+        return out
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k, v = k.strip(), v.strip().strip('"').strip("'")
+        if k in SECRET_KEYS and v:
+            out[k] = v
+    return out
 
 
 def _deep_merge(base: dict, extra: dict) -> dict:

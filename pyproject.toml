@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Only for developing/testing on a non-Mac machine (CPU Whisper).
-dev-linux = ["faster-whisper>=1.0"]
+# Linux / non-Mac machines: speech recognition on the CPU (faster-whisper).
+linux = ["faster-whisper>=1.0"]
 wolof = ["torch>=2.4", "transformers>=4.45", "sentencepiece>=0.2"]
 
 [dependency-groups]

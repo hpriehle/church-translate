@@ -328,3 +328,32 @@ def test_mixer_never_plays_stale_audio():
     for _ in range(3):
         m._next_frame()
     assert skipped == [1] and aired == [2]
+
+
+# ------------------------------------------------------------------ sign-in
+
+def test_operator_sign_in_rules():
+    from app import main
+    from app.config import Settings
+
+    main.S.settings = Settings.model_validate({"server": {"operator_pin": "s3cret"}})
+    main.S.local_addrs = {"127.0.0.1"}
+    tunnel = {"cf-connecting-ip": "203.0.113.9"}
+    ok = lambda host, headers=None, query=None, cookies=None: main._is_operator(host, headers or {}, query or {}, cookies or {})
+    assert ok("127.0.0.1")                                   # on the machine itself
+    assert not ok("127.0.0.1", tunnel)                       # via the tunnel: never "local"
+    assert ok("127.0.0.1", tunnel, {"key": "s3cret"})       # password in the link still works
+    assert not ok("127.0.0.1", tunnel, {"key": "nope"})
+    token = main._cookie_token("s3cret")
+    assert token != "s3cret" and ok("203.0.113.9", tunnel, cookies={"op_pin": token})
+    assert not ok("203.0.113.9", tunnel, cookies={"op_pin": "s3cret"})   # old plain cookies are refused
+    main.S.settings = Settings.model_validate({"server": {"operator_pin": ""}})
+    assert not ok("203.0.113.9", tunnel, {"key": ""})                   # no password set: nobody remote
+
+
+def test_secrets_file(tmp_path):
+    from app.config import load_secrets
+
+    f = tmp_path / "secrets.env"
+    f.write_text("# comment\nCLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-abc'\nOTHER=ignored\nANTHROPIC_API_KEY=\n")
+    assert load_secrets(f) == {"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-abc"}

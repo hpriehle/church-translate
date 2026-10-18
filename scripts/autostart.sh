@@ -12,8 +12,9 @@
 #   scripts/autostart.sh restart   restart the server from Terminal
 #   scripts/autostart.sh status
 set -euo pipefail
-LABEL=com.clntacq.church-translate
+LABEL="${CT_LABEL:-org.church-translate}"
 TUNNEL_LABEL=$LABEL.tunnel
+LEGACY_LABELS=(com.clntacq.church-translate com.clntacq.church-translate.tunnel)   # earlier names
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 TUNNEL_PLIST="$HOME/Library/LaunchAgents/$TUNNEL_LABEL.plist"
@@ -33,6 +34,18 @@ load() {  # load <label> <plist>
   done
   [[ -n "$ok" ]] || { echo "Could not start $1 — try: launchctl bootstrap $DOMAIN $2"; return 1; }
   launchctl enable "$DOMAIN/$1"
+}
+
+remove_legacy() {
+  for l in "${LEGACY_LABELS[@]}"; do
+    [[ "$l" == "$LABEL" || "$l" == "$TUNNEL_LABEL" ]] && continue
+    if launchctl print "$DOMAIN/$l" >/dev/null 2>&1 || [[ -f "$HOME/Library/LaunchAgents/$l.plist" ]]; then
+      launchctl bootout "$DOMAIN/$l" 2>/dev/null || true
+      for _ in $(seq 1 20); do launchctl print "$DOMAIN/$l" >/dev/null 2>&1 || break; sleep 0.5; done
+      rm -f "$HOME/Library/LaunchAgents/$l.plist"
+      echo "Removed the earlier service $l"
+    fi
+  done
 }
 
 install_server() {
@@ -95,11 +108,12 @@ PLIST_END
 }
 
 case "${1:-status}" in
-  install) install_server; install_tunnel ;;
-  tunnel)  install_tunnel ;;
+  install) remove_legacy; install_server; install_tunnel ;;
+  tunnel)  remove_legacy; install_tunnel ;;
   remove)
-    for l in "$TUNNEL_LABEL" "$LABEL"; do launchctl bootout "$DOMAIN/$l" 2>/dev/null || true; done
+    for l in "$TUNNEL_LABEL" "$LABEL" "${LEGACY_LABELS[@]}"; do launchctl bootout "$DOMAIN/$l" 2>/dev/null || true; done
     rm -f "$PLIST" "$TUNNEL_PLIST"
+    for l in "${LEGACY_LABELS[@]}"; do rm -f "$HOME/Library/LaunchAgents/$l.plist"; done
     echo "Removed. Start the server with ./start.sh when you need it."
     ;;
   restart) launchctl kickstart -k "$DOMAIN/$LABEL" ;;

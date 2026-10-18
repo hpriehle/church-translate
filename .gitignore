@@ -9,3 +9,6 @@ samples/*
 .DS_Store
 web/voices/*.mp3
 models/piper/
+.syncthing.*
+.stfolder/
+.stversions/

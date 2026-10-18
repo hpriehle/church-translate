@@ -1,8 +1,13 @@
-# Live French translation for church meetings
+# Live translation for church meetings (English → French and Wolof)
 
-English talks in → French captions and French audio out to phones on the church Wi-Fi.
-Listeners scan a QR code, tap the sound button, and hear the French voice (with earphones)
-while live captions appear. It's live only: the one control is mute/unmute, and there's no history to scroll back through. Everything runs on one Apple Silicon Mac. The phones don't need internet.
+English talks in → live French and Wolof captions and voice out to listeners' phones (or the
+chapel's headset transmitter). Listeners scan a QR code, pick a language, tap the sound button and
+listen with earphones. It's live only: the one control is mute/unmute, with no history to scroll
+back through.
+
+It runs on an Apple Silicon Mac (best: GPU speech recognition) or on a Linux server, where the
+speaker uses a phone's browser as the microphone. Translation uses Claude, through your own Claude
+subscription or an Anthropic API key (see [Claude access](#claude-access)).
 
 ```
  mic / soundboard ─► VAD chunks (3–8 s, cut on pauses) ─► Whisper large-v3-turbo (mlx)
@@ -37,6 +42,55 @@ while live captions appear. It's live only: the one control is mute/unmute, and 
 
 To pull the fallback model by hand: `ollama pull mistral-small3.2:24b`. A lighter option is
 `ollama pull gemma3:12b`; set it on the operator page or in `config.toml`.
+
+## Claude access
+
+Each installation needs its own Claude access. Pick one:
+
+- **A Claude subscription (Pro/Max).**
+  - **On a Mac you use:** sign in once with `claude` in Terminal. Nothing else is needed.
+  - **On a server, or a Mac running the background service:** run `claude setup-token` on any
+    computer with a browser, then put the token it prints in `data/secrets.env`:
+    `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…`. It counts against that subscription's plan limits.
+- **An Anthropic API key** (pay per use, roughly $1.50–2 per language per hour of speech with
+  caching). Put it in `data/secrets.env` as `ANTHROPIC_API_KEY=sk-ant-…`. This is the better choice
+  for an organisation, or when several buildings run their own copy.
+
+`data/secrets.env` is never committed (see `secrets.env.example`). If both lines are present,
+Claude Code uses the API key. The operator page shows which sign-in the translator is using.
+
+## Running on a Linux server (no laptop at church)
+
+On a server, the speaker opens **/speak** on a phone (its own microphone, or one plugged into it)
+and keeps that page open with the screen on. Listeners use the public link as usual.
+
+```bash
+git clone https://github.com/hpriehle/church-translate && cd church-translate
+sudo apt install -y ffmpeg && curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -fsSL https://claude.ai/install.sh | bash                 # Claude Code
+uv sync --extra linux --extra wolof                        # CPU Whisper + Wolof voice
+./start.sh --setup                                             # models and voices (skips Mac-only steps)
+cp secrets.env.example data/secrets.env && nano data/secrets.env
+```
+
+Then create `data/overrides.linux.json`:
+
+```json
+{"server": {"host": "127.0.0.1", "port": 8420, "operator_pin": "choose-a-password",
+            "public_url": "https://your.domain/", "open_browser": false},
+ "stt": {"engine": "faster-whisper", "faster_whisper_model": "small.en"},
+ "tts": {"engine": "piper", "voice": "fr_FR-tom-medium"}}
+```
+
+Run it with systemd (`scripts/church-translate.service.example`), and publish it with a Cloudflare
+tunnel pointing at `http://127.0.0.1:8420`. The **password** (`operator_pin`) protects the speaker
+and operator pages: people go to `/speak` or `/operator` and type it once.
+
+Notes for servers without a GPU:
+- Speech recognition uses a smaller Whisper on the processor, so there are a few more mistakes
+  with names than on a Mac.
+- The local Ollama fallback is too slow without a GPU, so leave it off: French then relies on Claude
+  like Wolof does.
 
 ## Keeping it running (Mac)
 

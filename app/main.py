@@ -90,7 +90,7 @@ def _code_version() -> str:
 def _managed_by() -> str:
     import os
 
-    if os.environ.get("XPC_SERVICE_NAME", "").startswith("com.clntacq."):
+    if os.environ.get("XPC_SERVICE_NAME", "").startswith(("org.church-translate", "com.clntacq.")):
         return "launchd (starts at login)"
     if os.environ.get("INVOCATION_ID"):
         return "systemd"
@@ -247,17 +247,31 @@ def page(path: Path) -> HTMLResponse:
 _PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "x-forwarded-for", "x-real-ip", "forwarded")
 
 
+def _cookie_token(pin: str) -> str:
+    """What the browser keeps after signing in: a fingerprint of the password, not the password."""
+    import hashlib
+
+    return hashlib.sha256(f"church-translate:{pin}".encode()).hexdigest()
+
+
 def _is_operator(host: str | None, headers, query, cookies) -> bool:
-    """Operator = a browser on this machine, or anyone with the PIN/key.
+    """Operator = a browser on this machine, or anyone with the password (operator_pin).
 
     Requests relayed by a tunnel/reverse proxy also come from localhost, so they never count as local.
     """
+    import hmac
+
     proxied = any(h in headers for h in _PROXY_HEADERS)
     if not proxied and host and host.split("%")[0] in S.local_addrs:
         return True
     want = S.settings.server.operator_pin
-    given = query.get("key") or query.get("pin") or cookies.get("op_pin")
-    return bool(want) and given == want
+    if not want:
+        return False
+    given = query.get("key") or query.get("pin")
+    if given and hmac.compare_digest(given, want):
+        return True
+    cookie = cookies.get("op_pin") or ""
+    return bool(cookie) and hmac.compare_digest(cookie, _cookie_token(want))
 
 
 def require_operator(request: Request) -> None:
@@ -266,12 +280,62 @@ def require_operator(request: Request) -> None:
         raise HTTPException(403, "Operator pages are only available on the computer running the server (or with the key).")
 
 
+def _set_login_cookie(request: Request, resp: Response) -> Response:
+    resp.set_cookie("op_pin", _cookie_token(S.settings.server.operator_pin), httponly=True, samesite="lax",
+                    max_age=30 * 86400, secure=request.headers.get("x-forwarded-proto") == "https")
+    return resp
+
+
 def _remember_key(request: Request, resp: Response) -> Response:
     key = request.query_params.get("key") or request.query_params.get("pin")
     if key and key == S.settings.server.operator_pin:
-        resp.set_cookie("op_pin", key, httponly=True, samesite="lax", max_age=30 * 86400,
-                        secure=request.headers.get("x-forwarded-proto") == "https")
+        _set_login_cookie(request, resp)
     return resp
+
+
+def _operator_page(request: Request, path: Path) -> Response:
+    """An operator page, or the sign-in page if this browser isn't signed in yet."""
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+
+    if not _is_operator(request.client.host if request.client else None, request.headers,
+                        request.query_params, request.cookies):
+        return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
+    return _remember_key(request, page(path))
+
+
+_login_fails: dict[str, list[float]] = {}
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return page(WEB_DIR / "login.html")
+
+
+@app.post("/login")
+async def login(request: Request):
+    import hmac
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import parse_qs, quote
+
+    form = parse_qs((await request.body()).decode(errors="replace"))
+    password = (form.get("password") or [""])[0]
+    nxt = (form.get("next") or ["/operator"])[0]
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        nxt = "/operator"
+    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    now = time.time()
+    fails = [t for t in _login_fails.get(ip, []) if now - t < 900]
+    if len(fails) >= 10:
+        return RedirectResponse(f"/login?error=busy&next={quote(nxt)}", status_code=303)
+    want = S.settings.server.operator_pin
+    if want and hmac.compare_digest(password, want):
+        _login_fails.pop(ip, None)
+        return _set_login_cookie(request, RedirectResponse(nxt, status_code=303))
+    fails.append(now)
+    _login_fails[ip] = fails
+    await asyncio.sleep(min(5, len(fails)))  # slow down guessing
+    return RedirectResponse(f"/login?error=1&next={quote(nxt)}", status_code=303)
 
 
 # ------------------------------------------------------------------ listener side
@@ -365,14 +429,12 @@ async def health():
 
 @app.get("/operator", response_class=HTMLResponse)
 async def operator_page(request: Request):
-    require_operator(request)
-    return _remember_key(request, page(WEB_DIR / "operator" / "index.html"))
+    return _operator_page(request, WEB_DIR / "operator" / "index.html")
 
 
 @app.get("/speak", response_class=HTMLResponse)
 async def speak_page(request: Request):
-    require_operator(request)
-    return _remember_key(request, page(WEB_DIR / "speak" / "index.html"))
+    return _operator_page(request, WEB_DIR / "speak" / "index.html")
 
 
 @app.websocket("/ws/speak")
@@ -415,8 +477,7 @@ async def ws_speak(ws: WebSocket):
 
 @app.get("/print", response_class=HTMLResponse)
 async def print_page(request: Request):
-    require_operator(request)
-    return page(WEB_DIR / "print.html")
+    return _operator_page(request, WEB_DIR / "print.html")
 
 
 @app.websocket("/ws/operator")
