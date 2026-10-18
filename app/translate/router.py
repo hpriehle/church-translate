@@ -41,7 +41,12 @@ def _swallow(task: asyncio.Task) -> None:
         task.exception()
 
 
-NO_FALLBACK_TIMEOUT_S = 15.0
+# Without a fallback (Wolof, or mode "claude") a late sentence beats a dropped one: wait up to
+# NO_FALLBACK_WAIT_S for Claude to finish an earlier late reply (or to finish starting), then up to
+# NO_FALLBACK_TIMEOUT_S for this reply. The channel merges sentences that queue up meanwhile, and a
+# session stuck for HUNG_AFTER_S is replaced.
+NO_FALLBACK_TIMEOUT_S = 30.0
+NO_FALLBACK_WAIT_S = 30.0
 
 
 class Translator:
@@ -140,6 +145,15 @@ class Translator:
                 self.standby = None
         self._maintain()
 
+    def _claude_coming(self) -> bool:
+        """Claude can't take a request yet but soon will: busy with a reply, or a session is starting."""
+        if time.monotonic() < self._paused_until:
+            return False
+        a = self.active
+        if a and a.alive and a.ready and not a.busy:
+            return False
+        return bool((a and a.alive and a.busy) or self._standby_task or self.standby)
+
     def restart_claude(self) -> None:
         """The Claude credentials changed: start a fresh session now (it reads data/secrets.env as it starts)."""
         self._restart_after = 0.0
@@ -210,6 +224,12 @@ class Translator:
         claude_task: asyncio.Task | None = None
         s = self.active
         claude_allowed = self.has_claude and (self.cfg.mode != "ollama" or not self.uses_ollama)
+        if claude_allowed and not self.uses_ollama:
+            deadline = t0 + NO_FALLBACK_WAIT_S
+            while self._claude_coming() and time.monotonic() < deadline:
+                await asyncio.sleep(0.1)
+                self._maintain()
+            s = self.active
         if claude_allowed:
             if time.monotonic() < self._paused_until:
                 note = "claude paused after errors"

@@ -378,3 +378,16 @@ def test_mms_wolof_spelling():
 
     assert mms_wolof_text("Xam naa ñu dëkk ci Yàlla, Mbóotaay") == "kham naa nu dekk ci yalla, mbootaay"
     assert mms_wolof_text("naqari") == "nakari"
+
+
+async def test_no_fallback_waits_for_busy_claude_instead_of_dropping():
+    from app.languages import LANGUAGES
+
+    t = Translator(TranslateCfg(), load_glossary(LANGUAGES["wo"].glossary_file), Path("/tmp/ct-test"), LANGUAGES["wo"])
+    t.has_claude = True
+    t.active = FakeSession(delay=0.3)
+    first = asyncio.create_task(t.translate("one"))
+    await asyncio.sleep(0.05)              # the first reply is still on its way
+    r = await t.translate("two")
+    assert r.engine == "claude" and r.text and "busy" not in r.note
+    assert (await first).engine == "claude"
