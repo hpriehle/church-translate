@@ -32,6 +32,7 @@ class ServerCfg(BaseModel):
     lan_ip: str = ""
     public_url: str = ""          # e.g. https://transcription.example.com/ when served through a tunnel
     use_public_url: bool = True   # listener link/QR: the public URL (if set) or the local-network address
+    tunnel_metrics: str = "127.0.0.1:20241"  # cloudflared --metrics address, for the "Public link" status
     open_browser: bool = True
 
 

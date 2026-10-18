@@ -123,7 +123,7 @@ async def tunnel_loop() -> None:
     async with httpx.AsyncClient(timeout=2) as c:
         while True:
             try:
-                r = await c.get("http://127.0.0.1:20241/ready")
+                r = await c.get(f"http://{S.settings.server.tunnel_metrics}/ready")
                 n = int((r.json() or {}).get("readyConnections") or 0)
                 S.tunnel = {"state": "connected" if r.status_code == 200 and n else "offline", "connections": n}
             except Exception:
