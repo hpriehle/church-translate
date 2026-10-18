@@ -37,8 +37,8 @@ flush_pause_ms = 800    # a pause this long sends whatever was said (even < min_
 min_voiced_s = 0.45     # shorter chunks are dropped as noise (coughs, clicks)
 
 [stt]
-# "mlx" on Apple Silicon. "faster-whisper" only for development on other machines.
-engine = "mlx"
+# "auto" = mlx-whisper on Apple Silicon Macs, faster-whisper (CPU) on Linux and other machines.
+engine = "auto"
 model = "mlx-community/whisper-large-v3-turbo"
 faster_whisper_model = "small.en"
 language = "en"

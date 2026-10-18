@@ -54,7 +54,7 @@ class VadCfg(BaseModel):
 
 
 class SttCfg(BaseModel):
-    engine: str = "mlx"
+    engine: str = "auto"
     model: str = "mlx-community/whisper-large-v3-turbo"
     faster_whisper_model: str = "small.en"
     language: str = "en"

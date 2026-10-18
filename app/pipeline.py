@@ -18,7 +18,7 @@ from .channel import Channel
 from .chunker import Chunk, Chunker, SileroVad
 from .config import LOG_DIR, Settings, tts_for
 from .metrics import ChunkRecord, LangResult, MetricsLog
-from .stt import Transcriber, build_prompt
+from .stt import Transcriber, build_prompt, resolve_engine
 from .translate.prompts import whisper_hints
 
 log = logging.getLogger("pipeline")
@@ -251,7 +251,8 @@ class Pipeline:
 
     def _run_info(self) -> dict[str, Any]:
         st = self.settings
-        stt_model = st.stt.model if st.stt.engine == "mlx" else st.stt.faster_whisper_model
+        stt_engine = resolve_engine(st.stt.engine)
+        stt_model = st.stt.model if stt_engine == "mlx" else st.stt.faster_whisper_model
         langs = {}
         for code, ch in self.channels.items():
             u = ch.translator.usage()
@@ -261,7 +262,7 @@ class Pipeline:
                            "fallback": ch.lang.fallback, "usage": usage}
         return {
             "source": self.source_label,
-            "stt": f"{st.stt.engine} {stt_model}",
+            "stt": f"{stt_engine} {stt_model}",
             "translator": (f"Claude {st.translate.claude_model} (effort {st.translate.claude_effort}), French fallback "
                            f"after {st.translate.claude_timeout_s:g}s to Ollama {st.translate.ollama_model}"),
             "languages": langs,

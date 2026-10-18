@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import platform
 import re
+import sys
 import time
 from dataclasses import dataclass
 
@@ -47,10 +49,17 @@ def _repetitive(text: str) -> bool:
     return False
 
 
+def resolve_engine(engine: str) -> str:
+    """"auto": mlx-whisper on Apple Silicon Macs, faster-whisper (CPU) everywhere else."""
+    if engine == "auto":
+        return "mlx" if sys.platform == "darwin" and platform.machine() == "arm64" else "faster-whisper"
+    return engine
+
+
 class Transcriber:
     def __init__(self, cfg: SttCfg):
         self.cfg = cfg
-        self.engine = cfg.engine
+        self.engine = resolve_engine(cfg.engine)
         self._fw_model = None
         self.ready = False
         self.load_s = 0.0
