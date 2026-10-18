@@ -70,7 +70,7 @@
     renderTableHead();
     $("rate").value = s.tts.rate; $("rateVal").textContent = s.tts.rate + " wpm";
     $("volume").value = s.tts.volume; $("volVal").textContent = Math.round(s.tts.volume * 100) + "%";
-    $("mode").value = s.translate.mode === "ollama" ? "ollama" : "auto";
+    $("mode").value = ["ollama", "claude"].includes(s.translate.mode) ? s.translate.mode : "auto";
     $("claudeModel").value = s.translate.claude_model;
     $("timeout").value = s.translate.claude_timeout_s;
     $("ollamaModel").value = s.translate.ollama_model;

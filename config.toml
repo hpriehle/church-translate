@@ -44,7 +44,8 @@ faster_whisper_model = "small.en"
 language = "en"
 
 [translate]
-# "auto" = Claude with Ollama fallback, "claude" = same, "ollama" = local only.
+# "auto" = Claude with Ollama fallback, "claude" = Claude only (servers without Ollama),
+# "ollama" = local only.
 mode = "auto"
 claude_model = "opus"
 claude_effort = "low"

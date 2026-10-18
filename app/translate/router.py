@@ -70,7 +70,7 @@ class Translator:
     # ------------------------------------------------------------ lifecycle
     @property
     def uses_ollama(self) -> bool:
-        return self.lang.fallback == "ollama"
+        return self.lang.fallback == "ollama" and self.cfg.mode != "claude"
 
     async def start(self) -> None:
         # The 15 GB fallback model is loaded when a run starts (or now, if Ollama is the translator),
@@ -107,7 +107,7 @@ class Translator:
         while True:
             try:
                 await self.ollama.keep_warm(self.system_prompt,
-                                            active=lambda: time.monotonic() - self.last_activity < 7200)
+                                            active=lambda: self.uses_ollama and time.monotonic() - self.last_activity < 7200)
             except asyncio.CancelledError:
                 raise
             except Exception:  # pragma: no cover
