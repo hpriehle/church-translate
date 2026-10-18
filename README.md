@@ -293,3 +293,8 @@ web/print.html         printable QR sign
 scripts/               load_test.py, browser_check.mjs, flaky_proxy.py
 tests/                 uv run pytest
 ```
+
+## License
+
+MIT (see `LICENSE`). Models and voices downloaded at setup have their own licenses: see
+`THIRD_PARTY_NOTICES.md`.
