@@ -46,13 +46,22 @@ class Channel:
         self.avg_clip_s = 4.0
         self.avg_tts_s = 0.5
         self.recording = None
+        self.on = True           # translating into this language (switched live on the operator page)
+        self._started = False
         self._tasks: list[asyncio.Task] = []
         mixer.on_air = self._on_air
         mixer.on_skip = self._on_skip
         mixer.max_age_s = pipeline.settings.backlog.drop_above_s + 5
 
     def start_tasks(self) -> None:
-        self._tasks = [asyncio.create_task(self._mt_stage()), asyncio.create_task(self._tts_stage())]
+        self._tasks += [asyncio.create_task(self._mt_stage()), asyncio.create_task(self._tts_stage())]
+
+    def activate(self) -> None:
+        """Start this language's Claude session and load its voice, the first time it is switched on."""
+        if self._started:
+            return
+        self._started = True
+        self._tasks += [asyncio.create_task(self.translator.start()), asyncio.create_task(self.tts.load())]
 
     # ------------------------------------------------------------ state
     def total_backlog(self) -> float:
@@ -65,6 +74,7 @@ class Channel:
     def status(self) -> dict[str, Any]:
         return {
             "name": self.lang.name,
+            "on": self.on,
             "backlog_s": round(self.mixer.backlog_s, 1),
             "pipeline_backlog_s": round(self.total_backlog(), 1),
             "queues": {"translate": self.mt_q.qsize(), "tts": self.tts_q.qsize()},

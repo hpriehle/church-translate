@@ -24,7 +24,7 @@ from .broadcast.stream import Mp3Broadcaster
 from .channel import Channel
 from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
-from .languages import LANGUAGES, enabled
+from .languages import LANGUAGES
 from .pipeline import Pipeline
 from .stt import Transcriber
 from .translate.router import Translator
@@ -62,13 +62,33 @@ S = State()
 
 
 def channel(code: str | None = None) -> Channel:
-    """The channel for a language code; the first (default) language if unknown/omitted."""
+    """The channel for a language code (even if switched off, so its phones resume when it's back on);
+    the first language being translated if the code is unknown or omitted."""
     chans = S.pipeline.channels
-    return chans.get(code or "") or next(iter(chans.values()))
+    return chans.get(code or "") or next(iter(S.pipeline.on_channels.values()), None) or next(iter(chans.values()))
 
 
 def languages_public() -> list[dict[str, str]]:
-    return [{"code": c, "name": ch.lang.name} for c, ch in S.pipeline.channels.items()]
+    """The languages listeners can pick: the ones being translated right now."""
+    return [{"code": c, "name": ch.lang.name} for c, ch in S.pipeline.on_channels.items()]
+
+
+def set_languages(codes: list[str]) -> list[str]:
+    """Switch languages on/off live, remember the choice, and tell every phone and the operator."""
+    on = [c for c in S.pipeline.channels if c in codes]
+    for c, ch in S.pipeline.channels.items():
+        was, ch.on = ch.on, c in on
+        if ch.on:
+            ch.activate()
+        if ch.on != was:
+            ch.hub.publish({"type": "lang_state", "on": ch.on})
+            log.info("%s translation switched %s", ch.lang.name, "on" if ch.on else "off")
+    S.settings.languages = on
+    save_override("languages", on)
+    for ch in S.pipeline.channels.values():
+        ch.hub.publish({"type": "languages", "languages": languages_public()})
+    S.operator.publish(full_status())
+    return on
 
 
 def listener_url() -> str:
@@ -107,8 +127,9 @@ def full_status() -> dict[str, Any]:
         "time": time.time(),
         "server": server_info(),
         "pipeline": S.pipeline.status(),
-        "translate": {c: ch.translator.status() for c, ch in S.pipeline.channels.items()},
+        "translate": {c: ch.translator.status() for c, ch in S.pipeline.on_channels.items()},
         "languages": languages_public(),
+        "language_switches": [{"code": c, "name": ch.lang.name, "on": ch.on} for c, ch in S.pipeline.channels.items()],
         "listeners": {"stream": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
                       "captions": sum(ch.hub.count for ch in S.pipeline.channels.values())},
         "listener_url": listener_url(),
@@ -151,7 +172,8 @@ async def lifespan(app: FastAPI):
     S.version = _code_version()
     S.local_addrs = netinfo.local_addresses()
     st = S.settings
-    langs = enabled(st.languages)
+    # A channel for every language; the ones in settings.languages are translated (switchable live).
+    langs = list(LANGUAGES.values())
     S.glossaries = {lang.code: load_glossary(lang.glossary_file) for lang in langs}
     S.operator = Hub("operator", queue_size=2000)
     S.pipeline = Pipeline(st, S.glossaries, S.operator, Transcriber(st.stt))
@@ -163,14 +185,16 @@ async def lifespan(app: FastAPI):
         m.volume = st.tts.volume
         tr = Translator(st.translate, S.glossaries[lang.code], ROOT / "data" / "claude-workdir", lang)
         tts = TtsRunner(tts_for(st, lang.code), sr, lazy=True)
-        S.pipeline.add_channel(Channel(S.pipeline, lang, tr, tts, m, b, Hub(f"listen-{lang.code}", history=300, queue_size=400)))
+        ch = Channel(S.pipeline, lang, tr, tts, m, b, Hub(f"listen-{lang.code}", history=300, queue_size=400))
+        ch.on = lang.code in st.languages
+        S.pipeline.add_channel(ch)
     S.pipeline.start_tasks()
     bg = [asyncio.create_task(status_loop()), asyncio.create_task(S.pipeline.load_stt()),
           asyncio.create_task(tunnel_loop())]
     for ch in S.pipeline.channels.values():
         ch.mixer.start()
-        bg.append(asyncio.create_task(ch.translator.start()))
-        bg.append(asyncio.create_task(ch.tts.load()))
+        if ch.on:  # a language switched off stays unloaded until it is switched on
+            ch.activate()
 
     if S.exit_when_done:
         def _drained():
@@ -182,7 +206,7 @@ async def lifespan(app: FastAPI):
             # Give Claude/Ollama/STT a moment so the first chunks aren't measured against cold models.
             t0 = time.monotonic()
             while time.monotonic() - t0 < 120:
-                chans = S.pipeline.channels.values()
+                chans = S.pipeline.on_channels.values()
                 claude_ok = all(ch.translator.status()["claude"]["state"] in ("ready", "disabled", "missing") for ch in chans)
                 ollama_ok = all(not ch.translator.uses_ollama or S.settings.translate.mode != "ollama"
                                 or ch.translator.ollama.warm or not ch.translator.ollama.available for ch in chans)
@@ -403,7 +427,7 @@ async def ws_listen(ws: WebSocket):
     same = hello.get("boot") == S.started and hello.get("session") == session and hello.get("lang") == ch.code
     last = int(hello.get("last_seq") or 0) if same else 0
     init = {"type": "init", "boot": S.started, "session": session, "live": S.pipeline.running,
-            "lang": ch.code, "languages": languages_public(),
+            "lang": ch.code, "on": ch.on, "languages": languages_public(),
             "server_time": time.time(), "history": ch.hub.replay_after(last) if session else []}
     await ch.hub.serve(ws, [init])
 
@@ -423,7 +447,7 @@ async def api_qr(request: Request, text: str):
 @app.get("/health")
 async def health():
     return {"ok": True, "listeners": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
-            "running": S.pipeline.running, "started": S.started, "languages": list(S.pipeline.channels)}
+            "running": S.pipeline.running, "started": S.started, "languages": list(S.pipeline.on_channels)}
 
 
 # ------------------------------------------------------------------ operator side
@@ -554,12 +578,8 @@ async def api_settings(request: Request):
                     data["voices"][code] = VoiceCfg(**v).model_dump()
             save_override("voices", data["voices"])
             continue
-        if section == "languages":  # takes effect after a restart
-            codes = [c for c in values if c in LANGUAGES]
-            if codes:
-                data["languages"] = codes
-                save_override("languages", codes)
-                note = "Languages saved — restart the server to apply."
+        if section == "languages":  # live: each language can be switched on/off at any time
+            data["languages"] = set_languages([c for c in values if c in LANGUAGES])
             continue
         allowed = EDITABLE.get(section, set())
         clean = {k: v for k, v in values.items() if k in allowed}

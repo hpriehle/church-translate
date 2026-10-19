@@ -72,3 +72,11 @@ select.inline { display:inline-block; width:auto; margin-left:.5rem; padding:.15
 #chunks td.lang { width:auto; }
 #chunks td.lang .meta { display:block; font-size:11px; color:var(--mute); margin-top:.2rem; }
 .v small { font-size:12px; color:var(--mute); font-weight:500; }
+.switches { margin:.8rem 0 .2rem; }
+.switch { display:flex; align-items:center; justify-content:space-between; gap:.6rem; margin:.45rem 0; color:var(--fg); font-size:14px; cursor:pointer; }
+.switch input { appearance:none; -webkit-appearance:none; width:42px; height:24px; border-radius:12px; background:#3a414b; position:relative; cursor:pointer; flex:none; margin:0; transition:background .15s; }
+.switch input::after { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:transform .15s; }
+.switch input:checked { background:#2a7a47; }
+.switch input:checked::after { transform:translateX(18px); }
+.switch .state { color:var(--mute); font-size:12px; margin-left:auto; margin-right:.2rem; }
+

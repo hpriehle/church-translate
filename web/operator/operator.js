@@ -148,19 +148,42 @@
       box.appendChild(lab);
     }
   }
+  // One live on/off switch per language (no restart needed).
   function renderLangChecks(s) {
     const box = $("langChecks");
     box.innerHTML = "";
     for (const l of state.all_languages || langs) {
+      const on = s.languages.includes(l.code);
       const lab = document.createElement("label");
-      lab.innerHTML = `<input type="checkbox" value="${l.code}"${s.languages.includes(l.code) ? " checked" : ""}> ${esc(l.name)}`;
-      lab.querySelector("input").onchange = async () => {
+      lab.className = "switch";
+      lab.innerHTML = `<span>${esc(l.name)}</span><span class="state">${on ? "on" : "off"}</span>`
+        + `<input type="checkbox" value="${l.code}"${on ? " checked" : ""} aria-label="Translate into ${esc(l.name)}">`;
+      const input = lab.querySelector("input");
+      input.onchange = async () => {
         const codes = [...box.querySelectorAll("input:checked")].map((x) => x.value);
-        if (!codes.length) { lab.querySelector("input").checked = true; return; }
-        try { const r = await api("/api/settings", { languages: codes }); log(r.message || "Languages saved"); }
-        catch (e) { log("Languages: " + e.message, "error"); }
+        lab.querySelector(".state").textContent = input.checked ? "on" : "off";
+        try {
+          await api("/api/settings", { languages: codes });
+          log(`${l.name} translation ${input.checked ? "on" : "off"}`);
+        } catch (e) { log("Languages: " + e.message, "error"); input.checked = !input.checked; }
       };
       box.appendChild(lab);
+    }
+  }
+  function syncLangSwitches(st) {
+    const sw = st.language_switches;
+    if (!sw) return;
+    for (const x of sw) {
+      const input = $("langChecks").querySelector(`input[value="${x.code}"]`);
+      if (input && input.checked !== x.on) {
+        input.checked = x.on;
+        input.closest("label").querySelector(".state").textContent = x.on ? "on" : "off";
+      }
+    }
+    const codes = (st.languages || []).map((l) => l.code).join(",");
+    if (codes !== langs.map((l) => l.code).join(",")) {  // columns and voice menus follow the switches
+      langs = st.languages || [];
+      if (state) { state.languages = langs; state.settings.languages = langs.map((l) => l.code); renderTableHead(); renderVoiceSelects(state.settings); }
     }
   }
   $("rate").oninput = () => { $("rateVal").textContent = $("rate").value + " wpm"; saveSlow("tts", { rate: +$("rate").value }); };
@@ -316,6 +339,7 @@
   function cls(el, c) { el.classList.remove("ok", "warn", "bad"); if (c) el.classList.add(c); }
 
   function updateStatus(st) {
+    syncLangSwitches(st);
     const p = st.pipeline, t = st.translate;
     const badge = $("live");
     if (p.running) { badge.className = "badge on"; badge.textContent = p.capturing ? "LIVE" : "FINISHING"; }

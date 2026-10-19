@@ -52,6 +52,9 @@
         <label class="upload">Upload a recording… <input id="upload" type="file" accept="audio/*,video/*"></label>
       </div>
       <label class="check"><input id="record" type="checkbox"> Save the French audio to logs/</label>
+      <div class="switches"><span class="k">Translate into</span><div id="langChecks"></div>
+        <div class="muted small">Switch a language off when nobody needs it: it stops at once (even mid-meeting)
+          and leaves the server's power to the others. Its listeners see that it is paused.</div></div>
       <div class="buttons">
         <button id="start" class="go">▶ Start</button>
         <button id="stop" class="stop" disabled>■ Stop</button>
@@ -70,8 +73,6 @@
       <h2>Voice &amp; translation</h2>
       <div id="voiceSelects"></div>
       <a class="ghost button" href="/static/voices/index.html" target="_blank">🎧 Compare voice samples</a>
-      <div class="langs-box"><span class="k">Languages offered to listeners</span><div id="langChecks"></div>
-        <div class="muted small">Each language runs its own Claude session. Changes apply after a restart.</div></div>
       <label>Rate <span id="rateVal" class="muted"></span><input id="rate" type="range" min="140" max="260" step="5"></label>
       <label>Volume <span id="volVal" class="muted"></span><input id="volume" type="range" min="0.2" max="2" step="0.05"></label>
       <label>Translator

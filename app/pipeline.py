@@ -60,6 +60,11 @@ class Pipeline:
     def add_channel(self, ch: Channel) -> None:
         self.channels[ch.code] = ch
 
+    @property
+    def on_channels(self) -> dict[str, Channel]:
+        """The languages being translated right now (each can be switched off live)."""
+        return {c: ch for c, ch in self.channels.items() if ch.on}
+
     def _hints(self) -> list[str]:
         hints: list[str] = []
         for g in self.glossaries.values():
@@ -120,9 +125,9 @@ class Pipeline:
         self.last_error = ""
         self.worker.start()
         self._hold_awake()
-        for ch in self.channels.values():
+        for ch in self.on_channels.values():
             ch.translator.prepare_fallback()
-        log.info("started: %s → %s", source.label, ", ".join(self.channels))
+        log.info("started: %s → %s", source.label, ", ".join(self.on_channels) or "no languages")
         # New session: phones clear what they show, and nobody is sent captions from earlier runs.
         self.session_id = time.strftime("%Y%m%d-%H%M%S")
         for ch in self.channels.values():
@@ -228,9 +233,13 @@ class Pipeline:
                 continue
             rec.en = res.text
             self.prev_en = res.text
-            rec.out = {code: LangResult() for code in self.channels}
+            chans = self.on_channels
+            rec.out = {code: LangResult() for code in chans}
+            if not chans:  # every language switched off: the operator still sees the English
+                self._finalize(rec)
+                continue
             self.publish_rec(rec)
-            for ch in self.channels.values():
+            for ch in chans.values():
                 ch.mt_q.put_nowait(rec)
 
     # ------------------------------------------------------------ misc
@@ -283,7 +292,7 @@ class Pipeline:
         self.operator.publish({"type": "log", "level": "info", "text": f"Report written: logs/{out.name}"})
 
     async def say_test(self) -> None:
-        await asyncio.gather(*(ch.say_test() for ch in self.channels.values()), return_exceptions=True)
+        await asyncio.gather(*(ch.say_test() for ch in self.on_channels.values()), return_exceptions=True)
 
     def apply_settings(self, settings: Settings, glossaries: dict[str, dict[str, Any]]) -> None:
         self.settings = settings
@@ -299,7 +308,7 @@ class Pipeline:
             ch.translator.reload(settings.translate, glossaries.get(code, {}))
 
     def status(self) -> dict[str, Any]:
-        chans = {code: ch.status() for code, ch in self.channels.items()}
+        chans = {code: ch.status() for code, ch in self.on_channels.items()}
         return {
             "running": self.running,
             "capturing": self.capturing,

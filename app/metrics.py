@@ -122,7 +122,8 @@ def summarize(records: list[dict[str, Any]], lang: str) -> dict[str, Any]:
     for x in captioned:
         engines[x["engine"]] = engines.get(x["engine"], 0) + 1
     return {
-        "chunks": len(records),
+        # Lines heard while this language was on (it can be switched on/off mid-run).
+        "chunks": len(rs) + sum(1 for r in records if not r.get("langs")),
         "captioned": len(captioned),
         "aired": len(aired),
         "dropped_audio": sum(1 for x in rs if x["status"] == "dropped"),

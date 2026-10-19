@@ -52,10 +52,14 @@
     lastSeq = 0;
   }
 
+  let langOn = true;            // the operator can pause a language
+  const LANG_OFF = { fr: "La traduction en français est arrêtée pour le moment.",
+                     wo: "La traduction en wolof est arrêtée pour le moment." };
   function updateWaiting() {
     const any = captionsEl.children.length > 0;
-    waitingEl.hidden = live && any;
-    if (live) waitingEl.textContent = "En direct — la traduction va s'afficher ici.";
+    waitingEl.hidden = live && any && langOn;
+    if (!langOn) waitingEl.textContent = LANG_OFF[lang] || "Cette traduction est arrêtée pour le moment.";
+    else if (live) waitingEl.textContent = "En direct — la traduction va s'afficher ici.";
     else if (any) waitingEl.textContent = "La traduction est terminée.";
     else waitingEl.textContent = "La traduction commencera au début de la réunion.";
   }
@@ -64,7 +68,8 @@
   let shownLang = null;
   const langsEl = $("langs");
   function renderLangs(list) {
-    langsEl.hidden = list.length < 2;
+    // Show the picker when there is a choice, or when this phone's language was paused.
+    langsEl.hidden = list.length < 2 && list.some((l) => l.code === lang);
     langsEl.innerHTML = "";
     for (const l of list) {
       const b = document.createElement("button");
@@ -117,6 +122,7 @@
           // Different server, run or language than what's on screen: start clean.
           if (m.boot !== boot || m.session !== session || (m.lang && m.lang !== shownLang)) clearCaptions();
           if (m.lang) { lang = m.lang; shownLang = m.lang; }
+          langOn = m.on !== false;
           renderLangs(m.languages || []);
           boot = m.boot;
           session = m.session;
@@ -137,6 +143,8 @@
           addCaption(m);
           break;
         case "onair": markOnAir(m.seq); break;
+        case "languages": renderLangs(m.languages || []); break;
+        case "lang_state": langOn = !!m.on; updateWaiting(); break;
         case "status":
           live = !!m.live;
           if (!live) session = null;  // run over: a reconnect after this must not treat it as current
