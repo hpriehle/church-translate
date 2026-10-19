@@ -238,11 +238,15 @@
     }).join(" · ") || "–";
   }
 
-  let urlShown = "";
+  let urlShown = "", langsShown = null;
   function status(st) {
     $("listeners").textContent = st.listeners.captions;
     $("backlog").textContent = st.pipeline.backlog_s.toFixed(1) + " s";
-    $("claude").textContent = st.translate.claude.state + " · " + st.translate.claude.model;
+    const tl = Object.entries(st.translate || {});  // one translator per language switched on
+    $("claude").textContent = tl.map(([c, x]) => (tl.length > 1 ? c.toUpperCase() + " " : "") + x.claude.state).join(" · ") || "off";
+    const on = (st.languages || []).map((l) => l.code).join(",");
+    if (langsShown !== null && on !== langsShown) loadVoices();  // switched on/off elsewhere
+    langsShown = on;
     $("stt").textContent = st.pipeline.stt_ready ? "ready" : "loading…";
     const url = shownUrl(st.listener_url);
     if (url && url !== urlShown) {
