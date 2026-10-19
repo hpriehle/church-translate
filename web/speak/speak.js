@@ -66,7 +66,7 @@
         const m = JSON.parse(ev.data);
         if (m.type === "started") {
           sending = true; setButton(); setPill("● LIVE", true); $("btn").disabled = false;
-          if ("wakeLock" in navigator) navigator.wakeLock.request("screen").then((w) => { wakeLock = w; }).catch(() => {});
+          if ("wakeLock" in navigator) navigator.wakeLock.request("screen").then((w) => { wakeLock = w; w.onrelease = () => { wakeLock = null; }; }).catch(() => {});
         } else if (m.type === "error") {
           $("err").textContent = m.message === "already running"
             ? "A translation run is already going (another speak page or the operator). Stop it first, or wait a few seconds."
@@ -74,7 +74,7 @@
         }
       };
       ws.onclose = (ev) => {
-        if (ev.code === 4403) $("err").textContent = "This page needs the key in its link (?key=…).";
+        if (ev.code === 4403) $("err").textContent = "You are signed out. Reload this page and enter the password.";
         else if (sending) $("err").textContent = "Connection to the server dropped. Press Start to resume.";
         stopLocal();
       };
@@ -83,6 +83,12 @@
       stopLocal();
     }
   }
+
+  // Phones release the screen lock when the page is hidden; take it again when it comes back.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && sending && !wakeLock && "wakeLock" in navigator)
+      navigator.wakeLock.request("screen").then((w) => { wakeLock = w; w.onrelease = () => { wakeLock = null; }; }).catch(() => {});
+  });
 
   function stopLocal() {
     sending = false;
@@ -117,6 +123,7 @@
   async function loadVoices() {
     let st;
     try { st = await (await fetch(withKey("/api/state"))).json(); } catch { return; }
+    renderSwitches(st);
     const box = $("voiceSelects");
     box.innerHTML = "";
     const chans = (st.status && st.status.pipeline && st.status.pipeline.channels) || {};
@@ -143,6 +150,50 @@
       };
       label.appendChild(sel);
       box.appendChild(label);
+      if (l.code !== "fr") {  // speed for this language's voice
+        const sp = document.createElement("label");
+        const range = document.createElement("input");
+        Object.assign(range, { type: "range", min: "0.8", max: "1.5", step: "0.05" });
+        range.value = ((st.settings.voices || {})[l.code] || {}).speed || 1;
+        const show = () => { sp.firstChild.textContent = `${l.name} speed ${Math.round(+range.value * 100)}%`; };
+        sp.appendChild(document.createTextNode(""));
+        show();
+        let t = null;
+        range.oninput = () => {
+          show();
+          clearTimeout(t);
+          t = setTimeout(async () => {
+            const [engine, ...rest] = sel.value.split(":");
+            try { await post("/api/settings", { voices: { [l.code]: { engine, voice: rest.join(":"), speed: +range.value } } }); }
+            catch (e) { voiceMsg("Could not change speed: " + e.message); }
+          }, 400);
+        };
+        sel.onchange = async () => {  // keep the chosen speed when the voice changes
+          const [engine, ...rest] = sel.value.split(":");
+          try {
+            await post("/api/settings", { voices: { [l.code]: { engine, voice: rest.join(":"), speed: +range.value } } });
+            voiceMsg(`${l.name}: ${sel.options[sel.selectedIndex].textContent}`);
+          } catch (e) { voiceMsg("Could not change voice: " + e.message); }
+        };
+        sp.appendChild(range);
+        box.appendChild(sp);
+      }
+    }
+  }
+  // Same live on/off switches as the operator page.
+  function renderSwitches(st) {
+    const box = $("langSwitches");
+    box.innerHTML = "";
+    for (const x of (st.status && st.status.language_switches) || []) {
+      const lab = document.createElement("label");
+      lab.className = "switch";
+      lab.innerHTML = `<span>${esc(x.name)}</span><input type="checkbox" value="${x.code}"${x.on ? " checked" : ""}>`;
+      lab.querySelector("input").onchange = async () => {
+        const codes = [...box.querySelectorAll("input:checked")].map((i) => i.value);
+        try { await post("/api/settings", { languages: codes }); loadVoices(); }
+        catch (e) { voiceMsg("Could not switch: " + e.message); }
+      };
+      box.appendChild(lab);
     }
   }
   $("testVoice").onclick = async () => {

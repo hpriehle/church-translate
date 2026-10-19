@@ -391,3 +391,13 @@ async def test_no_fallback_waits_for_busy_claude_instead_of_dropping():
     r = await t.translate("two")
     assert r.engine == "claude" and r.text and "busy" not in r.note
     assert (await first).engine == "claude"
+
+
+def test_voice_speed_setting():
+    from app.config import Settings, VoiceCfg, tts_for
+
+    st = Settings(voices={"wo": VoiceCfg(engine="mms", voice="default", speed=1.25)})
+    assert tts_for(st, "wo").speed == 1.25
+    import pytest
+    with pytest.raises(Exception):
+        VoiceCfg(engine="mms", voice="default", speed=3)

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live translation — running a meeting from your phone</title>
+<style>
+  body { margin:0; background:#f6f6f4; color:#1a1a1a; font:17px/1.5 -apple-system, system-ui, "Segoe UI", sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:1.2rem 1.1rem 2rem; background:#fff; }
+  h1 { font-size:1.45rem; line-height:1.25; margin:.2rem 0 .3rem; }
+  .sub { color:#555; margin:0 0 1rem; }
+  h2 { font-size:1.05rem; text-transform:uppercase; letter-spacing:.04em; color:#2a6b45; margin:1.4rem 0 .4rem; }
+  ol, ul { padding-left:1.3rem; margin:.3rem 0; }
+  li { margin:.35rem 0; }
+  .addr { font-weight:700; word-break:break-all; }
+  .note { background:#fff6dc; border-left:4px solid #e2b33c; padding:.55rem .8rem; margin:.8rem 0; }
+  @media print { body { background:#fff; font-size:12.5pt; } main { padding:0; } a { color:inherit; text-decoration:none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Live translation: running a meeting from your phone</h1>
+  <p class="sub">The speaker's words are translated into French and Wolof and sent to listeners' phones.
+    All you need is your phone (a microphone plugged into it is optional).</p>
+
+  <h2>You need</h2>
+  <ul>
+    <li>A charged phone and a charger you can plug in where you sit.</li>
+    <li>The password (ask whoever sent you this page).</li>
+    <li>Optional: a microphone plugged into the phone. Otherwise place the phone close to the speaker
+      or to a loudspeaker.</li>
+  </ul>
+
+  <h2>Before the meeting (5 minutes early)</h2>
+  <ol>
+    <li>Open <a class="addr" data-path="/speak" href="/speak">/speak</a> and type the password.
+      Your phone stays signed in for 30 days.</li>
+    <li>Under <b>Translate into</b>, switch on only the languages needed today.</li>
+    <li>Show listeners the link <a class="addr" data-path="/" href="/">/</a>, or put up the printed sign
+      with its QR code (from <span class="addr" data-path="/print">/print</span>).</li>
+    <li>Listeners use <b>headphones</b>: they open the link, pick Français or Wolof, and tap the round
+      button to hear the voice.</li>
+  </ol>
+
+  <h2>During the meeting</h2>
+  <ol>
+    <li>Press <b>Start speaking</b> when the meeting begins. Allow the microphone if the phone asks.</li>
+    <li><b>Keep this page open with the screen on.</b> Don't lock the phone or switch to another app: the
+      phone stops the microphone. Keep it plugged in.</li>
+    <li>Press <b>Stop</b> when the meeting ends.</li>
+  </ol>
+  <div class="note">The translation runs about 5 to 10 seconds behind the speaker. That is normal.</div>
+
+  <h2>If something goes wrong</h2>
+  <ul>
+    <li><b>"A translation run is already going"</b>: only one meeting can be translated at a time. Someone
+      else is using it; ask them to press Stop.</li>
+    <li><b>"You are signed out"</b>: reload the page and type the password again.</li>
+    <li><b>Listeners hear nothing</b>: check that the green bar moves when someone speaks, that their
+      language is switched on, and ask them to tap the round button again.</li>
+    <li><b>The translation repeats itself</b>: a listener's phone is playing out loud near your microphone.
+      Ask them to use headphones.</li>
+  </ul>
+</main>
+<script>
+  // Show full addresses (handy when this page is printed or forwarded).
+  for (const a of document.querySelectorAll("[data-path]")) {
+    const url = location.origin + a.dataset.path;
+    a.textContent = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    if (a.tagName === "A") a.href = url;
+  }
+</script>
+</body>
+</html>

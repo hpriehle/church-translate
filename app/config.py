@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.toml"
@@ -79,11 +79,13 @@ class TtsCfg(BaseModel):
     voice: str = "fr_FR-tom-medium"
     rate: int = 190
     volume: float = 1.0
+    speed: float = 1.0   # other languages: 1.0 = the voice's natural pace (French uses rate instead)
 
 
 class VoiceCfg(BaseModel):
     engine: str
     voice: str
+    speed: float = Field(1.0, ge=0.7, le=1.6)   # 1.2 = 20% faster
 
 
 # Voices for languages other than French (French uses [tts]).
@@ -126,7 +128,7 @@ def tts_for(settings: "Settings", code: str) -> TtsCfg:
     if code == "fr":
         return settings.tts
     v = settings.voices.get(code) or DEFAULT_VOICES.get(code) or VoiceCfg(engine="piper", voice="")
-    return TtsCfg(engine=v.engine, voice=v.voice, rate=settings.tts.rate, volume=settings.tts.volume)
+    return TtsCfg(engine=v.engine, voice=v.voice, rate=settings.tts.rate, volume=settings.tts.volume, speed=v.speed)
 
 
 def load_secrets(path: Path = SECRETS_PATH) -> dict[str, str]:

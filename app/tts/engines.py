@@ -31,6 +31,17 @@ def _read_wav(path: Path) -> tuple[np.ndarray, int]:
     return data, sr
 
 
+def _tempo(pcm: np.ndarray, sr: int, factor: float) -> np.ndarray:
+    """Speak faster/slower without changing the pitch (ffmpeg atempo), for voices with no speed control."""
+    if abs(factor - 1.0) < 0.02 or not len(pcm) or not shutil.which("ffmpeg"):
+        return pcm
+    factor = min(2.0, max(0.5, factor))
+    r = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "s16le", "-ar", str(sr), "-ac", "1",
+                        "-i", "pipe:0", "-filter:a", f"atempo={factor:.3f}", "-f", "s16le", "pipe:1"],
+                       input=pcm.astype(np.int16).tobytes(), capture_output=True, timeout=30)
+    return np.frombuffer(r.stdout, dtype=np.int16) if r.returncode == 0 and r.stdout else pcm
+
+
 def _resample(pcm: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
     if sr_in == sr_out:
         return pcm
@@ -269,7 +280,7 @@ class SpeechT5Tts:
                 out += [self._sentence(p), gap]
         audio = np.concatenate(out[:-1]) if out else np.zeros(0, np.float32)
         pcm = (np.clip(audio / max(1e-6, float(np.abs(audio).max())) * 0.9, -1, 1) * 32767).astype(np.int16)
-        return _resample(pcm, self.SR, self.out_sr)
+        return _resample(_tempo(pcm, self.SR, self.cfg.speed * speed), self.SR, self.out_sr)
 
 
 class MmsTts:
@@ -303,7 +314,7 @@ class MmsTts:
         gap = np.zeros(int(0.12 * self.SR), dtype=np.float32)
         out = []
         with self._lock, torch.inference_mode():
-            self._model.speaking_rate = max(0.5, speed * self.cfg.rate / 175.0)
+            self._model.speaking_rate = max(0.5, speed * self.cfg.speed)
             for p in parts:
                 if p:
                     ids = self._tok(p, return_tensors="pt")

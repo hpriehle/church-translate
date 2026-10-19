@@ -101,7 +101,11 @@
 
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   async function saveSetting(section, values) {
-    try { await api("/api/settings", { [section]: values }); log(`Saved ${section}: ${JSON.stringify(values)}`); }
+    try {
+      const r = await api("/api/settings", { [section]: values });
+      if (r.settings && state) state.settings = r.settings;
+      log(`Saved ${section}: ${JSON.stringify(values)}`);
+    }
     catch (e) { log("Settings: " + e.message, "error"); }
   }
   const saveSlow = debounce(saveSetting, 400);
@@ -138,14 +142,31 @@
         : `${(s.voices[l.code] || {}).engine || chTts.engine || ""}:${chTts.voice || (s.voices[l.code] || {}).voice || ""}`;
       fillSelect(sel, list, cur);
       sel.dataset.lang = l.code;
-      sel.onchange = () => {
+      // Other languages: a speed for the voice (French uses the Rate slider below).
+      let range = null;
+      const voiceCfg = () => {
         const [engine, ...rest] = sel.value.split(":");
-        const voice = rest.join(":");
-        if (l.code === "fr") saveSetting("tts", { engine, voice });
-        else saveSetting("voices", { [l.code]: { engine, voice } });
+        return { engine, voice: rest.join(":"), ...(range ? { speed: +range.value } : {}) };
+      };
+      sel.onchange = () => {
+        const v = voiceCfg();
+        if (l.code === "fr") saveSetting("tts", { engine: v.engine, voice: v.voice });
+        else saveSetting("voices", { [l.code]: v });
       };
       lab.appendChild(sel);
       box.appendChild(lab);
+      if (l.code !== "fr") {
+        const sp = document.createElement("label");
+        sp.innerHTML = `${esc(l.name)} speed <span class="muted"></span>`;
+        range = document.createElement("input");
+        Object.assign(range, { type: "range", min: "0.8", max: "1.5", step: "0.05" });
+        range.value = (s.voices[l.code] || {}).speed || 1;
+        const show = () => { sp.querySelector("span").textContent = `${Math.round(+range.value * 100)}%`; };
+        show();
+        range.oninput = () => { show(); saveSlow("voices", { [l.code]: voiceCfg() }); };
+        sp.appendChild(range);
+        box.appendChild(sp);
+      }
     }
   }
   // One live on/off switch per language (no restart needed).

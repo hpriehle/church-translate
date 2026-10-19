@@ -332,6 +332,12 @@ def _operator_page(request: Request, path: Path) -> Response:
 _login_fails: dict[str, list[float]] = {}
 
 
+@app.get("/guide", response_class=HTMLResponse)
+async def guide_page():
+    """How to run a meeting from a phone (public: no password in it)."""
+    return page(WEB_DIR / "guide.html")
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():
     return page(WEB_DIR / "login.html")
