@@ -17,6 +17,8 @@ cfg() { uv run --quiet "${EXTRAS[@]}" python -c "from app.config import load_set
 ollama_up() { curl -s --max-time 1 "$(cfg 's.translate.ollama_url')/api/tags" >/dev/null 2>&1; }
 
 start_ollama() {
+  # Not needed when the translator is set to Claude only (translate.mode = "claude").
+  [[ "$(cfg 's.translate.mode' 2>/dev/null)" == "claude" ]] && return 0
   if need ollama && ! ollama_up; then
     echo "Starting Ollama…"
     # One request slot: the long glossary prompt is cached once and every fallback reuses it.
@@ -77,7 +79,9 @@ except ImportError:
 print('ok')"
 
   echo "== 4/6 Ollama fallback model (optional)"
-  if need ollama; then
+  if [[ "$(cfg 's.translate.mode')" == "claude" ]]; then
+    echo "  Translator set to Claude only — no Ollama model needed."
+  elif need ollama; then
     start_ollama
     MODEL="$(cfg 's.translate.ollama_model')"
     ollama pull "$MODEL"
