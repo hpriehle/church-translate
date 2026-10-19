@@ -314,14 +314,14 @@ class MmsTts:
         gap = np.zeros(int(0.12 * self.SR), dtype=np.float32)
         out = []
         with self._lock, torch.inference_mode():
-            self._model.speaking_rate = max(0.5, speed * self.cfg.speed)
             for p in parts:
                 if p:
                     ids = self._tok(p, return_tensors="pt")
                     out += [self._model(**ids).waveform[0].float().numpy(), gap]
         audio = np.concatenate(out[:-1]) if out else np.zeros(0, np.float32)
         pcm = (np.clip(audio / max(1e-6, float(np.abs(audio).max())) * 0.9, -1, 1) * 32767).astype(np.int16)
-        return _resample(pcm, self.SR, self.out_sr)
+        # The model's own speaking_rate falls short (each sound has a minimum length), so time-stretch.
+        return _resample(_tempo(pcm, self.SR, self.cfg.speed * speed), self.SR, self.out_sr)
 
 
 def list_voices_for(code: str) -> list[dict]:
