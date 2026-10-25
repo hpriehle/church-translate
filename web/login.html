@@ -30,8 +30,9 @@
 <script>
   const q = new URLSearchParams(location.search);
   if (q.get("next") && q.get("next").startsWith("/")) document.getElementById("next").value = q.get("next");
-  if (q.get("error")) document.getElementById("err").textContent = q.get("error") === "busy"
-    ? "Too many attempts — wait a few minutes." : "Wrong password.";
+  const err = q.get("error");
+  if (err) document.getElementById("err").textContent = err === "busy" ? "Too many attempts — wait a few minutes."
+    : err === "operator" ? "This page needs the operator password." : "Wrong password.";
 </script>
 </body>
 </html>

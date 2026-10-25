@@ -390,16 +390,16 @@ def _remember_key(request: Request, resp: Response) -> Response:
 
 
 def _operator_page(request: Request, path: Path, speaker_ok: bool = False) -> Response:
-    """An operator page, or the sign-in page if this browser isn't signed in yet. With the speaker
-    password, pages other than the speak/print pages lead to the speak page."""
+    """An operator page, or the sign-in page if this browser isn't signed in yet (or only with the
+    speaker password, for pages other than the speak/print pages)."""
     from fastapi.responses import RedirectResponse
     from urllib.parse import quote
 
     role = _request_role(request)
     if role is None:
         return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
-    if role == SPEAKER and not speaker_ok:
-        return RedirectResponse("/speak", status_code=303)
+    if role == SPEAKER and not speaker_ok:  # signed in as speaker: let them sign in as operator instead
+        return RedirectResponse(f"/login?error=operator&next={quote(request.url.path)}", status_code=303)
     return _remember_key(request, page(path))
 
 
@@ -444,6 +444,8 @@ async def login(request: Request):
     for role, want in _passwords():
         if hmac.compare_digest(password, want):
             _login_fails.pop(ip, None)
+            if role == SPEAKER and nxt.startswith("/operator"):  # the operator page takes only its own password
+                return RedirectResponse(f"/login?error=operator&next={quote(nxt)}", status_code=303)
             if role == SPEAKER and nxt not in ("/speak", "/print"):
                 nxt = "/speak"
             return _set_login_cookie(request, RedirectResponse(nxt, status_code=303), role)
