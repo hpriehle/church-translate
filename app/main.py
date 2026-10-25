@@ -268,6 +268,20 @@ app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
 @app.middleware("http")
+async def canonical_host(request: Request, call_next):
+    """www.<public address> → <public address>: one address for links, sign-ins and QR codes."""
+    from urllib.parse import urlparse
+    from fastapi.responses import RedirectResponse
+
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    public = (urlparse(S.settings.server.public_url).hostname or "").lower()
+    if public and host == "www." + public:
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(f"https://{public}{request.url.path}{query}", status_code=301)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def revalidate_static(request: Request, call_next):
     # Without this, a CDN/tunnel in front (Cloudflare adds a 4 h browser cache) keeps phones on old JS.
     response = await call_next(request)
