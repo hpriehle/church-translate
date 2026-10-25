@@ -248,6 +248,9 @@
     if (langsShown !== null && on !== langsShown) loadVoices();  // switched on/off elsewhere
     langsShown = on;
     $("stt").textContent = st.pipeline.stt_ready ? "ready" : "loading…";
+    const hub = (st.engine || {}).hub;
+    $("engine").textContent = hub && hub.running ? hub.name
+      : hub && hub.connected && hub.use && !hub.busy && hub.compatible ? `${hub.name} (ready)` : "this server";
     const url = shownUrl(st.listener_url);
     if (url && url !== urlShown) {
       urlShown = url;

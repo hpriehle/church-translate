@@ -39,6 +39,14 @@ class ServerCfg(BaseModel):
     open_browser: bool = True
 
 
+class EngineCfg(BaseModel):
+    """Let a faster computer (e.g. a Mac) run the meetings of a public server (e.g. a VPS)."""
+    token: str = ""        # shared secret for the link; empty = off (set the same value on both)
+    use: bool = True       # public server: hand meetings to the engine while it is connected
+    hub_url: str = ""      # engine: the public server to serve, e.g. wss://live.example.org/ws/engine
+    name: str = ""         # engine: how the public server's pages name it, e.g. "Harrison's Mac"
+
+
 class AudioCfg(BaseModel):
     input_device: str = ""
     input_channel: int = 0
@@ -122,6 +130,7 @@ class Settings(BaseModel):
     tts: TtsCfg = TtsCfg()
     backlog: BacklogCfg = BacklogCfg()
     stream: StreamCfg = StreamCfg()
+    engine: EngineCfg = EngineCfg()
 
 
 def tts_for(settings: "Settings", code: str) -> TtsCfg:

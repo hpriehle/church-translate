@@ -59,11 +59,24 @@ class Mp3Broadcaster:
         self.kicked_total = 0
         self.bytes_out = 0
         self._recorders: list = []
+        self.taps: list = []        # called with every encoded chunk (an engine relaying to its hub)
+        self.external = False       # True while a stream relayed from an engine replaces this one
 
     def feed(self, pcm: np.ndarray) -> None:
         data = bytes(self.encoder.encode(pcm.tobytes()))
         if not data:
             return
+        for tap in self.taps:
+            tap(data)
+        if not self.external:
+            self._send(data)
+
+    def feed_mp3(self, data: bytes) -> None:
+        """Already-encoded audio relayed from an engine (same sample rate and bitrate)."""
+        if data:
+            self._send(data)
+
+    def _send(self, data: bytes) -> None:
         self.burst.append(data)
         for rec in self._recorders:
             rec.write(data)

@@ -373,8 +373,29 @@
   const ttsErrs = {};
   function cls(el, c) { el.classList.remove("ok", "warn", "bad"); if (c) el.classList.add(c); }
 
+  function showEngine(eng) {
+    $("engineBox").hidden = !(eng && (eng.hub || eng.client));
+    if (!eng) return;
+    if (eng.hub) {
+      const h = eng.hub;
+      $("engineInfo").textContent = !h.connected ? "No engine connected: meetings run on this server."
+        : `${h.name}: connected${h.running ? ", running the meeting now" : h.busy ? " (busy with its own meeting)" : ""}`
+          + (h.compatible ? "" : ". Its stream settings differ from this server's, so it isn't used.");
+      $("engineUseRow").hidden = false;
+      if (document.activeElement !== $("engineUse")) $("engineUse").checked = h.use;
+    } else {
+      const c = eng.client;
+      $("engineInfo").textContent = c.connected
+        ? `Linked to ${c.hub}: this computer runs its meetings${c.running ? " (one is running now)" : ""}.`
+        : `Not linked to ${c.hub} yet${c.error ? " (" + c.error + ")" : ""}; retrying.`;
+      $("engineUseRow").hidden = true;
+    }
+  }
+  $("engineUse").onchange = () => saveSetting("engine", { use: $("engineUse").checked });
+
   function updateStatus(st) {
     syncLangSwitches(st);
+    showEngine(st.engine);
     const p = st.pipeline, t = st.translate;
     const badge = $("live");
     if (p.running) { badge.className = "badge on"; badge.textContent = p.capturing ? "LIVE" : "FINISHING"; }

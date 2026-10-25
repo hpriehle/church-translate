@@ -31,12 +31,15 @@ class Hub:
         self.keep_history = history > 0
         self.queue_size = queue_size
         self.dropped_clients = 0
+        self.taps: list = []        # called with (msg, remember) for every message (engine → hub relay)
 
     @property
     def count(self) -> int:
         return len(self.clients)
 
     def publish(self, msg: dict[str, Any], remember: bool = False) -> None:
+        for tap in self.taps:
+            tap(msg, remember)
         if remember and self.keep_history:
             self.history.append(msg)
         data = json.dumps(msg, ensure_ascii=False)

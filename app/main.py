@@ -22,6 +22,7 @@ from .broadcast.hub import Hub
 from .broadcast.mixer import Mixer
 from .broadcast.stream import Mp3Broadcaster
 from .channel import Channel
+from .engine import EngineClient, EngineHub
 from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
 from .languages import LANGUAGES
@@ -39,6 +40,7 @@ EDITABLE = {
     "tts": {"engine", "voice", "rate", "volume"},
     "backlog": {"speedup_start_s", "speedup_full_s", "max_speed", "condense_on_s", "condense_off_s", "drop_above_s"},
     "server": {"lan_ip", "use_public_url"},
+    "engine": {"use"},
 }
 
 
@@ -54,6 +56,8 @@ class State:
     port_override: int | None = None
     mode_override: str | None = None
     tunnel: dict = {"state": "unknown"}
+    engine_hub: EngineHub = EngineHub()          # a faster computer running our meetings (if linked)
+    engine_client: EngineClient | None = None    # this computer running another server's meetings
     argv: list[str] = []
     version: str = ""
 
@@ -73,8 +77,9 @@ def languages_public() -> list[dict[str, str]]:
     return [{"code": c, "name": ch.lang.name} for c, ch in S.pipeline.on_channels.items()]
 
 
-def set_languages(codes: list[str]) -> list[str]:
-    """Switch languages on/off live, remember the choice, and tell every phone and the operator."""
+def set_languages(codes: list[str], persist: bool = True) -> list[str]:
+    """Switch languages on/off live, remember the choice (unless persist=False: a meeting handed over by
+    another server), and tell every phone and the operator."""
     on = [c for c in S.pipeline.channels if c in codes]
     for c, ch in S.pipeline.channels.items():
         was, ch.on = ch.on, c in on
@@ -83,8 +88,10 @@ def set_languages(codes: list[str]) -> list[str]:
         if ch.on != was:
             ch.hub.publish({"type": "lang_state", "on": ch.on})
             log.info("%s translation switched %s", ch.lang.name, "on" if ch.on else "off")
-    S.settings.languages = on
-    save_override("languages", on)
+    if persist:
+        S.settings.languages = on
+        save_override("languages", on)
+        S.engine_hub.set_languages(on)  # a meeting running on the engine follows the switches
     for ch in S.pipeline.channels.values():
         ch.hub.publish({"type": "languages", "languages": languages_public()})
     S.operator.publish(full_status())
@@ -117,17 +124,30 @@ def _managed_by() -> str:
     return "terminal"
 
 
+def meeting_live() -> bool:
+    """A meeting is running here, or on the engine for us."""
+    return S.pipeline.running or S.engine_hub.run_active
+
+
 def server_info() -> dict[str, Any]:
     return {"started": S.started, "version": S.version, "managed_by": _managed_by()}
 
 
 def full_status() -> dict[str, Any]:
+    pipeline = S.pipeline.status()
+    translate = {c: ch.translator.status() for c, ch in S.pipeline.on_channels.items()}
+    remote = S.engine_hub.status if S.engine_hub.run_active else None
+    if remote:  # the meeting runs on the engine: show its progress
+        pipeline, translate = remote.get("pipeline") or pipeline, remote.get("translate") or translate
+    eng = S.settings.engine
     return {
         "type": "status",
         "time": time.time(),
         "server": server_info(),
-        "pipeline": S.pipeline.status(),
-        "translate": {c: ch.translator.status() for c, ch in S.pipeline.on_channels.items()},
+        "pipeline": pipeline,
+        "translate": translate,
+        "engine": {"hub": S.engine_hub.info() if eng.token and not eng.hub_url else None,
+                   "client": S.engine_client.info() if S.engine_client else None},
         "languages": languages_public(),
         "language_switches": [{"code": c, "name": ch.lang.name, "on": ch.on} for c, ch in S.pipeline.channels.items()],
         "listeners": {"stream": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
@@ -157,7 +177,7 @@ async def tunnel_loop() -> None:
 async def status_loop() -> None:
     while True:
         await asyncio.sleep(1.0)
-        if S.operator.count:
+        if S.operator.count or (S.engine_client and S.engine_client.running):
             S.operator.publish(full_status())
 
 
@@ -195,6 +215,12 @@ async def lifespan(app: FastAPI):
         ch.mixer.start()
         if ch.on:  # a language switched off stays unloaded until it is switched on
             ch.activate()
+    eng = st.engine
+    if eng.hub_url and eng.token:  # this computer runs the meetings of a public server
+        import platform
+
+        S.engine_client = EngineClient(eng.hub_url, eng.token, eng.name or platform.node().split(".")[0])
+        bg.append(asyncio.create_task(S.engine_client.run_forever()))
 
     if S.exit_when_done:
         def _drained():
@@ -476,7 +502,7 @@ async def ws_listen(ws: WebSocket):
     session = S.pipeline.session_id
     same = hello.get("boot") == S.started and hello.get("session") == session and hello.get("lang") == ch.code
     last = int(hello.get("last_seq") or 0) if same else 0
-    init = {"type": "init", "boot": S.started, "session": session, "live": S.pipeline.running,
+    init = {"type": "init", "boot": S.started, "session": session, "live": meeting_live(),
             "lang": ch.code, "on": ch.on, "languages": languages_public(),
             "server_time": time.time(), "history": ch.hub.replay_after(last) if session else []}
     await ch.hub.serve(ws, [init])
@@ -497,7 +523,7 @@ async def api_qr(request: Request, text: str):
 @app.get("/health")
 async def health():
     return {"ok": True, "listeners": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
-            "running": S.pipeline.running, "started": S.started, "languages": list(S.pipeline.on_channels)}
+            "running": meeting_live(), "started": S.started, "languages": list(S.pipeline.on_channels)}
 
 
 # ------------------------------------------------------------------ operator side
@@ -527,27 +553,61 @@ async def ws_speak(ws: WebSocket):
     except Exception:
         await ws.close(code=1003)
         return
-    source = BrowserSource(rate, label=f"browser microphone ({hello.get('device') or 'web page'})")
+    device, record = hello.get("device") or "web page", bool(hello.get("record"))
+    eh = S.engine_hub
+
+    def start_here() -> BrowserSource:
+        src = BrowserSource(rate, label=f"browser microphone ({device})")
+        S.pipeline.start("browser", source=src, record=record)
+        return src
+
+    # A linked engine (e.g. the Mac) runs the meeting if it is online and free; otherwise this server does.
+    source: BrowserSource | None = None
+    remote = False
     try:
-        S.pipeline.start("browser", source=source, record=bool(hello.get("record")))
+        if eh.run_active:
+            raise RuntimeError("already running")
+        if eh.available() and not S.pipeline.capturing:
+            remote = await eh.start_run(rate, device, record, list(S.pipeline.on_channels))
+        if not remote:
+            source = start_here()
     except Exception as e:
         await ws.send_json({"type": "error", "message": str(e)})
         await ws.close()
         return
-    await ws.send_json({"type": "started"})
+    await ws.send_json({"type": "started", "engine": eh.name if remote else ""})
     try:
         while True:
             msg = await ws.receive()
             if msg["type"] == "websocket.disconnect":
                 break
-            if msg.get("bytes"):
-                source.push(msg["bytes"])
+            data = msg.get("bytes")
+            if data:
+                if remote and not eh.push(data):
+                    if eh.stopped:  # stopped from the operator page
+                        break
+                    # The engine dropped out mid-meeting: carry on here.
+                    remote = False
+                    source = start_here()
+                    S.operator.publish({"type": "log", "level": "warn",
+                                        "text": f"{eh.name or 'The engine'} went offline: the meeting continues on this server."})
+                if not remote:
+                    source.push(data)
             elif msg.get("text") and '"stop"' in msg["text"]:
                 break
     except Exception:
-        pass
+        log.exception("speak connection ended")
     finally:
-        source.stop()
+        if remote:
+            eh.stop_run()
+        if source is not None:
+            source.stop()
+
+
+@app.websocket("/ws/engine")
+async def ws_engine(ws: WebSocket):
+    """A faster computer offering to run this server's meetings (see app/engine.py)."""
+    await S.engine_hub.serve(ws)
 
 
 @app.get("/print", response_class=HTMLResponse)
@@ -592,6 +652,8 @@ async def api_state(request: Request):
 @app.post("/api/start")
 async def api_start(request: Request):
     require_operator(request)
+    if S.engine_hub.run_active:
+        raise HTTPException(400, f"A meeting is running on {S.engine_hub.name}: stop it first.")
     body = await request.json()
     kind = body.get("source", "mic")
     try:
@@ -611,6 +673,7 @@ async def api_start(request: Request):
 @app.post("/api/stop")
 async def api_stop(request: Request):
     require_speaker(request)
+    S.engine_hub.stop_run()
     S.pipeline.stop()
     return {"ok": True}
 
