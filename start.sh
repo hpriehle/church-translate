@@ -12,8 +12,9 @@ mkdir -p logs samples data
 
 need() { command -v "$1" >/dev/null 2>&1; }
 # On Linux the CPU speech recognition and the Wolof voice come from optional package groups.
+# (Written ${EXTRAS[@]+"${EXTRAS[@]}"} below: macOS's bash 3.2 rejects an empty "${EXTRAS[@]}" under set -u.)
 if [[ "$(uname)" == "Darwin" ]]; then EXTRAS=(); else EXTRAS=(--extra linux --extra wolof); fi
-cfg() { uv run --quiet "${EXTRAS[@]}" python -c "from app.config import load_settings as l; s=l(); print($1)"; }
+cfg() { uv run --quiet ${EXTRAS[@]+"${EXTRAS[@]}"} python -c "from app.config import load_settings as l; s=l(); print($1)"; }
 ollama_up() { curl -s --max-time 1 "$(cfg 's.translate.ollama_url')/api/tags" >/dev/null 2>&1; }
 
 start_ollama() {
@@ -57,10 +58,10 @@ if [[ "${1:-}" == "--setup" ]]; then
   fi
 
   echo "== 2/6 Python packages"
-  uv sync "${EXTRAS[@]}"
+  uv sync ${EXTRAS[@]+"${EXTRAS[@]}"}
 
   echo "== 3/6 Speech recognition and Wolof voice models"
-  uv run "${EXTRAS[@]}" python -c "
+  uv run ${EXTRAS[@]+"${EXTRAS[@]}"} python -c "
 import sys
 from huggingface_hub import snapshot_download
 from app.config import load_settings
@@ -110,7 +111,7 @@ fi
 
 need uv || { echo "uv is missing — run ./start.sh --setup"; exit 1; }
 need ffmpeg || echo "warning: ffmpeg missing (needed for test recordings): brew install ffmpeg"
-uv sync --quiet "${EXTRAS[@]}"
+uv sync --quiet ${EXTRAS[@]+"${EXTRAS[@]}"}
 ensure_piper_voices
 start_ollama
-exec uv run --quiet "${EXTRAS[@]}" python -m app "$@"
+exec uv run --quiet ${EXTRAS[@]+"${EXTRAS[@]}"} python -m app "$@"
