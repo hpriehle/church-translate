@@ -244,14 +244,17 @@ class Pipeline:
 
     # ------------------------------------------------------------ misc
     def _hold_awake(self) -> None:
-        """Keep the Mac from idle-sleeping while a run is active (not while the server just waits)."""
+        """While a run is active, keep the Mac awake and its screen on (not while the server just waits).
+
+        The screen matters too: when it turns off and locks, the browser tab recording the microphone
+        can be held back, and the translation goes quiet."""
         import os
         import shutil
         import subprocess
         import sys
 
         if self._caff is None and sys.platform == "darwin" and shutil.which("caffeinate"):
-            self._caff = subprocess.Popen(["caffeinate", "-ims", "-w", str(os.getpid())])
+            self._caff = subprocess.Popen(["caffeinate", "-dims", "-w", str(os.getpid())])
 
     def release_awake(self) -> None:
         if self._caff is not None:
