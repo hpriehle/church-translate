@@ -89,6 +89,10 @@ Then create `data/overrides.linux.json` (pick your own password and address):
   `"tunnel_metrics": "127.0.0.1:20242"` so the operator page can show the Public link status.
 - The **password** (`operator_pin`) protects the speaker and operator pages: people go to `/speak` or
   `/operator`, type it once, and the phone stays signed in for 30 days.
+- To let other people run meetings, set a **speaker password** on the operator page (Server →
+  Speaker password). It opens only the speak page: Start/Stop, the language switches and the voices.
+  Settings, Claude access, Restart and the passwords stay with the operator password. Changing it
+  signs out everyone who used the old one. Send them `/guide` (how to run a meeting from a phone).
 - Add Claude access on the operator page (**Claude access**, see above).
 - With `update_from_git`, **Restart server** on the operator page first pulls the latest code from
   GitHub, so updates need no SSH.
@@ -101,6 +105,25 @@ Notes for servers without a GPU:
   relies on Claude like Wolof does.
 - At church, the speaker's phone (or a mic plugged into it) must keep the speak page open **with the
   screen on**: phones stop the microphone when they lock. Plug it in to charge.
+
+## A faster computer as the engine (Mac + server)
+
+A server without a GPU is a few seconds slower than an Apple Silicon Mac. You can have both: keep
+the public server for the pages, passwords and phones, and let a Mac do the work whenever it is on.
+
+- On the **server**, set a shared secret: `"engine": {"token": "<long random text>"}` in
+  `data/overrides.linux.json`.
+- On the **Mac**, set the same secret and the server's address in `data/overrides.darwin.json`:
+  `"engine": {"hub_url": "wss://your.domain/ws/engine", "token": "<same text>", "name": "Church Mac"}`,
+  then restart its server.
+
+The Mac connects out to the server (no tunnel or open port needed, any internet connection works,
+it can stay at home). While it is linked and free, every meeting started on the server's speak page
+runs on the Mac, and its captions and voice reach phones through the server as usual. If the Mac is
+asleep, busy with its own meeting, or drops out mid-meeting, the server runs the meeting itself
+(phones see the captions restart once). The operator page shows the link under Server → Engine,
+with a switch to stop using it. Keep the Mac plugged in with the lid open: it keeps itself awake
+while linked. Voice and speed choices for meetings on the Mac are the Mac's own.
 
 ## Keeping it running (Mac)
 
