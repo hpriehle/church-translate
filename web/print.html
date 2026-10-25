@@ -2,79 +2,64 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>Traduction en français — affiche</title>
+<title>Signs — listen to the translation</title>
 <style>
-  @page { size: A4 portrait; margin: 14mm; }
-  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; color: #111; margin: 0; }
-  .controls { background: #f3f3f3; padding: 10px 14px; border-bottom: 1px solid #ccc; font-size: 14px; }
-  .controls input { font-size: 14px; padding: 4px 6px; margin: 0 10px 0 4px; }
-  .sheet { max-width: 180mm; margin: 0 auto; text-align: center; padding-top: 10mm; }
-  h1 { font-size: 34pt; margin: 0 0 4mm; }
-  .en { font-size: 13pt; color: #555; margin: 0 0 8mm; }
-  .codes { display: flex; justify-content: center; gap: 14mm; align-items: flex-start; }
-  .code { width: 82mm; }
-  .code img { width: 100%; }
-  .step { font-size: 15pt; font-weight: 700; margin: 3mm 0; }
-  .sub { font-size: 12pt; color: #444; }
-  .url { font-size: 18pt; font-weight: 700; margin-top: 6mm; word-break: break-all; }
-  ol { text-align: left; font-size: 15pt; line-height: 1.6; margin: 10mm auto 0; max-width: 150mm; }
-  .wifi[hidden] { display: none; }
-  @media print { .controls { display: none; } }
+  @page { size: letter portrait; margin: 12mm; }
+  body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; color: #111; margin: 0; background: #eee; }
+  .controls { background: #f6f6f6; padding: 10px 14px; border-bottom: 1px solid #ccc; font-size: 14px; }
+  .controls button { font: inherit; padding: 4px 12px; }
+  .sheet { background: #fff; width: 190mm; min-height: 250mm; margin: 8mm auto; box-sizing: border-box; padding: 16mm 14mm;
+           text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;
+           page-break-after: always; break-after: page; }
+  .sheet:last-child { page-break-after: auto; break-after: auto; }
+  h1 { font-size: 36pt; line-height: 1.12; margin: 0 0 8mm; }
+  .scan { font-size: 24pt; font-weight: 700; margin: 0 0 6mm; }
+  .qr { width: 112mm; height: 112mm; }
+  .url { font-size: 17pt; font-weight: 700; margin: 4mm 0 10mm; word-break: break-all; }
+  .phones { display: flex; align-items: center; gap: 6mm; font-size: 22pt; font-weight: 650; }
+  .phones svg { width: 20mm; height: 20mm; flex: none; fill: none; stroke: #111; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .en { font-size: 12pt; color: #666; margin-top: 10mm; }
+  @media print { body { background: #fff; } .controls { display: none; } .sheet { margin: 0 auto; } }
 </style>
 </head>
 <body>
 <div class="controls">
-  Wi-Fi name <input id="ssid" placeholder="ex. Eglise-Invites">
-  Password <input id="pass" placeholder="(optional)">
-  <button onclick="window.print()">Print</button>
-  <span style="color:#666">These fields add a "join the Wi-Fi" code. Leave empty for the listener code only.</span>
+  <button onclick="window.print()">Print both signs</button>
+  · One sign per page. Each code opens the listening page in its language. Please have a Wolof speaker check the Wolof.
 </div>
-<div class="sheet">
-  <h1>🎧 Traduction en français</h1>
-  <p class="en">French translation — scan with your phone camera</p>
-  <div class="codes">
-    <div class="code wifi" id="wifiBox" hidden>
-      <div class="step">① Wi-Fi</div>
-      <img id="wifiQr" alt="">
-      <div class="sub" id="wifiName"></div>
-    </div>
-    <div class="code">
-      <div class="step" id="pageStep">Scannez ce code</div>
-      <img id="pageQr" alt="">
-      <div class="sub">puis touchez « Écouter »</div>
-    </div>
-  </div>
-  <div class="url" id="url"></div>
-  <ol>
-    <li id="liWifi">Connectez-vous au Wi-Fi de l'église<span id="liSsid"></span>.</li>
-    <li>Ouvrez l'appareil photo et visez le code, ou tapez l'adresse ci-dessus.</li>
-    <li>Touchez <b>« Écouter »</b>. Utilisez des écouteurs.</li>
-    <li>Si le son s'arrête, gardez l'écran allumé.</li>
-  </ol>
+
+<div class="sheet" data-lang="fr">
+  <h1>Pour écouter la réunion en français</h1>
+  <div class="scan">Scannez le code QR</div>
+  <img class="qr" alt="Code QR">
+  <div class="url"></div>
+  <div class="phones"><svg viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="2.5" y="14" width="4" height="6.5" rx="1.5"/><rect x="17.5" y="14" width="4" height="6.5" rx="1.5"/></svg>
+    Prenez des écouteurs si vous en avez besoin.</div>
+  <div class="en">To listen to church in French, scan the QR code. Take some headphones if you need some.</div>
 </div>
+
+<div class="sheet" data-lang="wo">
+  <h1>Ngir déglu ndaje mi ci wolof</h1>
+  <div class="scan">Scannéel QR code bi</div>
+  <img class="qr" alt="QR code">
+  <div class="url"></div>
+  <div class="phones"><svg viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="2.5" y="14" width="4" height="6.5" rx="1.5"/><rect x="17.5" y="14" width="4" height="6.5" rx="1.5"/></svg>
+    Su nga soxlaa ay écouteurs, jëlal ci yi.</div>
+  <div class="en">To listen to church in Wolof, scan the QR code. Take some headphones if you need some.</div>
+</div>
+
 <script>
+  // Codes point at the address this page was opened on when it's public (e.g. live.clntacq.com),
+  // otherwise at the server's listener link; ?lang= opens the page in that language.
   const VIA_PUBLIC = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[|[\d.]+$)/.test(location.hostname);
-  fetch("/api/state").then(r => r.json()).then(s => {
-    const url = VIA_PUBLIC ? location.origin + "/" : s.listener_url;
-    document.getElementById("url").textContent = url;
-    document.getElementById("pageQr").src = "/api/qr?text=" + encodeURIComponent(url);
-  });
-  const ssid = document.getElementById("ssid"), pass = document.getElementById("pass");
-  const esc = (v) => v.replace(/([\\;,:"])/g, "\\$1");
-  function update() {
-    const has = ssid.value.trim().length > 0;
-    document.getElementById("wifiBox").hidden = !has;
-    document.getElementById("pageStep").textContent = has ? "② Traduction" : "Scannez ce code";
-    document.getElementById("liSsid").textContent = has ? ` « ${ssid.value.trim()} »` : "";
-    document.getElementById("wifiName").textContent = has ? ssid.value.trim() : "";
-    if (has) {
-      const t = pass.value ? `WIFI:T:WPA;S:${esc(ssid.value.trim())};P:${esc(pass.value)};;` : `WIFI:T:nopass;S:${esc(ssid.value.trim())};;`;
-      document.getElementById("wifiQr").src = "/api/qr?text=" + encodeURIComponent(t);
+  fetch("/api/state").then((r) => r.json()).then((s) => {
+    const base = (VIA_PUBLIC ? location.origin + "/" : s.listener_url).replace(/\/?$/, "/");
+    for (const sheet of document.querySelectorAll(".sheet")) {
+      const url = base + "?lang=" + sheet.dataset.lang;
+      sheet.querySelector(".qr").src = "/api/qr?text=" + encodeURIComponent(url);
+      sheet.querySelector(".url").textContent = base.replace(/^https?:\/\//, "").replace(/\/$/, "");
     }
-    localStorage.setItem("ssid", ssid.value);
-  }
-  ssid.value = localStorage.getItem("ssid") || "";
-  ssid.oninput = update; pass.oninput = update; update();
+  });
 </script>
 </body>
 </html>
