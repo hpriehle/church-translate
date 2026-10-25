@@ -89,6 +89,7 @@
   function switchLang(code) {
     if (code === lang) return;
     lang = code;
+    if (!startOverlay.hidden) showStart(true);  // the Start button follows the language
     localStorage.setItem("lang", code);
     langsEl.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", "false"));
     clearCaptions();
@@ -210,6 +211,7 @@
       if (err && err.name === "NotAllowedError") {
         soundOn = false; showMute();
         setState("Touchez le bouton pour activer le son", "warn");
+        showStart(true);
       } else {
         restartAudio();
       }
@@ -251,6 +253,21 @@
   }
 
   muteBtn.onclick = () => (soundOn ? mute() : unmute());
+
+  // Sound is on by default. Phones (iPhones always) only allow sound after a tap, so when the
+  // phone refuses, a full-screen Start button in the listener's language asks for that one tap.
+  const START_TEXT = {
+    fr: { label: "Commencer", hint: "Touchez pour écouter la traduction en français. Utilisez des écouteurs." },
+    wo: { label: "Tàmbali", hint: "Bësal fii ngir déglu tekki bi ci wolof. Jëfandikool ay écouteurs." },
+  };
+  const startOverlay = $("startOverlay");
+  function showStart(on) {
+    const t = START_TEXT[lang] || START_TEXT.fr;
+    $("startLabel").textContent = t.label;
+    $("startHint").textContent = t.hint;
+    startOverlay.hidden = !on;
+  }
+  $("startBtn").onclick = () => { showStart(false); unmute(); };
 
   audio.addEventListener("playing", () => { audioDelay = 1000; if (soundOn) setState("En direct", "live"); });
   audio.addEventListener("waiting", () => { if (soundOn) setState("Chargement…"); });
@@ -323,4 +340,6 @@
   showMute();
   updateWaiting();
   connect();
+  if (MODE === "stream") unmute();   // try to start the sound right away (the Start button appears if refused)
+  else showStart(true);
 })();

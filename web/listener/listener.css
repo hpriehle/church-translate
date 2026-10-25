@@ -71,3 +71,15 @@ footer {
 .state.live::before { content: ""; display: inline-block; width: .5em; height: .5em; border-radius: 50%;
                       background: currentColor; margin-right: .4em; vertical-align: .1em; }
 .state.warn { color: var(--accent); }
+
+/* Shown when the phone won't start sound by itself: one clear tap starts it. */
+.start-overlay { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.88);
+                 display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; }
+.start-overlay[hidden] { display: none; }
+.start-btn { display: flex; align-items: center; justify-content: center; gap: .7rem; width: min(80vw, 340px);
+             min-height: 5.5rem; border-radius: 2.75rem; border: 0; background: #2f7d44; color: #fff;
+             font: inherit; font-size: 1.9rem; font-weight: 750; cursor: pointer; box-shadow: 0 0 0 6px rgba(47,125,68,.25); }
+.start-btn:active { transform: scale(.97); }
+.start-btn svg { width: 2rem; height: 2rem; fill: currentColor; }
+.start-hint { color: #d6d3cf; font-size: 1.15rem; text-align: center; max-width: 22rem; margin: 1.4rem 0 0; line-height: 1.45; }
+
