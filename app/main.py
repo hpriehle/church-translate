@@ -272,15 +272,25 @@ def page(path: Path) -> HTMLResponse:
 _PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "x-forwarded-for", "x-real-ip", "forwarded")
 
 
-def _cookie_token(pin: str) -> str:
+OPERATOR, SPEAKER = "operator", "speaker"
+
+
+def _cookie_token(pin: str, role: str = OPERATOR) -> str:
     """What the browser keeps after signing in: a fingerprint of the password, not the password."""
     import hashlib
 
-    return hashlib.sha256(f"church-translate:{pin}".encode()).hexdigest()
+    tag = "church-translate" if role == OPERATOR else "church-translate:speaker"
+    return hashlib.sha256(f"{tag}:{pin}".encode()).hexdigest()
 
 
-def _is_operator(host: str | None, headers, query, cookies) -> bool:
-    """Operator = a browser on this machine, or anyone with the password (operator_pin).
+def _passwords() -> list[tuple[str, str]]:
+    srv = S.settings.server
+    return [(r, p) for r, p in ((OPERATOR, srv.operator_pin), (SPEAKER, srv.speaker_pin)) if p]
+
+
+def _role(host: str | None, headers, query, cookies) -> str | None:
+    """Who is asking: "operator" (a browser on this machine, or the operator password), "speaker" (the
+    speaker password: the speak page only), or None.
 
     Requests relayed by a tunnel/reverse proxy also come from localhost, so they never count as local.
     """
@@ -288,45 +298,77 @@ def _is_operator(host: str | None, headers, query, cookies) -> bool:
 
     proxied = any(h in headers for h in _PROXY_HEADERS)
     if not proxied and host and host.split("%")[0] in S.local_addrs:
-        return True
-    want = S.settings.server.operator_pin
-    if not want:
-        return False
-    given = query.get("key") or query.get("pin")
-    if given and hmac.compare_digest(given, want):
-        return True
+        return OPERATOR
+    given = query.get("key") or query.get("pin") or ""
     cookie = cookies.get("op_pin") or ""
-    return bool(cookie) and hmac.compare_digest(cookie, _cookie_token(want))
+    for role, want in _passwords():
+        if given and hmac.compare_digest(given, want):
+            return role
+        if cookie and hmac.compare_digest(cookie, _cookie_token(want, role)):
+            return role
+    return None
+
+
+def _request_role(request: Request) -> str | None:
+    return _role(request.client.host if request.client else None, request.headers, request.query_params, request.cookies)
+
+
+def _is_operator(host: str | None, headers, query, cookies) -> bool:
+    return _role(host, headers, query, cookies) == OPERATOR
 
 
 def require_operator(request: Request) -> None:
-    if not _is_operator(request.client.host if request.client else None, request.headers,
-                        request.query_params, request.cookies):
-        raise HTTPException(403, "Operator pages are only available on the computer running the server (or with the key).")
+    role = _request_role(request)
+    if role != OPERATOR:
+        raise HTTPException(403, "Only the operator password can do this." if role
+                            else "Not signed in: open /login (or use the computer running the server).")
 
 
-def _set_login_cookie(request: Request, resp: Response) -> Response:
-    resp.set_cookie("op_pin", _cookie_token(S.settings.server.operator_pin), httponly=True, samesite="lax",
+def require_speaker(request: Request) -> str:
+    """The speak page's actions: allowed with either password. Returns the role."""
+    role = _request_role(request)
+    if role is None:
+        raise HTTPException(403, "Not signed in: open /login (or use the computer running the server).")
+    return role
+
+
+def _set_login_cookie(request: Request, resp: Response, role: str = OPERATOR) -> Response:
+    pin = S.settings.server.operator_pin if role == OPERATOR else S.settings.server.speaker_pin
+    resp.set_cookie("op_pin", _cookie_token(pin, role), httponly=True, samesite="lax",
                     max_age=30 * 86400, secure=request.headers.get("x-forwarded-proto") == "https")
     return resp
 
 
 def _remember_key(request: Request, resp: Response) -> Response:
+    import hmac
+
     key = request.query_params.get("key") or request.query_params.get("pin")
-    if key and key == S.settings.server.operator_pin:
-        _set_login_cookie(request, resp)
+    for role, want in _passwords() if key else []:
+        if hmac.compare_digest(key, want):
+            return _set_login_cookie(request, resp, role)
     return resp
 
 
-def _operator_page(request: Request, path: Path) -> Response:
-    """An operator page, or the sign-in page if this browser isn't signed in yet."""
+def _operator_page(request: Request, path: Path, speaker_ok: bool = False) -> Response:
+    """An operator page, or the sign-in page if this browser isn't signed in yet. With the speaker
+    password, pages other than the speak/print pages lead to the speak page."""
     from fastapi.responses import RedirectResponse
     from urllib.parse import quote
 
-    if not _is_operator(request.client.host if request.client else None, request.headers,
-                        request.query_params, request.cookies):
+    role = _request_role(request)
+    if role is None:
         return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
+    if role == SPEAKER and not speaker_ok:
+        return RedirectResponse("/speak", status_code=303)
     return _remember_key(request, page(path))
+
+
+def _public_settings() -> dict[str, Any]:
+    """Settings for the pages: the passwords are never sent, only whether they are set."""
+    d = S.settings.model_dump()
+    for k in ("operator_pin", "speaker_pin"):
+        d["server"][k] = "set" if d["server"].get(k) else ""
+    return d
 
 
 _login_fails: dict[str, list[float]] = {}
@@ -359,10 +401,12 @@ async def login(request: Request):
     fails = [t for t in _login_fails.get(ip, []) if now - t < 900]
     if len(fails) >= 10:
         return RedirectResponse(f"/login?error=busy&next={quote(nxt)}", status_code=303)
-    want = S.settings.server.operator_pin
-    if want and hmac.compare_digest(password, want):
-        _login_fails.pop(ip, None)
-        return _set_login_cookie(request, RedirectResponse(nxt, status_code=303))
+    for role, want in _passwords():
+        if hmac.compare_digest(password, want):
+            _login_fails.pop(ip, None)
+            if role == SPEAKER and nxt not in ("/speak", "/print"):
+                nxt = "/speak"
+            return _set_login_cookie(request, RedirectResponse(nxt, status_code=303), role)
     fails.append(now)
     _login_fails[ip] = fails
     await asyncio.sleep(min(5, len(fails)))  # slow down guessing
@@ -446,7 +490,7 @@ async def qr(dark: str = "#000", light: str = "#fff"):
 
 @app.get("/api/qr")
 async def api_qr(request: Request, text: str):
-    require_operator(request)
+    require_speaker(request)
     return Response(netinfo.qr_svg(text), media_type="image/svg+xml", headers={"Cache-Control": "no-cache"})
 
 
@@ -465,13 +509,13 @@ async def operator_page(request: Request):
 
 @app.get("/speak", response_class=HTMLResponse)
 async def speak_page(request: Request):
-    return _operator_page(request, WEB_DIR / "speak" / "index.html")
+    return _operator_page(request, WEB_DIR / "speak" / "index.html", speaker_ok=True)
 
 
 @app.websocket("/ws/speak")
 async def ws_speak(ws: WebSocket):
     """Browser microphone → pipeline. First message: {"type":"hello","sample_rate":48000}; then int16 PCM frames."""
-    if not _is_operator(ws.client.host if ws.client else None, ws.headers, ws.query_params, ws.cookies):
+    if _role(ws.client.host if ws.client else None, ws.headers, ws.query_params, ws.cookies) is None:
         await ws.close(code=4403)
         return
     await ws.accept()
@@ -508,12 +552,12 @@ async def ws_speak(ws: WebSocket):
 
 @app.get("/print", response_class=HTMLResponse)
 async def print_page(request: Request):
-    return _operator_page(request, WEB_DIR / "print.html")
+    return _operator_page(request, WEB_DIR / "print.html", speaker_ok=True)
 
 
 @app.websocket("/ws/operator")
 async def ws_operator(ws: WebSocket):
-    if not _is_operator(ws.client.host if ws.client else None, ws.headers, ws.query_params, ws.cookies):
+    if _role(ws.client.host if ws.client else None, ws.headers, ws.query_params, ws.cookies) is None:
         await ws.close(code=4403)
         return
     await ws.accept()
@@ -528,10 +572,10 @@ def _samples() -> list[dict]:
 
 @app.get("/api/state")
 async def api_state(request: Request):
-    require_operator(request)
-    st = S.settings
+    role = require_speaker(request)
     return {
-        "settings": st.model_dump(),
+        "role": role,
+        "settings": _public_settings(),
         "devices": list_input_devices(),
         "voices": {c: list_voices_for(c) for c in S.pipeline.channels},
         "samples": _samples(),
@@ -566,15 +610,24 @@ async def api_start(request: Request):
 
 @app.post("/api/stop")
 async def api_stop(request: Request):
-    require_operator(request)
+    require_speaker(request)
     S.pipeline.stop()
     return {"ok": True}
 
 
+# What the speaker password may change (from the speak page): languages and voices, nothing else.
+SPEAKER_EDITABLE = {"languages": None, "voices": None, "tts": {"engine", "voice"}}
+
+
 @app.post("/api/settings")
 async def api_settings(request: Request):
-    require_operator(request)
+    role = require_speaker(request)
     body: dict[str, Any] = await request.json()
+    if role == SPEAKER:
+        for section, values in body.items():
+            allowed = SPEAKER_EDITABLE.get(section, set())
+            if section not in SPEAKER_EDITABLE or (allowed is not None and set(values) - allowed):
+                raise HTTPException(403, "Only the operator password can change that setting.")
     data = S.settings.model_dump()
     note = ""
     for section, values in body.items():
@@ -599,7 +652,23 @@ async def api_settings(request: Request):
         raise HTTPException(400, str(e))
     S.settings = new
     S.pipeline.apply_settings(new, S.glossaries)
-    return {"ok": True, "settings": new.model_dump(), "message": note}
+    return {"ok": True, "settings": _public_settings(), "message": note}
+
+
+@app.post("/api/speaker-password")
+async def api_speaker_password(request: Request):
+    """Set, change or remove the speaker password (write-only). Changing it signs out every speaker."""
+    require_operator(request)
+    pw = str((await request.json()).get("password") or "").strip()
+    if pw and (len(pw) < 6 or len(pw) > 100):
+        raise HTTPException(400, "Use 6 to 100 characters.")
+    if pw and pw == S.settings.server.operator_pin:
+        raise HTTPException(400, "Use a different password from the operator password.")
+    S.settings.server.speaker_pin = pw
+    save_override("server", {"speaker_pin": pw})
+    log.info("speaker password %s", "set" if pw else "removed")
+    return {"ok": True, "set": bool(pw),
+            "message": "Speaker password saved. Earlier speaker sign-ins no longer work." if pw else "Speaker password removed."}
 
 
 CLAUDE_CREDENTIALS = {  # kind → (variable in data/secrets.env, how it starts, name for messages)
@@ -670,7 +739,7 @@ async def api_upload(request: Request, file: UploadFile = File(...)):
 
 @app.post("/api/test-voice")
 async def api_test_voice(request: Request):
-    require_operator(request)
+    require_speaker(request)
     try:
         await S.pipeline.say_test()
     except Exception as e:

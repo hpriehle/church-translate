@@ -65,6 +65,7 @@
     if (!state.samples.length) fillSelect($("sample"), [{ value: "", label: "No recordings in samples/ — upload one" }], "");
 
     langs = state.languages || langs;
+    showSpeakerPw(!!s.server.speaker_pin);
     renderVoiceSelects(s);
     renderLangChecks(s);
     renderTableHead();
@@ -121,6 +122,19 @@
       log(r.message);
     } catch (e) { log("Claude access: " + e.message, "error"); }
   }
+  // Speaker password (write-only, like the Claude credentials).
+  const showSpeakerPw = (set) => { $("speakerPwState").textContent = set ? "Set: speakers can sign in with it." : "Not set: only the operator password works."; };
+  async function saveSpeakerPw(password) {
+    try {
+      const r = await api("/api/speaker-password", { password });
+      $("speakerPw").value = "";
+      showSpeakerPw(r.set);
+      log(r.message);
+    } catch (e) { log("Speaker password: " + e.message, "error"); }
+  }
+  $("speakerPwSave").onclick = () => { const v = $("speakerPw").value.trim(); if (v) saveSpeakerPw(v); };
+  $("speakerPwRemove").onclick = () => { if (confirm("Remove the speaker password? People using it will be signed out.")) saveSpeakerPw(""); };
+
   $("credSave").onclick = () => { const v = $("credValue").value.trim(); if (v) saveAccess($("credKind").value, v); };
   $("credForget").onclick = () => { if (confirm("Remove the saved token or key and use this computer's own Claude login?")) saveAccess("login", ""); };
 

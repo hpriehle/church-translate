@@ -29,7 +29,8 @@ WEB_DIR = ROOT / "web"
 class ServerCfg(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
-    operator_pin: str = ""
+    operator_pin: str = ""        # password for everything (operator page, settings, Claude access)
+    speaker_pin: str = ""         # optional second password: the speak page only (start/stop, languages)
     lan_ip: str = ""
     public_url: str = ""          # e.g. https://transcription.example.com/ when served through a tunnel
     use_public_url: bool = True   # listener link/QR: the public URL (if set) or the local-network address

@@ -351,6 +351,23 @@ def test_operator_sign_in_rules():
     assert not ok("203.0.113.9", tunnel, {"key": ""})                   # no password set: nobody remote
 
 
+def test_speaker_password_is_limited():
+    from app import main
+    from app.config import Settings
+
+    main.S.settings = Settings.model_validate({"server": {"operator_pin": "boss", "speaker_pin": "talk"}})
+    main.S.local_addrs = {"127.0.0.1"}
+    tunnel = {"cf-connecting-ip": "203.0.113.9"}
+    role = lambda query=None, cookies=None: main._role("127.0.0.1", tunnel, query or {}, cookies or {})
+    assert role({"key": "boss"}) == "operator" and role({"key": "talk"}) == "speaker"
+    assert role(cookies={"op_pin": main._cookie_token("talk", "speaker")}) == "speaker"
+    assert role(cookies={"op_pin": main._cookie_token("talk")}) is None     # a speaker cookie can't pose as operator
+    assert role({"key": "nope"}) is None
+    d = main._public_settings()
+    assert d["server"]["operator_pin"] == "set" and d["server"]["speaker_pin"] == "set"   # never sent
+    assert "boss" not in str(d) and "talk" not in str(d)
+
+
 def test_secrets_file(tmp_path):
     from app.config import load_secrets
 

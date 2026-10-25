@@ -67,6 +67,13 @@
       <div id="serverInfo" class="muted small">…</div>
       <button id="restart" class="ghost">⟳ Restart server</button>
       <div class="muted small">Picks up code and setting updates. Phones reconnect by themselves.</div>
+      <div class="access"><span class="k">Speaker password</span>
+        <div id="speakerPwState" class="small">…</div>
+        <label>New speaker password <input id="speakerPw" type="password" autocomplete="new-password" placeholder="at least 6 characters"></label>
+        <div class="two"><button id="speakerPwSave">Save</button><button id="speakerPwRemove">Remove</button></div>
+        <div class="muted small">Give this one to other people: it opens only the speak page (start/stop, languages,
+          voices), not settings or Claude access. Changing it signs out everyone who used the old one.</div>
+      </div>
     </section>
 
     <section>
