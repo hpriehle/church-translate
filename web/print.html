@@ -50,14 +50,14 @@
 
 <script>
   // Codes point at the address this page was opened on when it's public (e.g. live.clntacq.com),
-  // otherwise at the server's listener link; ?lang= opens the page in that language.
+  // otherwise at the server's listener link; #french / #wolof opens the page in that language.
   const VIA_PUBLIC = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[|[\d.]+$)/.test(location.hostname);
   fetch("/api/state").then((r) => r.json()).then((s) => {
     const base = (VIA_PUBLIC ? location.origin + "/" : s.listener_url).replace(/\/?$/, "/");
     for (const sheet of document.querySelectorAll(".sheet")) {
-      const url = base + "?lang=" + sheet.dataset.lang;
+      const url = base + "#" + ({ fr: "french", wo: "wolof" })[sheet.dataset.lang];
       sheet.querySelector(".qr").src = "/api/qr?text=" + encodeURIComponent(url);
-      sheet.querySelector(".url").textContent = base.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      sheet.querySelector(".url").textContent = url.replace(/^https?:\/\//, "");
     }
   });
 </script>

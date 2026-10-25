@@ -15,7 +15,12 @@
   "use strict";
   const params = new URLSearchParams(location.search);
   const MODE = params.get("mode") === "clips" ? "clips" : "stream";
-  let lang = params.get("lang") || localStorage.getItem("lang") || "";   // "" = server default
+  // Language from the link: /#french or /#wolof (what the printed QR codes use), then ?lang=, then
+  // what this phone chose last time; "" = the server's default.
+  const HASH_LANGS = { french: "fr", francais: "fr", "français": "fr", fr: "fr", wolof: "wo", wo: "wo" };
+  const hashLang = () => HASH_LANGS[decodeURIComponent(location.hash.slice(1)).toLowerCase()] || "";
+  let lang = hashLang() || params.get("lang") || localStorage.getItem("lang") || "";
+  if (hashLang()) localStorage.setItem("lang", lang);
   const KEEP_LINES = 6;
   const $ = (id) => document.getElementById(id);
   const captionsEl = $("captions"), waitingEl = $("waiting"), connEl = $("conn"), stateEl = $("audioState");
@@ -80,6 +85,7 @@
       langsEl.appendChild(b);
     }
   }
+  window.addEventListener("hashchange", () => { const h = hashLang(); if (h) switchLang(h); });
   function switchLang(code) {
     if (code === lang) return;
     lang = code;
