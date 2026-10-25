@@ -17,7 +17,7 @@
   h1 { font-size:1.1rem; margin:0; font-weight:650; }
   .pill { font-size:.85rem; padding:.2rem .7rem; border-radius:999px; background:#1d2229; color:var(--mute); white-space:nowrap; }
   .pill.live { background:#5a1111; color:#ff9a9a; font-weight:700; }
-  main { flex:1; display:flex; flex-direction:column; justify-content:center; padding:2rem 0; }
+  main { padding:1.4rem 0 1rem; }
   button.big { width:100%; min-height:7rem; border:0; border-radius:1.4rem; font-size:1.7rem; font-weight:750; color:#fff; background:#1d5a33; }
   button.big.on { background:#5a1d1d; }
   button.big:disabled { opacity:.5; }
@@ -26,7 +26,16 @@
   .status { text-align:center; color:var(--mute); font-size:.95rem; min-height:1.4em; }
   .status b { color:var(--fg); font-weight:650; }
   .err { color:var(--bad); text-align:center; min-height:1.3em; margin:.6rem 0 0; }
-  .tip { color:var(--mute); font-size:.9rem; text-align:center; }
+  h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); margin:.6rem 0 .5rem; font-weight:650; }
+  #feed { flex:1; }
+  #feed:empty::before { content:"The translation appears here once you start."; color:var(--mute); font-size:.95rem; }
+  .card { background:#161a1f; border:1px solid #262b33; border-radius:.8rem; padding:.7rem .85rem; margin-bottom:.6rem; }
+  .card .en { color:#aab2bd; font-size:.95rem; }
+  .card .fr { font-size:1.1rem; margin-top:.35rem; }
+  .card .lc { font-size:.7rem; font-weight:700; color:#8b93a1; border:1px solid #3a414b; border-radius:4px; padding:0 .3rem; margin-right:.3rem; vertical-align:2px; }
+  .card .meta { color:var(--mute); font-size:.75rem; margin-top:.15rem; }
+  .card.skipped, .card.merged { opacity:.5; }
+  .tip { color:var(--mute); font-size:.9rem; text-align:center; margin-top:1rem; }
   .tip a { color:#7fb2ff; }
 </style>
 </head>
@@ -43,6 +52,9 @@
     <div id="status" class="status"></div>
     <div id="err" class="err"></div>
   </main>
+
+  <h2>Live translation</h2>
+  <div id="feed"></div>
 
   <p class="tip">Keep this page open with the screen on and the phone plugged in.<br>
     Listeners open <b id="listenUrl">the listening page</b> with headphones.<br>

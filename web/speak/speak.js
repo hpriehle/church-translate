@@ -109,14 +109,44 @@
 
   $("btn").onclick = () => (sending ? stop() : start());
 
-  // ------------------------------------------------------------------ status line (operator feed)
+  // ------------------------------------------------------------------ live translation (operator feed)
+  const cards = new Map();
+  const lags = [];
+  function upsert(r) {
+    let el = cards.get(r.seq);
+    if (!el) {
+      el = document.createElement("div");
+      cards.set(r.seq, el);
+      $("feed").prepend(el);
+      while (cards.size > 60) { const k = cards.keys().next().value; cards.get(k).remove(); cards.delete(k); }
+    }
+    el.className = "card " + r.status;
+    const out = r.langs || {};
+    const many = Object.keys(out).length > 1;
+    let html = `<div class="en">${esc(r.en) || "…"}</div>`;
+    for (const [code, x] of Object.entries(out)) {
+      const note = ["skipped", "failed", "dropped"].includes(x.status) ? `<div class="meta">${esc(x.status)}</div>` : "";
+      html += `<div class="fr">${many ? `<span class="lc">${code.toUpperCase()}</span>` : ""}${esc(x.text) || "…"}</div>${note}`;
+      if (x.status === "aired" && x.caption_lag != null && !el.dataset["c" + code]) {
+        el.dataset["c" + code] = "1";
+        lags.push(x.caption_lag);
+        if (lags.length > 20) lags.shift();
+      }
+    }
+    el.innerHTML = html;
+  }
+  $("btn").addEventListener("click", () => { if (!sending) { cards.clear(); $("feed").innerHTML = ""; lags.length = 0; } });
+
+  // ------------------------------------------------------------------ status line
   function status(st) {
     const hub = (st.engine || {}).hub;
     const where = hub && hub.running ? hub.name : "";
     const n = st.listeners.captions;
     const live = st.pipeline.running || (hub && hub.running);
+    const lag = lags.length ? [...lags].sort((a, b) => a - b)[Math.floor(lags.length / 2)] : null;
     $("status").innerHTML = live
-      ? `<b>${n}</b> listener${n === 1 ? "" : "s"}` + (where ? ` · running on ${esc(where)}` : "")
+      ? `<b>${n}</b> listener${n === 1 ? "" : "s"}` + (lag != null ? ` · <span id="lag">${lag.toFixed(1)} s</span> behind` : "")
+        + (where ? ` · on ${esc(where)}` : "")
       : `${n} listener${n === 1 ? "" : "s"} connected`;
     const url = shownUrl(st.listener_url);
     if (url) $("listenUrl").textContent = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -129,6 +159,7 @@
     f.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.type === "status") status(m);
+      else if (m.type === "chunk") upsert(m);
     };
     f.onopen = () => { feedDelay = 1000; };
     f.onclose = (ev) => {

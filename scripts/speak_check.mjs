@@ -32,10 +32,12 @@ await sleep(+secs * 1000);
 await speak.click("#btn");
 await sleep(15000);
 const feed = await speak.$$eval("#feed .card", (cs) => cs.reverse().map((c) => ({
-  en: c.querySelector(".en").textContent, fr: c.querySelector(".fr").textContent, meta: c.querySelector(".meta").textContent })));
+  en: c.querySelector(".en")?.textContent || "", fr: [...c.querySelectorAll(".fr")].map((x) => x.textContent).join(" | "),
+  meta: c.querySelector(".meta")?.textContent || "" })));
 const lis = await listener.evaluate(() => ({ captions: document.querySelectorAll("#captions p").length,
   audioTime: window.__listener.audio.currentTime, state: document.getElementById("audioState").textContent }));
 await speak.screenshot({ path: "logs/speak.png", fullPage: false });
 await listener.screenshot({ path: "logs/listener-speak.png" });
-console.log(JSON.stringify({ err: await speak.textContent("#err"), lag: await speak.textContent("#lag"), feed, listener: lis }, null, 2));
+const lag = await speak.evaluate(() => document.getElementById("status").textContent);
+console.log(JSON.stringify({ err: await speak.textContent("#err"), lag, feed, listener: lis }, null, 2));
 await browser.close();
