@@ -35,6 +35,7 @@
 
   async function start() {
     $("err").textContent = "";
+    cards.clear(); $("feed").innerHTML = ""; lags.length = 0;  // a new meeting starts with an empty feed
     $("btn").disabled = true;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -135,7 +136,6 @@
     }
     el.innerHTML = html;
   }
-  $("btn").addEventListener("click", () => { if (!sending) { cards.clear(); $("feed").innerHTML = ""; lags.length = 0; } });
 
   // ------------------------------------------------------------------ status line
   function status(st) {

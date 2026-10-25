@@ -5,6 +5,8 @@ their connection halfway through and come back 5 s later (like a phone losing Wi
 check they get the captions they missed and the audio resumes.
 
     uv run python scripts/load_test.py --url http://127.0.0.1:8000 --phones 30 --seconds 120
+
+Phones alternate between the languages given with --langs (default: fr,wo).
 """
 from __future__ import annotations
 
@@ -17,8 +19,11 @@ import time
 import httpx
 import websockets
 
+# Cloudflare turns away Python's default user agents.
+UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) load-test"
 
-async def caption_client(base: str, idx: int, seconds: float, drop: bool, out: dict) -> None:
+
+async def caption_client(base: str, idx: int, seconds: float, drop: bool, out: dict, lang: str) -> None:
     ws_url = base.replace("http", "ws", 1) + "/ws/listen"
     got: dict[int, float] = {}
     last_seq = 0
@@ -28,8 +33,8 @@ async def caption_client(base: str, idx: int, seconds: float, drop: bool, out: d
     drop_at = time.monotonic() + seconds / 2 if drop else None
     while time.monotonic() < end:
         try:
-            async with websockets.connect(ws_url, open_timeout=5) as ws:
-                await ws.send(json.dumps({"type": "hello", "last_seq": last_seq, "boot": boot}))
+            async with websockets.connect(ws_url, open_timeout=10, user_agent_header=UA) as ws:
+                await ws.send(json.dumps({"type": "hello", "last_seq": last_seq, "boot": boot, "lang": lang}))
                 while time.monotonic() < end:
                     if drop_at and time.monotonic() > drop_at:
                         drop_at = None
@@ -48,18 +53,18 @@ async def caption_client(base: str, idx: int, seconds: float, drop: bool, out: d
         except Exception as e:
             reconnects += 1
             await asyncio.sleep(5 if isinstance(e, ConnectionResetError) else 1)
-    out[idx] = {"captions": got, "reconnects": reconnects, "dropped": drop}
+    out[idx] = {"captions": got, "reconnects": reconnects, "dropped": drop, "lang": lang}
 
 
-async def stream_client(base: str, idx: int, seconds: float, drop: bool, out: dict) -> None:
+async def stream_client(base: str, idx: int, seconds: float, drop: bool, out: dict, lang: str) -> None:
     total = 0
     stalls = 0
     end = time.monotonic() + seconds
     drop_at = time.monotonic() + seconds / 2 if drop else None
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=10)) as c:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=10), headers={"User-Agent": UA}) as c:
         while time.monotonic() < end:
             try:
-                async with c.stream("GET", base + f"/stream.mp3?phone={idx}") as r:
+                async with c.stream("GET", base + f"/stream/{lang}.mp3?phone={idx}") as r:
                     async for chunk in r.aiter_bytes():
                         total += len(chunk)
                         if time.monotonic() > end:
@@ -80,15 +85,18 @@ async def main() -> None:
     ap.add_argument("--url", default="http://127.0.0.1:8000")
     ap.add_argument("--phones", type=int, default=30)
     ap.add_argument("--seconds", type=float, default=120)
+    ap.add_argument("--langs", default="fr,wo")
     a = ap.parse_args()
+    langs = a.langs.split(",")
     base = a.url.rstrip("/")
     caps: dict = {}
     streams: dict = {}
     tasks = []
     for i in range(a.phones):
         drop = i % 3 == 0
-        tasks.append(caption_client(base, i, a.seconds, drop, caps))
-        tasks.append(stream_client(base, i, a.seconds, drop, streams))
+        lang = langs[i % len(langs)]
+        tasks.append(caption_client(base, i, a.seconds, drop, caps, lang))
+        tasks.append(stream_client(base, i, a.seconds, drop, streams, lang))
     t0 = time.monotonic()
     await asyncio.gather(*tasks)
     print(f"\n{a.phones} simulated phones for {time.monotonic() - t0:.0f}s against {base}")
@@ -97,9 +105,15 @@ async def main() -> None:
     print(f"Audio stream: per-phone throughput min {min(kbps):.1f} / median {statistics.median(kbps):.1f} kbps "
           f"(expected ≈ bitrate), stream errors {sum(s['stalls'] for s in streams.values())}")
 
+    for lang in langs:  # caption numbers are per language
+        group = {i: c for i, c in caps.items() if c["lang"] == lang}
+        report_captions(lang, group)
+
+
+def report_captions(lang: str, caps: dict) -> None:
     all_seqs = set().union(*(set(c["captions"]) for c in caps.values()))
     if not all_seqs:
-        print("Captions: none received (is a run in progress?)")
+        print(f"[{lang}] Captions: none received (is a run in progress?)")
         return
     # Ignore captions that only appeared in the last few seconds (clients were already finishing).
     first_seen = {seq: min(c["captions"][seq] for c in caps.values() if seq in c["captions"]) for seq in all_seqs}
@@ -115,13 +129,13 @@ async def main() -> None:
         ts = [c["captions"][seq] for c in steady if seq in c["captions"]]
         if len(ts) == len(steady):
             spread.append((max(ts) - min(ts)) * 1000)
-    print(f"Captions: {len(all_seqs)} distinct; phones with every caption: {complete}/{a.phones}; "
+    print(f"[{lang}] Captions: {len(all_seqs)} distinct; phones with every caption: {complete}/{len(caps)}; "
           f"dropped-and-reconnected phones with no gaps: {dropped_ok}/{n_drop}")
     if spread:
-        print(f"Caption fan-out spread across connected phones: median {statistics.median(spread):.0f} ms, max {max(spread):.0f} ms")
+        print(f"[{lang}] Caption fan-out spread across connected phones: median {statistics.median(spread):.0f} ms, max {max(spread):.0f} ms")
     bad = {i: m[:10] for i, m in missing.items() if m}
     if bad:
-        print("Missing captions:", bad)
+        print(f"[{lang}] Missing captions:", bad)
 
 
 if __name__ == "__main__":
