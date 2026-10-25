@@ -140,8 +140,8 @@ that Claude Code needs (which it doesn't have when started over SSH). After that
   shows **Public link: connected / offline**. If a building's network blocks it, set **Listener
   link → Local network** (phones on the same Wi-Fi) or use a hotspot / travel router.
 - The Mac is only kept awake, with its screen on, while a run is active (a screen that turns off
-  and locks can hold back the browser tab recording the microphone). Keep the lid open, and the Ollama fallback model is loaded when
-  a run starts, so an idle server uses little memory.
+  and locks can hold back the browser tab recording the microphone); keep the lid open. The Ollama
+  fallback model is loaded when a run starts, so an idle server uses little memory.
 - The first time the server uses the Mac's microphone from the background service, macOS asks
   whether "python3" may use the microphone. Click Allow on the Mac (once).
 
