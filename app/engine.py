@@ -412,3 +412,84 @@ class EngineClient:
         if not lost:
             self._send({"type": "done"})
         log.info("meeting for %s %s", urlparse(self.url).hostname, "cut off" if lost else "finished")
+
+
+
+class PublishClient(EngineClient):
+    """Engine side of Hear Church: publish this computer's own locally started meetings to the hub as the
+    congregation's live session. The hub never sends audio here; it only relays what this computer makes."""
+
+    def __init__(self, url: str, token: str, name: str) -> None:
+        super().__init__(url, token, name)
+        self.announced = False            # session_start sent on this link and not stopped yet
+        self.session_code = ""            # the hub's code for the running session, for resuming after a drop
+        self.refused_run = 0.0            # started_at of a meeting the hub refused (not asked again)
+        self._offered: list[str] = []
+
+    def info(self) -> dict[str, Any]:
+        return {**super().info(), "mode": "publish", "live": self.running}
+
+    async def _session(self, ws) -> None:
+        M = _m()
+        self._out = asyncio.Queue(maxsize=3000)
+        sender = asyncio.create_task(self._sender(ws, self._out))
+        st = M.S.settings.stream
+        self._send({"type": "hello", "name": self.name, "languages": list(M.S.pipeline.channels),
+                    "stream": {"sample_rate": st.sample_rate, "bitrate_kbps": st.bitrate_kbps}, "busy": False})
+        self._attach()
+        watcher = asyncio.create_task(self._publish_watch())
+        try:
+            async for m in ws:
+                if isinstance(m, bytes):
+                    continue
+                msg = json.loads(m)
+                if msg.get("type") == "session_started":
+                    self.session_code, self.running, self.last_error = msg.get("session") or "", True, ""
+                    log.info("live on %s%s", urlparse(self.url).hostname, " (resumed)" if msg.get("resumed") else "")
+                elif msg.get("type") == "session_refused":
+                    self.announced, self.running = False, False
+                    self.refused_run, self.last_error = _m().S.pipeline.started_at, str(msg.get("message") or "refused")
+                    log.warning("hub refused the meeting: %s", self.last_error)
+        finally:
+            sender.cancel()
+            watcher.cancel()
+            self._out = None
+
+    def _attach(self) -> None:
+        """Relay everything while a session is announced; the hub ignores it otherwise."""
+        M = _m()
+        for i, (code, ch) in enumerate(M.S.pipeline.channels.items()):
+            def hub_tap(msg, remember, code=code):
+                if self.announced:
+                    self._send({"type": "hub", "lang": code, "msg": msg, "remember": remember})
+
+            def mp3_tap(data, i=i):
+                if self.announced:
+                    self._send(bytes([i]) + data)
+            self._tap(ch.hub.taps, hub_tap)
+            self._tap(ch.broadcaster.taps, mp3_tap)
+
+    async def _publish_watch(self) -> None:
+        """Announce a meeting started on this computer, follow its languages, and stop it when it is over."""
+        M = _m()
+        p = M.S.pipeline
+        while True:
+            await asyncio.sleep(0.5)
+            if p.running and not self.announced and p.started_at != self.refused_run:
+                self._offered = list(p.on_channels)
+                self.announced = True
+                self._send({"type": "session_start", "languages": self._offered, "resume": self.session_code})
+            elif self.announced and not p.running:
+                self._send({"type": "session_stop"})
+                self.announced, self.running, self.session_code = False, False, ""
+                log.info("meeting over: session stopped on %s", urlparse(self.url).hostname)
+            elif self.announced and list(p.on_channels) != self._offered:
+                self._offered = list(p.on_channels)
+                self._send({"type": "languages", "languages": self._offered})
+
+    def _finish(self, lost: bool) -> None:
+        """The link dropped: stop relaying, keep the session code so the reconnect can resume the session."""
+        self.announced, self.running = False, False
+        self._detach()
+        if not _m().S.pipeline.running:
+            self.session_code = ""

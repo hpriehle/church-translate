@@ -22,7 +22,8 @@ from .broadcast.hub import Hub
 from .broadcast.mixer import Mixer
 from .broadcast.stream import Mp3Broadcaster
 from .channel import Channel
-from .engine import EngineClient, EngineHub
+from .engine import EngineClient, EngineHub, PublishClient
+from .hear import api as hear_api
 from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
 from .languages import LANGUAGES
@@ -189,6 +190,7 @@ async def lifespan(app: FastAPI):
     if S.mode_override:
         S.settings.translate.mode = S.mode_override
     S.started = time.time()
+    hear_api.setup(S.settings)
     S.version = _code_version()
     S.local_addrs = netinfo.local_addresses()
     st = S.settings
@@ -216,9 +218,12 @@ async def lifespan(app: FastAPI):
         if ch.on:  # a language switched off stays unloaded until it is switched on
             ch.activate()
     eng = st.engine
-    if eng.hub_url and eng.token:  # this computer runs the meetings of a public server
-        import platform
+    import platform
 
+    if eng.hub_url and eng.device_token:  # this computer publishes its own meetings as a Hear Church congregation
+        S.engine_client = PublishClient(eng.hub_url, eng.device_token, eng.name or platform.node().split(".")[0])
+        bg.append(asyncio.create_task(S.engine_client.run_forever()))
+    elif eng.hub_url and eng.token:  # this computer runs the meetings of a public server
         S.engine_client = EngineClient(eng.hub_url, eng.token, eng.name or platform.node().split(".")[0])
         bg.append(asyncio.create_task(S.engine_client.run_forever()))
 
@@ -265,6 +270,7 @@ def _shutdown() -> None:
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+app.include_router(hear_api.router)  # Hear Church: sign-up, /c/<slug>, /ws/engine, /admin
 
 
 @app.middleware("http")
@@ -408,6 +414,8 @@ def _public_settings() -> dict[str, Any]:
     d = S.settings.model_dump()
     for k in ("operator_pin", "speaker_pin"):
         d["server"][k] = "set" if d["server"].get(k) else ""
+    for k in ("token", "device_token"):
+        d["engine"][k] = "set" if d["engine"].get(k) else ""
     return d
 
 
@@ -475,7 +483,10 @@ async def stream_lang(code: str):
 
 
 def _stream(ch: Channel) -> StreamingResponse:
-    broadcaster = ch.broadcaster
+    return mp3_response(ch.broadcaster, f"Traduction en direct ({ch.lang.name})")
+
+
+def mp3_response(broadcaster: Mp3Broadcaster, name: str) -> StreamingResponse:
     sub, burst = broadcaster.subscribe()
 
     async def body():
@@ -492,7 +503,7 @@ def _stream(ch: Channel) -> StreamingResponse:
 
     headers = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache",
                "X-Content-Type-Options": "nosniff", "Access-Control-Allow-Origin": "*",
-               "icy-name": f"Traduction en direct ({ch.lang.name})"}
+               "icy-name": name}
     return StreamingResponse(body(), media_type="audio/mpeg", headers=headers)
 
 
@@ -618,12 +629,6 @@ async def ws_speak(ws: WebSocket):
             eh.stop_run()
         if source is not None:
             source.stop()
-
-
-@app.websocket("/ws/engine")
-async def ws_engine(ws: WebSocket):
-    """A faster computer offering to run this server's meetings (see app/engine.py)."""
-    await S.engine_hub.serve(ws)
 
 
 @app.get("/print", response_class=HTMLResponse)

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hear Church: congregations</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 1.5em; background: #111; color: #e8e6e3; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .4em .6em; border-bottom: 1px solid #333; }
+  .hidden td { opacity: .5 }
+  .live { color: #6c6; font-weight: 600 }
+  button { font: inherit; padding: .25em .7em; cursor: pointer; }
+  a { color: #f0c46c }
+</style>
+</head>
+<body>
+<h1>Congregations</h1>
+<p id="msg"></p>
+<table>
+  <thead><tr><th>Name</th><th>Church</th><th>E-mail</th><th>Macs</th><th>Status</th><th>Created</th><th></th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+async function load() {
+  const r = await fetch("/api/admin/congregations");
+  if (!r.ok) { document.getElementById("msg").textContent = "Could not load (" + r.status + ")"; return; }
+  const rows = document.getElementById("rows");
+  rows.innerHTML = "";
+  for (const c of (await r.json()).congregations) {
+    const tr = document.createElement("tr");
+    if (c.hidden) tr.className = "hidden";
+    const cell = (t) => { const td = document.createElement("td"); td.textContent = t; tr.appendChild(td); return td; };
+    const name = cell(""); const a = document.createElement("a"); a.href = "/c/" + c.slug; a.textContent = c.name; name.appendChild(a);
+    cell(c.church + (c.stake ? " · " + c.stake : ""));
+    cell(c.email + (c.email_verified ? "" : " (not verified)"));
+    cell(c.devices);
+    const st = cell(c.hidden ? "hidden" : c.live ? "LIVE · " + c.listeners + " listening" : "offline");
+    if (c.live) st.className = "live";
+    cell(new Date(c.created_at * 1000).toLocaleDateString());
+    const b = document.createElement("button");
+    b.textContent = c.hidden ? "Unhide" : "Hide";
+    b.onclick = async () => {
+      await fetch("/api/admin/congregations/" + c.id + "/hidden", { method: "POST", body: JSON.stringify({ hidden: !c.hidden }) });
+      load();
+    };
+    cell("").appendChild(b);
+    rows.appendChild(tr);
+  }
+}
+load();
+</script>
+</body>
+</html>
