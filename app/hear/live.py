@@ -37,6 +37,9 @@ log = logging.getLogger("hear.live")
 _SKIP_KINDS = {"languages", "lang_state", "session", "status", "clip"}
 
 
+LISTENERS_EVERY_S = 5.0   # how often a live session tells its engine how many phones listen
+
+
 class Link:
     """One engine connection."""
 
@@ -118,9 +121,20 @@ class Live:
             self.lost(link)
 
     async def _sender(self, link: Link) -> None:
+        """Everything queued for the engine, plus the listener count whenever it changes (the app shows it)."""
+        reported = None
         try:
             while True:
-                await link.ws.send_text(json.dumps(await link.out.get(), ensure_ascii=False))
+                try:
+                    item = await asyncio.wait_for(link.out.get(), LISTENERS_EVERY_S)
+                except asyncio.TimeoutError:
+                    s = link.session
+                    count = (s.listeners(), s.captions()) if s else None
+                    if count is None or count == reported:
+                        continue
+                    reported = count
+                    item = {"type": "listeners", "stream": count[0], "captions": count[1]}
+                await link.ws.send_text(json.dumps(item, ensure_ascii=False))
         except Exception:
             pass
 

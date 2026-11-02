@@ -53,6 +53,12 @@
   async function load() {
     state = await api("/api/state");
     const s = state.settings;
+    if (state.status.app_mode && !document.body.classList.contains("app")) {
+      // The Mac app: its own microphone, no browser capture.
+      document.body.classList.add("app");
+      document.querySelector("input[name=src][value=mic]").checked = true;
+      showSource();
+    }
     devices = state.devices;
     const devItems = devices.map((d) => ({ value: d.name, label: d.name + (d.default ? " (default)" : "") + ` · ${d.channels}ch` }));
     if (!devItems.length) devItems.push({ value: "", label: "No input devices found" });

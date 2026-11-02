@@ -80,3 +80,7 @@ select.inline { display:inline-block; width:auto; margin-left:.5rem; padding:.15
 .switch input:checked::after { transform:translateX(18px); }
 .switch .state { color:var(--mute); font-size:12px; margin-left:auto; margin-right:.2rem; }
 
+
+/* Inside the Hear Church Mac app: the app manages Claude access, restarts and the listener link. */
+.app .app-hide { display: none !important; }
+body:not(.app) .app-only { display: none; }

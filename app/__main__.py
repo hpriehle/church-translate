@@ -25,6 +25,8 @@ def main() -> None:
     p.add_argument("--exit-when-done", action="store_true", help="test mode: quit after the file has been fully processed")
     p.add_argument("--translator", choices=["auto", "ollama"], help="this run only: override [translate].mode")
     p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--app", action="store_true",
+                   help="run inside the Hear Church Mac app: this Mac only, Claude through the API key, no browser")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
 
@@ -51,14 +53,17 @@ def main() -> None:
     appmod.S.port_override = args.port
     appmod.S.mode_override = args.translator
     appmod.S.argv = sys.argv[1:]
+    appmod.S.app_mode = args.app
 
-    if settings.server.open_browser and not args.no_browser and not args.exit_when_done:
+    # The app shows the operator page itself, and only this Mac may open it.
+    host = "127.0.0.1" if args.app else settings.server.host
+    if settings.server.open_browser and not args.no_browser and not args.exit_when_done and not args.app:
         def _open():
             time.sleep(2.5)
             webbrowser.open(f"http://localhost:{port}/operator")
         threading.Thread(target=_open, daemon=True).start()
 
-    uvicorn.run(appmod.app, host=settings.server.host, port=port, log_level="warning",
+    uvicorn.run(appmod.app, host=host, port=port, log_level="warning",
                 ws_ping_interval=20, ws_ping_timeout=30, timeout_keep_alive=30)
 
 

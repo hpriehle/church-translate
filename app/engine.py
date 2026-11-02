@@ -284,8 +284,9 @@ class EngineClient:
             delay = min(60.0, delay * 2)
 
     def _stay_awake(self) -> None:
-        """A Mac serving as engine must not fall asleep while plugged in (lid open)."""
-        if sys.platform != "darwin":
+        """A Mac serving as engine must not fall asleep while plugged in (lid open). In the Hear Church app
+        the Mac only stays awake while a meeting runs (the app and the pipeline handle that)."""
+        if sys.platform != "darwin" or _m().S.app_mode:
             return
         pid = os.getpid()
         if subprocess.run(["pgrep", "-f", f"caffeinate -is -w {pid}"], capture_output=True).returncode != 0:
@@ -426,9 +427,11 @@ class PublishClient(EngineClient):
         self.refused_run = 0.0            # started_at of a meeting the hub refused (not asked again)
         self._offered: list[str] = []
         self.notice = ""                  # the hub's last refusal / ending of our session, for the operator page
+        self.listeners = {"stream": 0, "captions": 0}  # phones on the hub, as it reports them
 
     def info(self) -> dict[str, Any]:
-        return {**super().info(), "mode": "publish", "live": self.running, "notice": self.notice}
+        return {**super().info(), "mode": "publish", "live": self.running, "notice": self.notice,
+                "listeners": self.listeners if self.running else {"stream": 0, "captions": 0}}
 
     async def _session(self, ws) -> None:
         M = _m()
@@ -451,6 +454,8 @@ class PublishClient(EngineClient):
                     self.announced, self.running = False, False
                     self.refused_run, self.notice = _m().S.pipeline.started_at, str(msg.get("message") or "refused")
                     log.warning("hub refused the meeting: %s", self.notice)
+                elif msg.get("type") == "listeners":
+                    self.listeners = {"stream": int(msg.get("stream") or 0), "captions": int(msg.get("captions") or 0)}
                 elif msg.get("type") == "session_ended":  # the hub closed it (e.g. hidden): stop sending, don't re-announce
                     self.announced, self.running, self.session_code = False, False, ""
                     self.refused_run, self.notice = _m().S.pipeline.started_at, str(msg.get("message") or "ended by the server")

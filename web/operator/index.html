@@ -17,9 +17,9 @@
   <div class="stat wide"><span class="k">Input level</span><div class="meter"><div id="level"></div></div></div>
   <div class="stat"><span class="k">Speech-to-text</span><span id="sttState" class="v">…</span></div>
   <div class="stat"><span class="k">Claude</span><span id="claudeState" class="v">…</span></div>
-  <div class="stat"><span class="k">Ollama</span><span id="ollamaState" class="v">…</span></div>
+  <div class="stat app-hide"><span class="k">Ollama</span><span id="ollamaState" class="v">…</span></div>
   <div class="stat"><span class="k">Claude usage</span><span id="usage" class="v">–</span></div>
-  <div class="stat"><span class="k">Public link</span><span id="tunnelState" class="v">–</span></div>
+  <div class="stat app-hide"><span class="k">Public link</span><span id="tunnelState" class="v">–</span></div>
 </header>
 
 <div class="layout">
@@ -27,8 +27,8 @@
     <section>
       <h2>Source</h2>
       <div class="seg">
-        <label><input type="radio" name="src" value="browser" checked> Microphone (this browser)</label>
-        <label><input type="radio" name="src" value="mic"> Microphone (server)</label>
+        <label class="app-hide"><input type="radio" name="src" value="browser" checked> Microphone (this browser)</label>
+        <label><input type="radio" name="src" value="mic"> Microphone (<span class="app-hide">server</span><span class="app-only">this Mac</span>)</label>
         <label><input type="radio" name="src" value="file"> Test recording</label>
       </div>
       <div id="browserBox">
@@ -65,14 +65,14 @@
     <section>
       <h2>Server</h2>
       <div id="serverInfo" class="muted small">…</div>
-      <button id="restart" class="ghost">⟳ Restart server</button>
-      <div class="muted small">Picks up code and setting updates. Phones reconnect by themselves.</div>
+      <button id="restart" class="ghost app-hide">⟳ Restart server</button>
+      <div class="muted small app-hide">Picks up code and setting updates. Phones reconnect by themselves.</div>
       <div class="access" id="engineBox" hidden><span class="k">Engine (faster computer)</span>
         <div id="engineInfo" class="small">…</div>
         <label class="switch" id="engineUseRow"><span>Run meetings on it while it's online</span>
           <input type="checkbox" id="engineUse"></label>
       </div>
-      <div class="access"><span class="k">Speaker password</span>
+      <div class="access app-hide"><span class="k">Speaker password</span>
         <div id="speakerPwState" class="small">…</div>
         <label>New speaker password <input id="speakerPw" type="password" autocomplete="new-password" placeholder="at least 6 characters"></label>
         <div class="two"><button id="speakerPwSave">Save</button><button id="speakerPwRemove">Remove</button></div>
@@ -87,15 +87,15 @@
       <a class="ghost button" href="/static/voices/index.html" target="_blank">🎧 Compare voice samples</a>
       <label>Rate <span id="rateVal" class="muted"></span><input id="rate" type="range" min="140" max="260" step="5"></label>
       <label>Volume <span id="volVal" class="muted"></span><input id="volume" type="range" min="0.2" max="2" step="0.05"></label>
-      <label>Translator
+      <label class="app-hide">Translator
         <select id="mode"><option value="auto">Claude (Ollama fallback)</option><option value="claude">Claude only</option><option value="ollama">Ollama only (offline)</option></select>
       </label>
       <div class="two">
         <label>Claude model <select id="claudeModel"><option>opus</option><option>sonnet</option><option>haiku</option></select></label>
-        <label>Fallback after (s) <input id="timeout" type="number" min="2" max="20" step="0.5"></label>
+        <label class="app-hide">Fallback after (s) <input id="timeout" type="number" min="2" max="20" step="0.5"></label>
       </div>
-      <label>Ollama model <input id="ollamaModel" type="text"></label>
-      <div class="access"><span class="k">Claude access</span>
+      <label class="app-hide">Ollama model <input id="ollamaModel" type="text"></label>
+      <div class="access app-hide"><span class="k">Claude access</span>
         <div id="claudeAccess" class="small">…</div>
         <label>Kind <select id="credKind"><option value="token">Subscription token</option><option value="api_key">API key</option></select></label>
         <label>Paste it here <input id="credValue" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
@@ -109,7 +109,7 @@
       <h2>Listener link</h2>
       <img id="qr" alt="QR code for the listener page">
       <a id="url" class="url" target="_blank"></a>
-      <label>Listener link <select id="lanIp"></select></label>
+      <label class="app-hide">Listener link <select id="lanIp"></select></label>
       <a class="ghost button" id="printLink" href="/print" target="_blank">🖨 Printable sign</a>
     </section>
   </aside>

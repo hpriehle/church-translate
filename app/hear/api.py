@@ -32,7 +32,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..config import LOG_DIR, ROOT, WEB_DIR
+from ..config import HOME, LOG_DIR, WEB_DIR
 from .db import Database
 from .geo import Geocoder, bounding_box, hide_coordinates_in_access_log, in_box
 from .live import Live
@@ -66,7 +66,7 @@ def setup(settings) -> Hear:
     """Open the database and build the registry (called once at server start, and by tests)."""
     global H
     cfg = settings.hearchurch
-    path = ROOT / cfg.db_path
+    path = HOME / cfg.db_path
     db = Database(path)
     H = Hear(db, Mailer.from_settings(cfg, LOG_DIR / "outbox.log"), Live(db, settings.stream, cfg.grace_s))
     return H

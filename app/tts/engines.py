@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..config import MODELS_DIR, TtsCfg
+from ..config import MODELS_DIR, PIPER_DIR, TtsCfg
 
 log = logging.getLogger("tts")
 
@@ -115,7 +115,6 @@ class SayTts:
 
 # ------------------------------------------------------------------ Piper
 
-PIPER_DIR = MODELS_DIR / "piper"
 DEFAULT_PIPER_VOICE = "fr_FR-tom-medium"
 _PIPER_NAMES = {"tom": "Tom (male)", "siwis": "Siwis (female)", "upmc": "UPMC (female)",
                 "gilles": "Gilles (male)", "mls": "MLS"}

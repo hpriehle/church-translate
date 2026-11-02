@@ -17,6 +17,7 @@ from typing import Any
 
 from ..config import TranslateCfg
 from ..languages import LANGUAGES, Language
+from .api_session import ApiSession
 from .claude_session import ClaudeSession, Usage, claude_binary
 from .ollama import OllamaClient
 from .prompts import build_system_prompt, clean_output, seed_message, user_message
@@ -68,7 +69,7 @@ class Translator:
         self.retired_usage = Usage()
         self.counts: Counter[str] = Counter()
         self.last_error = ""
-        self.has_claude = claude_binary() is not None
+        self.has_claude = cfg.backend == "api" or claude_binary() is not None
         self.sessions_started = 0
         self.last_activity = 0.0
 
@@ -129,8 +130,9 @@ class Translator:
     def reload(self, cfg: TranslateCfg, glossary: dict[str, Any]) -> None:
         new_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code)
         restart = (new_prompt != self.system_prompt or cfg.claude_model != self.cfg.claude_model
-                   or cfg.claude_effort != self.cfg.claude_effort)
+                   or cfg.claude_effort != self.cfg.claude_effort or cfg.backend != self.cfg.backend)
         self.cfg = cfg
+        self.has_claude = cfg.backend == "api" or claude_binary() is not None
         self.system_prompt = new_prompt
         self.ollama.url = cfg.ollama_url.rstrip("/")
         self.ollama.timeout_s = cfg.ollama_timeout_s
@@ -190,7 +192,8 @@ class Translator:
                 asyncio.create_task(self._retire(old))
 
     async def _prepare_standby(self) -> None:
-        s = ClaudeSession(self.system_prompt, self.cfg.claude_model, self.cfg.claude_effort, self.workdir / self.lang.code)
+        session_type = ApiSession if self.cfg.backend == "api" else ClaudeSession
+        s = session_type(self.system_prompt, self.cfg.claude_model, self.cfg.claude_effort, self.workdir / self.lang.code)
         try:
             await s.start()
             self.sessions_started += 1

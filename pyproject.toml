@@ -24,6 +24,7 @@ dependencies = [
     "torch>=2.4; sys_platform == 'darwin'",
     "transformers>=4.45; sys_platform == 'darwin'",
     "sentencepiece>=0.2; sys_platform == 'darwin'",
+    "anthropic>=1.0",
 ]
 
 [project.optional-dependencies]

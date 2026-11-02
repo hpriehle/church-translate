@@ -24,7 +24,7 @@ from .broadcast.stream import Mp3Broadcaster
 from .channel import Channel
 from .engine import EngineClient, EngineHub, PublishClient
 from .hear import api as hear_api
-from .config import (ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
+from .config import (HOME, ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
 from .languages import LANGUAGES
 from .pipeline import Pipeline
@@ -56,6 +56,7 @@ class State:
     exit_when_done: bool = False
     port_override: int | None = None
     mode_override: str | None = None
+    app_mode: bool = False                       # run by the Hear Church Mac app (see `python -m app --app`)
     tunnel: dict = {"state": "unknown"}
     engine_hub: EngineHub = EngineHub()          # a faster computer running our meetings (if linked)
     engine_client: EngineClient | None = None    # this computer running another server's meetings
@@ -156,6 +157,7 @@ def full_status() -> dict[str, Any]:
         "listener_url": listener_url(),
         "tunnel": S.tunnel,
         "claude_access": claude_access(),
+        "app_mode": S.app_mode,
     }
 
 
@@ -189,6 +191,9 @@ async def lifespan(app: FastAPI):
         S.settings.server.port = S.port_override
     if S.mode_override:
         S.settings.translate.mode = S.mode_override
+    if S.app_mode:  # no Ollama and no Claude Code inside the app: the congregation's own API key
+        S.settings.translate.mode = "claude"
+        S.settings.translate.backend = "api"
     S.started = time.time()
     hear_api.setup(S.settings)
     S.version = _code_version()
@@ -205,7 +210,7 @@ async def lifespan(app: FastAPI):
         b = Mp3Broadcaster(sr, st.stream.bitrate_kbps, st.stream.burst_s)
         m = Mixer(sr, on_frame=b.feed)
         m.volume = st.tts.volume
-        tr = Translator(st.translate, S.glossaries[lang.code], ROOT / "data" / "claude-workdir", lang)
+        tr = Translator(st.translate, S.glossaries[lang.code], HOME / "data" / "claude-workdir", lang)
         tts = TtsRunner(tts_for(st, lang.code), sr, lazy=True)
         ch = Channel(S.pipeline, lang, tr, tts, m, b, Hub(f"listen-{lang.code}", history=300, queue_size=400))
         ch.on = lang.code in st.languages
@@ -670,6 +675,38 @@ async def api_state(request: Request):
     }
 
 
+@app.get("/api/status")
+async def api_status(request: Request):
+    """The live status alone (what /ws/operator pushes), for the Mac app's window and menu bar."""
+    require_operator(request)
+    return full_status()
+
+
+@app.get("/api/packages")
+async def api_packages(request: Request):
+    """Whether the models for the switched-on languages are on this computer (the Mac app's preflight)."""
+    require_operator(request)
+    from .packages import PACKAGES
+
+    return {"packages": await PACKAGES.status(S.settings)}
+
+
+@app.post("/api/packages/download")
+async def api_packages_download(request: Request):
+    require_operator(request)
+    from .packages import PACKAGES
+
+    def load_missing_voices() -> None:
+        for ch in S.pipeline.channels.values():
+            if ch.on and ch.tts.engine is None:
+                asyncio.create_task(ch.tts.load())
+
+    PACKAGES.on_ready = load_missing_voices
+    await PACKAGES.status(S.settings)
+    PACKAGES.download_missing(S.settings)
+    return {"packages": await PACKAGES.status(S.settings)}
+
+
 @app.post("/api/start")
 async def api_start(request: Request):
     require_operator(request)
@@ -861,7 +898,7 @@ async def _restart_in_place() -> None:
             proc.kill()
         log.info("git pull before restart: exit %s", proc.returncode)
     uv = shutil.which("uv")
-    if uv and (ROOT / "uv.lock").exists():
+    if uv and (ROOT / "uv.lock").exists() and not S.app_mode:
         # Pick up new dependencies; --inexact never removes packages (e.g. dev extras).
         proc = await asyncio.create_subprocess_exec(uv, "sync", "--quiet", "--inexact", cwd=str(ROOT))
         try:

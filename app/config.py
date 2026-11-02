@@ -11,19 +11,35 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
+# Where this computer's own files go (settings, logs, glossaries, downloaded voices). The project folder by
+# default; the Hear Church Mac app sets HEARCHURCH_HOME to ~/Library/Application Support/Hear Church because
+# the code itself sits read-only inside the signed app.
+HOME = Path(os.environ["HEARCHURCH_HOME"]).expanduser() if os.environ.get("HEARCHURCH_HOME") else ROOT
 CONFIG_PATH = ROOT / "config.toml"
 # Per platform, because the project folder may be synced between a Mac and a Linux box
 # (e.g. Syncthing) and each needs its own engines/voices: overrides.darwin.json, overrides.linux.json.
-OVERRIDES_PATH = ROOT / "data" / f"overrides.{sys.platform}.json"
+OVERRIDES_PATH = HOME / "data" / f"overrides.{sys.platform}.json"
 # Claude credentials for the translator (never committed): CLAUDE_CODE_OAUTH_TOKEN (from
 # `claude setup-token`, uses a Claude subscription) or ANTHROPIC_API_KEY (pay per use).
-SECRETS_PATH = ROOT / "data" / "secrets.env"
+SECRETS_PATH = HOME / "data" / "secrets.env"
 SECRET_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
-GLOSSARY_PATH = ROOT / "glossary.json"
-LOG_DIR = ROOT / "logs"
-SAMPLES_DIR = ROOT / "samples"
-MODELS_DIR = ROOT / "models"
+LOG_DIR = HOME / "logs"
+SAMPLES_DIR = HOME / "samples"
+MODELS_DIR = ROOT / "models"          # shipped with the code (speech detector, Wolof speakers)
+PIPER_DIR = HOME / "models" / "piper"  # downloaded voices
 WEB_DIR = ROOT / "web"
+
+
+def user_file(name: str) -> Path:
+    """A file the operator page edits (e.g. a glossary): in HOME, first copied there from the code's default."""
+    path = HOME / name
+    if HOME != ROOT and not path.exists() and (ROOT / name).exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((ROOT / name).read_bytes())
+    return path
+
+
+GLOSSARY_PATH = user_file("glossary.json")
 
 
 class ServerCfg(BaseModel):
@@ -87,6 +103,8 @@ class SttCfg(BaseModel):
 
 class TranslateCfg(BaseModel):
     mode: str = "auto"
+    backend: str = "cli"       # how Claude is reached: "cli" = the `claude` CLI (subscription or key),
+                               # "api" = the Anthropic API directly with ANTHROPIC_API_KEY (the Mac app)
     claude_model: str = "opus"
     claude_effort: str = "low"
     claude_timeout_s: float = 6.0
@@ -188,6 +206,8 @@ def save_secrets(values: dict[str, str], path: Path = SECRETS_PATH) -> None:
 def claude_access(path: Path = SECRETS_PATH) -> str:
     """Which credential the translator uses: "api_key", "token" (subscription) or "login" (this computer's)."""
     s = load_secrets(path)
+    if os.environ.get("ANTHROPIC_API_KEY"):  # e.g. passed in by the Mac app from the Keychain
+        return "api_key"
     return "api_key" if "ANTHROPIC_API_KEY" in s else "token" if "CLAUDE_CODE_OAUTH_TOKEN" in s else "login"
 
 
@@ -210,7 +230,24 @@ def load_settings(config_path: Path = CONFIG_PATH) -> Settings:
             data = _deep_merge(data, json.loads(OVERRIDES_PATH.read_text()))
         except json.JSONDecodeError:
             pass
-    return Settings.model_validate(data)
+    return Settings.model_validate(_env_overrides(data))
+
+
+# Set by the Hear Church Mac app for the engine it runs: they win over config.toml and the overrides file,
+# and the device token never has to be written to disk.
+ENV_OVERRIDES = {
+    "HEARCHURCH_HUB_URL": ("engine", "hub_url"),
+    "HEARCHURCH_DEVICE_TOKEN": ("engine", "device_token"),
+    "HEARCHURCH_DEVICE_NAME": ("engine", "name"),
+    "HEARCHURCH_LISTENER_URL": ("server", "public_url"),   # the congregation's hearchurch.com/c/<slug> page
+}
+
+
+def _env_overrides(data: dict[str, Any]) -> dict[str, Any]:
+    for var, (section, key) in ENV_OVERRIDES.items():
+        if os.environ.get(var):
+            data = _deep_merge(data, {section: {key: os.environ[var]}})
+    return data
 
 
 def save_override(section: str, values: Any) -> None:

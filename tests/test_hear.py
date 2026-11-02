@@ -685,3 +685,17 @@ def test_find_page_and_legacy_root_unchanged(client, hear):
     assert client.get("/static/find/find.js").status_code == 200
     root = client.get("/")
     assert root.status_code == 200 and "/static/listener/listener.js?v=" in root.text and "Find my congregation" not in root.text
+
+
+async def test_hub_reports_listener_counts_to_the_engine(server, hear, monkeypatch):
+    from app.hear import live as hear_live
+
+    monkeypatch.setattr(hear_live, "LISTENERS_EVERY_S", 0.1)
+    _cong, token = make_cong(hear)
+    eng = await engine(server, token)
+    await start(eng, ["fr"])
+    ws_l, _ = await listener(server, "dakar-ward")
+    m = await recv(eng, "listeners")
+    assert m == {"type": "listeners", "stream": 0, "captions": 1}
+    await ws_l.close()
+    assert (await recv(eng, "listeners"))["captions"] == 0                 # only sent again when it changes

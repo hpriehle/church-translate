@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import ROOT
+from .config import user_file
 
 
 @dataclass(frozen=True)
@@ -17,10 +17,10 @@ class Language:
 
 
 LANGUAGES: dict[str, Language] = {
-    "fr": Language("fr", "Français", "ollama", ROOT / "glossary.json",
+    "fr": Language("fr", "Français", "ollama", user_file("glossary.json"),
                    "Bonjour. Ceci est un essai de la traduction en direct. Si vous m'entendez, tout fonctionne."),
     # The local fallback model's Wolof is poor, so Wolof relies on Claude only.
-    "wo": Language("wo", "Wolof", "none", ROOT / "glossary.wo.json",
+    "wo": Language("wo", "Wolof", "none", user_file("glossary.wo.json"),
                    "Salaam aleekum. Lii ab natt la ngir xool ndax tekki bi dafay dox. Su ngeen ma déggee, lépp baax na."),
 }
 

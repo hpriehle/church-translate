@@ -1,0 +1,48 @@
+# Hear Church Mac app. Generate the Xcode project with `xcodegen` (in this folder), or just run
+# ./build.sh, which also bundles the Python engine. HearChurch.xcodeproj is generated, not committed.
+name: HearChurch
+options:
+  bundleIdPrefix: com.hearchurch
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  HearChurch:
+    type: application
+    platform: macOS
+    sources:
+      - HearChurch/Sources
+    info:
+      path: HearChurch/Info.plist
+      properties:
+        CFBundleName: Hear Church
+        CFBundleDisplayName: Hear Church
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.productivity
+        NSMicrophoneUsageDescription: Hear Church listens to the meeting through this microphone and translates it for listeners' phones. The sound itself never leaves this Mac.
+        NSLocationUsageDescription: Used once, if you ask, to place your building on the map. Only the building's location is saved.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: HearChurch/HearChurch.entitlements
+      properties:
+        com.apple.security.device.audio-input: true
+        com.apple.security.personal-information.location: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hearchurch.HearChurch
+        PRODUCT_NAME: Hear Church
+        ENABLE_HARDENED_RUNTIME: YES
+        DEVELOPMENT_TEAM: 5473W6M839
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: Apple Development
+        GENERATE_INFOPLIST_FILE: NO
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: YES

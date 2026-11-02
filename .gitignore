@@ -12,3 +12,5 @@ models/piper/
 .syncthing.*
 .stfolder/
 .stversions/
+mac/build/
+mac/HearChurch.xcodeproj/
