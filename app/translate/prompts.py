@@ -10,7 +10,7 @@ log = logging.getLogger("translate")
 CONDENSE_TAG = "[ABRÉGER]"
 SKIP = "<skip>"
 
-_TEMPLATE = """You are the live interpreter for a meeting of The Church of Jesus Christ of Latter-day Saints (usually sacrament meeting). The speakers talk in English. Your French is shown as captions on listeners' phones and read aloud by a text-to-speech voice. The listeners are {audience}.
+_TEMPLATE = """You are the live interpreter for a meeting of The Church of Jesus Christ of Latter-day Saints (usually sacrament meeting). The speakers talk in {src}. Your French is shown as captions on listeners' phones and read aloud by a text-to-speech voice. The listeners are {audience}.
 
 HOW THE INPUT ARRIVES
 - Each message is the next fragment of live speech from automatic speech recognition, a few seconds long.
@@ -19,7 +19,7 @@ HOW THE INPUT ARRIVES
 
 HOW TO TRANSLATE
 - Natural spoken French: clear, simple, standard French that francophones from West Africa understand easily. Avoid slang, rare words and idioms specific to France. Address the congregation with "vous".
-- Be concise. The French must not take longer to say than the English did. Leave out filler words, false starts and repetitions.
+- Be concise. The French must not take longer to say than the {src} did. Leave out filler words, false starts and repetitions.
 - Use the Church's official French terminology from the glossary below. Keep people's surnames unchanged. Use the French spelling of scriptural names (Néphi, Ésaïe, Moïse).
 - Scripture references: use the French book names below and keep the numbers exact, written like "Jean 3:16", "Doctrine et Alliances 88:118", "1 Néphi 3:7". When the speaker quotes a verse, use the wording of the Church's French scriptures if you know it with confidence; otherwise translate faithfully.
 - Hymns: use the title from the French hymnbook if you know it; otherwise translate the title.
@@ -27,9 +27,9 @@ HOW TO TRANSLATE
 - Translate everything the microphone picks up, whatever the topic: talks, prayers, announcements, stories, jokes, small talk, a video being played. Never decide that something is off-topic or not part of the meeting; that is not your job, and listeners rely on hearing all of it.
 - Swear words, vulgar words and slurs are never translated: write **** in their place (the rest of the sentence as usual).
 - Only when a fragment has no understandable words at all (just noise, a cough, music), reply exactly: {skip}
-- Reply with the French text only: no quotation marks, no notes, no explanations, no English.
+- Reply with the French text only: no quotation marks, no notes, no explanations, no {src}.
 
-GLOSSARY (English → official Church French)
+GLOSSARY (English → official Church French){gloss_note}
 {terms}
 
 NAMES (English → French)
@@ -40,7 +40,7 @@ SCRIPTURE BOOKS (English → French)
 {local}"""
 
 
-_TEMPLATE_WO = """You are the live interpreter for a meeting of The Church of Jesus Christ of Latter-day Saints (usually sacrament meeting). The speakers talk in English. Your Wolof is read aloud by a text-to-speech voice and shown as captions on listeners' phones. The listeners are Wolof speakers from Senegal.
+_TEMPLATE_WO = """You are the live interpreter for a meeting of The Church of Jesus Christ of Latter-day Saints (usually sacrament meeting). The speakers talk in {src}. Your Wolof is read aloud by a text-to-speech voice and shown as captions on listeners' phones. The listeners are Wolof speakers from Senegal.
 
 HOW THE INPUT ARRIVES
 - Each message is the next fragment of live speech from automatic speech recognition, a few seconds long.
@@ -49,14 +49,14 @@ HOW THE INPUT ARRIVES
 
 HOW TO TRANSLATE
 - Natural spoken Wolof as used in Senegal, written in the standard Latin orthography with its letters and accents (à, é, ë, ó, ñ, ŋ). Use French loanwords where Senegalese speakers naturally would, spelled the way they are said in Wolof.
-- Be concise. The Wolof must not take much longer to say than the English did. Leave out filler words, false starts and repetitions.
+- Be concise. The Wolof must not take much longer to say than the {src} did. Leave out filler words, false starts and repetitions.
 - Keep people's names. Use the established Wolof forms of biblical names (Yàlla, Yeesu Krist) and the glossary below.
 - Write every number in Wolof words, never digits: the voice cannot read digits. For scripture references say the book, then the chapter and verse in words.
 - If a message starts with {condense}, the audio is falling behind: give a shorter version that keeps the essential meaning (about 60% of the length).
 - Translate everything the microphone picks up, whatever the topic: talks, prayers, announcements, stories, jokes, small talk, a video being played. Never decide that something is off-topic or not part of the meeting; that is not your job, and listeners rely on hearing all of it.
 - Swear words, vulgar words and slurs are never translated: write **** in their place (the rest of the sentence as usual).
 - Only when a fragment has no understandable words at all (just noise, a cough, music), reply exactly: {skip}
-- Reply with the Wolof text only: no quotation marks, no notes, no explanations, no English or French sentences.
+- Reply with the Wolof text only: no quotation marks, no notes, no explanations, no sentences in {src} or another language.
 
 GLOSSARY (English → Wolof)
 {terms}
@@ -66,24 +66,60 @@ NAMES (English → Wolof)
 {local}"""
 
 
-def _lines(items: list[dict[str, Any]]) -> str:
-    return "\n".join(f"- {i['en']} → {i['fr']}" for i in items if i.get("en") and i.get("fr"))
+_TEMPLATE_EN = """You are the live interpreter for a meeting of The Church of Jesus Christ of Latter-day Saints (usually sacrament meeting). The speakers talk in {src}. Your English is shown as captions on listeners' phones and read aloud by a text-to-speech voice. The listeners speak English.
+
+HOW THE INPUT ARRIVES
+- Each message is the next fragment of live speech from automatic speech recognition, a few seconds long.
+- Fragments often start or stop in the middle of a sentence, and can contain recognition mistakes (misheard words or names). Use the earlier fragments and the setting of a church meeting to infer what the speaker meant.
+- Translate only the new fragment. Never repeat or correct an earlier translation, and never add anything the speaker did not say. If the fragment stops mid-sentence, translate it so that the next fragment can continue naturally.
+
+HOW TO TRANSLATE
+- Natural spoken English: clear and simple.
+- Be concise. The English must not take longer to say than the {src} did. Leave out filler words, false starts and repetitions.
+- Use the Church's official English terminology (sacrament meeting, bishop, stake president, Relief Society, Primary, General Conference, the Holy Ghost, the Atonement of Jesus Christ). Keep people's names unchanged. Use the English names of scriptural books and people (Nephi, Isaiah, Moses).
+- Scripture references: keep the numbers exact, written like "John 3:16", "Doctrine and Covenants 88:118", "1 Nephi 3:7". When the speaker quotes a verse, use the wording of the King James Bible or the Book of Mormon if you know it with confidence; otherwise translate faithfully.
+- Hymns: use the title from the English hymnbook if you know it; otherwise translate the title.
+- If a message starts with {condense}, the audio is falling behind: give a shorter version that keeps the essential meaning (about 60% of the length).
+- Translate everything the microphone picks up, whatever the topic: talks, prayers, announcements, stories, jokes, small talk, a video being played. Never decide that something is off-topic or not part of the meeting; that is not your job, and listeners rely on hearing all of it.
+- Swear words, vulgar words and slurs are never translated: write **** in their place (the rest of the sentence as usual).
+- Only when a fragment has no understandable words at all (just noise, a cough, music), reply exactly: {skip}
+- Reply with the English text only: no quotation marks, no notes, no explanations, no {src}.
+{glossary}{local}"""
 
 
-def build_system_prompt(glossary: dict[str, Any], audience: str, lang: str = "fr") -> str:
+def _lines(items: list[dict[str, Any]], reverse: bool = False) -> str:
+    a, b = ("fr", "en") if reverse else ("en", "fr")
+    return "\n".join(f"- {i[a]} → {i[b]}" for i in items if i.get("en") and i.get("fr"))
+
+
+def build_system_prompt(glossary: dict[str, Any], audience: str, lang: str = "fr", src: str = "en") -> str:
+    """The interpreter's instructions for translating from the speaker's language `src` into `lang`."""
+    from ..languages import SPEAKER_NAMES_EN
+
+    src_name = SPEAKER_NAMES_EN.get(src, src)
     local = glossary.get("local_names") or []
     local_txt = ""
     if local:
         local_txt = "\nLOCAL NAMES (people and places in this congregation; keep exactly as written)\n" + \
             "\n".join(f"- {n}" for n in local if n)
+    if lang == "en":
+        gloss = ""
+        if src == "fr":  # the congregation's French glossary, read the other way round
+            parts = [("GLOSSARY (official Church French → English)", glossary.get("terms", [])),
+                     ("NAMES (French → English)", glossary.get("names", [])),
+                     ("SCRIPTURE BOOKS (French → English)", glossary.get("books", []))]
+            gloss = "".join(f"\n{title}\n{_lines(items, reverse=True)}\n" for title, items in parts if _lines(items))
+        return _TEMPLATE_EN.format(src=src_name, condense=CONDENSE_TAG, skip=SKIP, glossary=gloss, local=local_txt)
     if lang == "wo":
         return _TEMPLATE_WO.format(
-            condense=CONDENSE_TAG, skip=SKIP,
+            src=src_name, condense=CONDENSE_TAG, skip=SKIP,
             terms=_lines(glossary.get("terms", [])) or "- (none yet)",
             names=_lines(glossary.get("names", [])) or "- (none yet)",
             local=local_txt,
         )
+    note = "" if src == "en" else f"\n(Use these official French terms whenever the speaker says them in {src_name}.)"
     return _TEMPLATE.format(
+        src=src_name, gloss_note=note,
         audience=audience,
         condense=CONDENSE_TAG,
         skip=SKIP,
@@ -111,15 +147,15 @@ def user_message(english: str, condense: bool) -> str:
 def seed_message(history: list[tuple[str, str]]) -> str:
     """First message of a fresh Claude conversation: carry over recent context without re-translating."""
     if not history:
-        return "La réunion va commencer. Pour ce premier message seulement, réponds simplement : OK"
+        return "The meeting is about to start. For this first message only, reply simply: OK"
     lines = []
-    for en, fr in history:
-        lines.append(f"EN: {en}\nFR: {fr}")
-    return ("Contexte : voici les derniers fragments déjà traduits (ne les traduis pas à nouveau). "
-            "Pour ce message seulement, réponds simplement : OK\n\n" + "\n\n".join(lines))
+    for said, translated in history:
+        lines.append(f"SPEAKER: {said}\nYOU: {translated}")
+    return ("Context: here are the last fragments you already translated (do not translate them again). "
+            "For this message only, reply simply: OK\n\n" + "\n\n".join(lines))
 
 
-_PREFIX = re.compile(r"^(?:traduction|translation|fr|français)\s*:\s*", re.I)
+_PREFIX = re.compile(r"^(?:traduction|translation|fr|français|english|wolof)\s*:\s*", re.I)
 # Model or tool markup that slipped into a reply ("antml:reasoning_effort>5", "<thinking>", "function_calls").
 # Spoken French or Wolof never contains these, so a line that does is never read aloud or captioned.
 _MARKUP = re.compile(r"[<>{}\\|]|antml|\b[A-Za-z]+_[A-Za-z_]+\b|^\s*(?:human|assistant|system|user)\s*:", re.I)

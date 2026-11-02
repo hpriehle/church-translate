@@ -26,7 +26,7 @@ from .engine import EngineClient, EngineHub, PublishClient
 from .hear import api as hear_api
 from .config import (HOME, ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
-from .languages import LANGUAGES
+from .languages import AUTO, LANGUAGES, SPEAKER_LANGUAGES
 from .pipeline import Pipeline
 from .stt import Transcriber
 from .translate.router import Translator
@@ -42,6 +42,7 @@ EDITABLE = {
     "backlog": {"speedup_start_s", "speedup_full_s", "max_speed", "condense_on_s", "condense_off_s", "drop_above_s"},
     "server": {"lan_ip", "use_public_url", "sharing"},
     "engine": {"use"},
+    "stt": {"language"},
 }
 
 
@@ -83,8 +84,10 @@ def languages_public() -> list[dict[str, str]]:
 def set_languages(codes: list[str], persist: bool = True) -> list[str]:
     """Switch languages on/off live, remember the choice (unless persist=False: a meeting handed over by
     another server), and tell every phone and the operator."""
-    on = [c for c in S.pipeline.channels if c in codes]
+    on = [c for c in S.pipeline.channels if c in codes and c not in AUTO]
     for c, ch in S.pipeline.channels.items():
+        if c in AUTO:   # English follows the speaker, not the switches
+            continue
         was, ch.on = ch.on, c in on
         if ch.on:
             ch.activate()
@@ -94,11 +97,33 @@ def set_languages(codes: list[str], persist: bool = True) -> list[str]:
     if persist:
         S.settings.languages = on
         save_override("languages", on)
-        S.engine_hub.set_languages(on)  # a meeting running on the engine follows the switches
+        S.engine_hub.set_languages(list(S.pipeline.on_channels))  # a meeting running on the engine follows
     for ch in S.pipeline.channels.values():
         ch.hub.publish({"type": "languages", "languages": languages_public()})
     S.operator.publish(full_status())
     return on
+
+
+def auto_on(code: str) -> bool:
+    """English is translated whenever the speaker isn't speaking English."""
+    return code != S.pipeline.speaker
+
+
+def set_speaker(code: str) -> None:
+    """The speaker switched language: English follows, the speaker's own language pauses, phones are told."""
+    for c, ch in S.pipeline.channels.items():
+        if c in AUTO:
+            was, ch.on = ch.on, auto_on(c)
+            if ch.on:
+                ch.activate()
+            if ch.on != was:
+                ch.hub.publish({"type": "lang_state", "on": ch.on})
+    msg = {"type": "speaker", "speaker": code, "name": SPEAKER_LANGUAGES.get(code, code)}
+    for ch in S.pipeline.channels.values():
+        ch.hub.publish(msg)
+        ch.hub.publish({"type": "languages", "languages": languages_public()})
+    S.operator.publish(full_status())
+    log.info("the speaker now talks in %s", SPEAKER_LANGUAGES.get(code, code))
 
 
 def local_sharing() -> bool:
@@ -165,7 +190,9 @@ def full_status() -> dict[str, Any]:
         "engine": {"hub": S.engine_hub.info() if eng.token and not eng.hub_url else None,
                    "client": S.engine_client.info() if S.engine_client else None},
         "languages": languages_public(),
-        "language_switches": [{"code": c, "name": ch.lang.name, "on": ch.on} for c, ch in S.pipeline.channels.items()],
+        "language_switches": [{"code": c, "name": ch.lang.name, "on": ch.on} for c, ch in S.pipeline.channels.items()
+                              if c not in AUTO],
+        "speaker": S.pipeline.speaker,
         "listeners": {"stream": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
                       "captions": sum(ch.hub.count for ch in S.pipeline.channels.values())},
         "listener_url": listener_url(),
@@ -232,8 +259,8 @@ async def lifespan(app: FastAPI):
         tr = Translator(st.translate, S.glossaries[lang.code], HOME / "data" / "claude-workdir", lang)
         tts = TtsRunner(tts_for(st, lang.code), sr, lazy=True)
         ch = Channel(S.pipeline, lang, tr, tts, m, b, Hub(f"listen-{lang.code}", history=300, queue_size=400))
-        ch.on = lang.code in st.languages
         S.pipeline.add_channel(ch)
+        ch.on = auto_on(lang.code) if lang.code in AUTO else lang.code in st.languages
     S.pipeline.start_tasks()
     bg = [asyncio.create_task(status_loop()), asyncio.create_task(S.pipeline.load_stt()),
           asyncio.create_task(tunnel_loop())]
@@ -621,7 +648,7 @@ async def ws_listen(ws: WebSocket):
     same = hello.get("boot") == S.started and hello.get("session") == session and hello.get("lang") == ch.code
     last = int(hello.get("last_seq") or 0) if same else 0
     init = {"type": "init", "boot": S.started, "session": session, "live": meeting_live(),
-            "lang": ch.code, "on": ch.on, "languages": languages_public(),
+            "lang": ch.code, "on": ch.on, "languages": languages_public(), "speaker": S.pipeline.speaker,
             "server_time": time.time(), "history": ch.hub.replay_after(last) if session else []}
     await ch.hub.serve(ws, [init])
 
@@ -753,7 +780,8 @@ async def api_state(request: Request):
         "voices": {c: list_voices_for(c) for c in S.pipeline.channels},
         "samples": _samples(),
         "languages": languages_public(),
-        "all_languages": [{"code": l.code, "name": l.name} for l in LANGUAGES.values()],
+        "all_languages": [{"code": l.code, "name": l.name} for l in LANGUAGES.values() if l.code not in AUTO],
+        "speaker_languages": [{"code": c, "name": n} for c, n in SPEAKER_LANGUAGES.items()],
         "glossaries": S.glossaries,
         "listener_url": listener_url(),
         "lan_candidates": netinfo.candidate_ips(),
@@ -837,7 +865,7 @@ async def api_stop(request: Request):
 
 
 # What the speaker password may change (from the speak page): languages and voices, nothing else.
-SPEAKER_EDITABLE = {"languages": None, "voices": None, "tts": {"engine", "voice"}}
+SPEAKER_EDITABLE = {"languages": None, "voices": None, "tts": {"engine", "voice"}, "stt": {"language"}}
 
 
 @app.post("/api/settings")
@@ -863,6 +891,8 @@ async def api_settings(request: Request):
             continue
         allowed = EDITABLE.get(section, set())
         clean = {k: v for k, v in values.items() if k in allowed}
+        if section == "stt" and clean.get("language") not in SPEAKER_LANGUAGES:
+            raise HTTPException(400, "The speaker can talk in " + ", ".join(SPEAKER_LANGUAGES.values()) + ".")
         if not clean:
             continue
         data[section].update(clean)
@@ -871,8 +901,11 @@ async def api_settings(request: Request):
         new = Settings.model_validate(data)
     except Exception as e:
         raise HTTPException(400, str(e))
+    speaker_was = S.settings.stt.language
     S.settings = new
     S.pipeline.apply_settings(new, S.glossaries)
+    if new.stt.language != speaker_was:
+        set_speaker(new.stt.language)
     return {"ok": True, "settings": _public_settings(), "message": note}
 
 
@@ -939,7 +972,9 @@ async def api_glossary_set(request: Request, lang: str = "fr"):
         save_glossary(g, LANGUAGES[lang].glossary_file)
     except Exception as e:
         raise HTTPException(400, f"Invalid glossary: {e}")
-    S.glossaries[lang] = g
+    for code, other in LANGUAGES.items():   # English reads the French glossary too
+        if other.glossary_file == LANGUAGES[lang].glossary_file:
+            S.glossaries[code] = g
     S.pipeline.apply_settings(S.settings, S.glossaries)
     return {"ok": True, "message": "Glossary saved. Claude restarts with it in the background (Ollama and speech recognition use it immediately)."}
 

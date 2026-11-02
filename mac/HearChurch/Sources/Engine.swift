@@ -327,6 +327,7 @@ struct EngineStatus: Decodable, Equatable {
     let listener_url: String?
     let language_switches: [Switch]?
     let sharing: String?
+    let speaker: String?
 }
 
 struct PackageStatus: Decodable, Equatable, Identifiable {
@@ -348,12 +349,14 @@ struct EngineSettings: Decodable, Equatable {
         struct Translate: Decodable, Equatable { let claude_model: String }
         struct Voice: Decodable, Equatable { let engine: String; let voice: String }
         struct Server: Decodable, Equatable { let sharing: String? }
+        struct Stt: Decodable, Equatable { let language: String }
         let languages: [String]
         let audio: Audio
         let tts: Tts
         let translate: Translate
         let voices: [String: Voice]
         let server: Server
+        let stt: Stt?
     }
     struct Device: Decodable, Hashable { let name: String; let channels: Int; let `default`: Bool? }
     struct VoiceOption: Decodable, Hashable { let id: String; let engine: String; let voice: String; let label: String }

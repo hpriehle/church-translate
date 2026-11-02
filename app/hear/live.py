@@ -7,7 +7,7 @@ An engine (the congregation's Mac) connects to /ws/engine with "Authorization: B
 (the legacy engine token path in app/engine.py is separate and unchanged) and then:
   engine → hub   {"type": "hello", name, languages, stream, busy}   (languages = every language it can
                      produce; the binary frames index into this list; stream must match this server's)
-                 {"type": "session_start", languages, trial?, resume?}   languages = the ones offered;
+                 {"type": "session_start", languages, speaker?, trial?, resume?}   languages = the ones offered;
                      resume = the session code from an earlier "session_started" (reconnect within the grace)
                  {"type": "languages", languages}      (offered languages changed during the meeting)
                  {"type": "hub", lang, msg, remember}  (a caption etc. for that language's listeners)
@@ -65,6 +65,7 @@ class LiveSession:
         self.link: Link | None = link
         self.device_id = link.device["id"]
         self.db_id, self.code, self.offered = db_id, code, offered
+        self.speaker = "en"   # the speaker's language: the phones in that language are told to listen in the room
         self.started = time.time()
         self.grace = None  # timer handle while the engine is away
         self.hubs = {c: Hub(f"live-{self.slug}-{c}", history=300, queue_size=400) for c in all_langs}
@@ -176,6 +177,7 @@ class Live:
                 return refuse("This meeting is already started.")
             same = old.device_id == link.device["id"]
             if m.get("resume") == old.code and (old.link is None or same):
+                old.speaker = str(m.get("speaker") or old.speaker)[:8]
                 self._resume(old, link, offered)
                 return
             if old.link is None and same:
@@ -187,6 +189,7 @@ class Live:
         code = time.strftime("%Y%m%d-%H%M%S")
         db_id = self.db.start_session(cong["id"], offered, bool(m.get("trial")))
         s = LiveSession(cong, link, db_id, code, offered, link.languages, self.stream)
+        s.speaker = str(m.get("speaker") or "en")[:8]
         self.sessions[cong["id"]] = s
         link.session = s
         for c, h in s.hubs.items():
@@ -218,6 +221,8 @@ class Live:
             return
         if msg.get("type") == "caption":
             msg = {**msg, "session": s.code}  # phones compare this with the session they joined
+        elif msg.get("type") == "speaker":
+            s.speaker = str(msg.get("speaker") or "en")[:8]
         hub.publish(msg, remember=bool(m.get("remember")))
 
     def _mp3(self, link: Link, data: bytes) -> None:

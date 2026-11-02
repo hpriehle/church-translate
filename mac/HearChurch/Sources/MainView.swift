@@ -36,6 +36,7 @@ private struct TopBar: View {
     var body: some View {
         HStack(spacing: 16) {
             StartButton()
+            SpeakerPicker()
             MeetingState()
             HStack(spacing: 6) {
                 Image(systemName: "mic.fill").foregroundStyle(.secondary)
@@ -61,6 +62,23 @@ private struct TopBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+}
+
+/// The language the speaker talks in. English is translated whenever the speaker isn't speaking English;
+/// the translation into the speaker's own language pauses and its phones are told to listen in the room.
+private struct SpeakerPicker: View {
+    @EnvironmentObject var model: AppModel
+    static let options = [("en", "English"), ("fr", "Français"), ("es", "Español"), ("ru", "Русский")]
+
+    var body: some View {
+        Picker("Speaker", selection: Binding(get: { model.speaker }, set: { code in
+            Task { await model.setSpeaker(code) }
+        })) {
+            ForEach(Self.options, id: \.0) { Text($0.1).tag($0.0) }
+        }
+        .fixedSize()
+        .help("The language the speaker is talking in. Switch it whenever the speaker changes, even during the meeting.")
     }
 }
 
@@ -271,6 +289,12 @@ private struct LanguagesSection: View {
     var body: some View {
         SectionCard(title: "Languages") {
             ForEach(OutputLanguage.all.filter(\.available)) { LanguageToggle(language: $0) }
+            if model.speaker != "en" {
+                let name = ["fr": "French", "es": "Spanish", "ru": "Russian"][model.speaker] ?? model.speaker
+                Text("The speaker talks \(name): English is added for listeners."
+                     + (OutputLanguage.all.contains { $0.id == model.speaker } ? " \(name) phones are told to listen in the room." : ""))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             if let failed = model.engine.packages.first(where: { $0.state == "failed" }) {
                 Text("\(failed.name): \(failed.error)").font(.caption).foregroundStyle(.orange)
             }

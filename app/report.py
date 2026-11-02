@@ -15,7 +15,7 @@ from typing import Any
 
 from .metrics import languages_in, summarize
 
-NAMES = {"fr": "French", "wo": "Wolof"}
+NAMES = {"fr": "French", "wo": "Wolof", "en": "English"}
 
 
 def _row(label: str, p: dict | None, unit: str = "s") -> str:
@@ -80,7 +80,7 @@ def build_report(records: list[dict[str, Any]], info: dict[str, Any] | None = No
               "(typically 1–3 s).", ""]
     for code in langs:
         lines += _lang_section(records, code, info, audio_s)
-    head = "| # | at | English | " + " | ".join(NAMES.get(c, c) for c in langs) + " |"
+    head = "| # | at | Speaker | " + " | ".join(NAMES.get(c, c) for c in langs) + " |"
     lines += ["## Transcript", "", head, "|" + "---|" * (3 + len(langs))]
     for r in records:
         if r.get("status") == "skipped":

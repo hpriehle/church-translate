@@ -52,11 +52,13 @@ NO_FALLBACK_WAIT_S = 30.0
 
 
 class Translator:
-    def __init__(self, cfg: TranslateCfg, glossary: dict[str, Any], workdir: Path, lang: Language | None = None):
+    def __init__(self, cfg: TranslateCfg, glossary: dict[str, Any], workdir: Path, lang: Language | None = None,
+                 src: str = "en"):
         self.cfg = cfg
         self.lang = lang or LANGUAGES["fr"]
+        self.src = src            # the speaker's language
         self.workdir = workdir
-        self.system_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code)
+        self.system_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code, src)
         self.active: ClaudeSession | None = None
         self.standby: ClaudeSession | None = None
         self._standby_task: asyncio.Task | None = None
@@ -128,8 +130,11 @@ class Translator:
                 await s.close()
         await self.ollama.close()
 
-    def reload(self, cfg: TranslateCfg, glossary: dict[str, Any]) -> None:
-        new_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code)
+    def reload(self, cfg: TranslateCfg, glossary: dict[str, Any], src: str | None = None) -> None:
+        if src and src != self.src:
+            self.src = src
+            self.history.clear()   # the earlier pairs were in another language
+        new_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code, self.src)
         restart = (new_prompt != self.system_prompt or cfg.claude_model != self.cfg.claude_model
                    or cfg.claude_effort != self.cfg.claude_effort or cfg.backend != self.cfg.backend)
         self.cfg = cfg

@@ -66,6 +66,15 @@ class Pipeline:
         """The languages being translated right now (each can be switched off live)."""
         return {c: ch for c, ch in self.channels.items() if ch.on}
 
+    @property
+    def speaker(self) -> str:
+        """The language the speaker talks in (en, fr, es, ru)."""
+        return self.settings.stt.language
+
+    def translating(self) -> dict[str, "Channel"]:
+        """The channels that get each sentence: on, and not in the speaker's own language (that one pauses)."""
+        return {c: ch for c, ch in self.on_channels.items() if c != self.speaker}
+
     def _hints(self) -> list[str]:
         hints: list[str] = []
         for g in self.glossaries.values():
@@ -219,7 +228,7 @@ class Pipeline:
             self.records[rec.seq] = rec
             try:
                 await self.stt_ready.wait()
-                prompt = build_prompt(self.hints, self.prev_en)
+                prompt = build_prompt(self.hints, self.prev_en, self.speaker)
                 res = await self.loop.run_in_executor(self.stt_exec, self.stt.transcribe, chunk.audio, prompt)
             except Exception as e:
                 log.exception("stt failed")
@@ -232,9 +241,9 @@ class Pipeline:
                 rec.status, rec.note = "skipped", res.dropped_reason
                 self._finalize(rec)
                 continue
-            rec.en = censor(res.text, "en")   # masked before translation: no translation can carry the word
+            rec.en = censor(res.text, self.speaker)   # masked before translation: no translation can carry it
             self.prev_en = res.text
-            chans = self.on_channels
+            chans = self.translating()
             rec.out = {code: LangResult() for code in chans}
             if not chans:  # every language switched off: the operator still sees the English
                 self._finalize(rec)
@@ -302,6 +311,7 @@ class Pipeline:
         self.settings = settings
         self.glossaries = glossaries
         self.hints = self._hints()
+        self.stt.cfg = settings.stt
         for code, ch in self.channels.items():
             ch.backlog.cfg = settings.backlog
             ch.mixer.max_age_s = settings.backlog.drop_above_s + 5
@@ -309,12 +319,13 @@ class Pipeline:
             new_tts = tts_for(settings, code)
             if new_tts.model_dump() != ch.tts.cfg.model_dump():
                 ch.tts.reload(new_tts)
-            ch.translator.reload(settings.translate, glossaries.get(code, {}))
+            ch.translator.reload(settings.translate, glossaries.get(code, {}), self.speaker)
 
     def status(self) -> dict[str, Any]:
-        chans = {code: ch.status() for code, ch in self.on_channels.items()}
+        chans = {code: {**ch.status(), "paused": code == self.speaker} for code, ch in self.on_channels.items()}
         return {
             "running": self.running,
+            "speaker": self.speaker,
             "capturing": self.capturing,
             "source": self.source_label,
             "started_at": self.started_at,

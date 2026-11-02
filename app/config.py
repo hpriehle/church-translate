@@ -103,7 +103,7 @@ class SttCfg(BaseModel):
     engine: str = "auto"
     model: str = "mlx-community/whisper-large-v3-turbo"
     faster_whisper_model: str = "small.en"
-    language: str = "en"
+    language: str = "en"   # the speaker's language (en, fr, es, ru): switched live next to Start meeting
 
 
 class TranslateCfg(BaseModel):
@@ -126,6 +126,7 @@ class TtsCfg(BaseModel):
     rate: int = 190
     volume: float = 1.0
     speed: float = 1.0   # other languages: 1.0 = the voice's natural pace (French uses rate instead)
+    lang: str = "fr"     # which macOS voices `say` picks from
 
 
 class VoiceCfg(BaseModel):
@@ -137,7 +138,8 @@ class VoiceCfg(BaseModel):
 # Voices for languages other than French (French uses [tts]).
 # Wolof: SpeechT5 (male/female) is fast on Apple Silicon; elsewhere the faster MMS voice keeps up better.
 DEFAULT_VOICES: dict[str, VoiceCfg] = {
-    "wo": VoiceCfg(engine="speecht5", voice="male") if sys.platform == "darwin" else VoiceCfg(engine="mms", voice="default")}
+    "wo": VoiceCfg(engine="speecht5", voice="male") if sys.platform == "darwin" else VoiceCfg(engine="mms", voice="default"),
+    "en": VoiceCfg(engine="say", voice="")}
 
 
 class BacklogCfg(BaseModel):
@@ -176,7 +178,8 @@ def tts_for(settings: "Settings", code: str) -> TtsCfg:
     if code == "fr":
         return settings.tts
     v = settings.voices.get(code) or DEFAULT_VOICES.get(code) or VoiceCfg(engine="piper", voice="")
-    return TtsCfg(engine=v.engine, voice=v.voice, rate=settings.tts.rate, volume=settings.tts.volume, speed=v.speed)
+    return TtsCfg(engine=v.engine, voice=v.voice, rate=settings.tts.rate, volume=settings.tts.volume, speed=v.speed,
+                  lang=code)
 
 
 def load_secrets(path: Path = SECRETS_PATH) -> dict[str, str]:

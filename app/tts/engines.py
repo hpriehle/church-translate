@@ -70,15 +70,27 @@ def list_say_voices() -> list[dict]:
     return voices
 
 
-def french_voices() -> list[dict]:
+# macOS novelty voices: never for a meeting.
+_NOVELTY = {"Albert", "Bad News", "Bahh", "Bells", "Boing", "Bubbles", "Cellos", "Wobble", "Fred", "Good News",
+            "Jester", "Junior", "Kathy", "Organ", "Superstar", "Ralph", "Trinoids", "Whisper", "Zarvox"}
+_REGION = {"fr": "fr_FR", "en": "en_US", "es": "es_ES", "ru": "ru_RU"}
+_FAVOURITE = {"fr": "Thomas", "en": "Samantha"}
+
+
+def say_voices(lang: str = "fr") -> list[dict]:
+    """The installed macOS voices for one language, best first."""
     def score(v: dict) -> tuple:
         name = v["name"]
         quality = 3 if "Premium" in name else 2 if "Enhanced" in name or "améliorée" in name.lower() else 1
-        region = 2 if v["lang"] == "fr_FR" else 1
-        return (quality, region, "Thomas" in name)
+        region = 2 if v["lang"] == _REGION.get(lang) else 1
+        return (quality, region, _FAVOURITE.get(lang, "-") in name)
 
-    fr = [v for v in list_say_voices() if v["lang"].startswith("fr")]
-    return sorted(fr, key=score, reverse=True)
+    out = [v for v in list_say_voices() if v["lang"].startswith(lang) and v["name"].split(" (")[0] not in _NOVELTY]
+    return sorted(out, key=score, reverse=True)
+
+
+def french_voices() -> list[dict]:
+    return say_voices("fr")
 
 
 class SayTts:
@@ -89,7 +101,7 @@ class SayTts:
             raise RuntimeError("macOS `say` is not available on this machine")
         self.cfg = cfg
         self.out_sr = out_sr
-        voices = french_voices()
+        voices = say_voices(cfg.lang)
         names = {v["name"] for v in voices}
         if cfg.voice and cfg.voice in names:
             self.voice = cfg.voice
@@ -98,10 +110,10 @@ class SayTts:
                 log.warning("voice %r not installed; using %s", cfg.voice, voices[0]["name"])
             self.voice = voices[0]["name"]
         else:
-            raise RuntimeError("no French voice installed (System Settings → Accessibility → Spoken Content)")
+            raise RuntimeError(f"no {cfg.lang} voice installed (System Settings → Accessibility → Spoken Content)")
 
     def synth(self, text: str, speed: float = 1.0) -> np.ndarray:
-        rate = int(round(self.cfg.rate * speed))
+        rate = int(round(self.cfg.rate * self.cfg.speed * speed))
         with tempfile.TemporaryDirectory() as td:
             txt = Path(td) / "t.txt"
             wav = Path(td) / "o.wav"
@@ -328,7 +340,8 @@ def list_voices_for(code: str) -> list[dict]:
         return list_wolof_voices()
     if code == "fr":
         return list_voices()
-    return []
+    return [{"id": f"say:{v['name']}", "engine": "say", "voice": v["name"],
+             "label": f"{v['name']} (macOS) · {v['lang']}", "lang": v["lang"]} for v in say_voices(code)]
 
 
 def make_tts(cfg: TtsCfg, out_sr: int):

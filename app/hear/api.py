@@ -460,7 +460,7 @@ async def ws_listen(ws: WebSocket, slug: str):
     lang = hello.get("lang") if hello.get("lang") in s.offered else s.offered[0]
     same = hello.get("boot") == h.live.started and hello.get("session") == s.code and hello.get("lang") == lang
     last = int(hello.get("last_seq") or 0) if same else 0
-    init.update(session=s.code, live=True, lang=lang, languages=s.languages_public(),
+    init.update(session=s.code, live=True, lang=lang, languages=s.languages_public(), speaker=s.speaker,
                 history=s.hubs[lang].replay_after(last))
     await s.hubs[lang].serve(ws, [init])
 

@@ -492,7 +492,8 @@ class PublishClient(EngineClient):
             elif p.running and not local and not self.announced and p.started_at != self.refused_run:
                 self._offered = list(p.on_channels)
                 self.announced = True
-                self._send({"type": "session_start", "languages": self._offered, "resume": self.session_code})
+                self._send({"type": "session_start", "languages": self._offered, "resume": self.session_code,
+                            "speaker": getattr(p, "speaker", "en")})
             elif self.announced and not p.running:
                 self._send({"type": "session_stop"})
                 self.announced, self.running, self.session_code = False, False, ""

@@ -51,6 +51,13 @@ final class AppModel: ObservableObject {
         await engine.set(["server": ["sharing": local ? "local" : "cloud"]])
     }
 
+    /// The language the speaker talks in (en, fr, es, ru). Switchable during the meeting.
+    var speaker: String { engine.status?.speaker ?? engine.settings?.settings.stt?.language ?? "en" }
+
+    func setSpeaker(_ code: String) async {
+        await engine.set(["stt": ["language": code]])
+    }
+
     // MARK: engine
 
     /// The engine runs from the first launch, so voices can download while the operator is still in setup.

@@ -204,3 +204,38 @@ async def test_api_session_forgets_a_reply_with_markup():
     assert [m["role"] for m in s.messages] == ["user", "assistant"]
     assert await s.ask("Thank you.") == "Merci."
     assert "antml" not in str(client.calls[2]["messages"])
+
+
+def test_speaker_language_switch(monkeypatch):
+    """French speaker: English turns on, French pauses (its phones are told), Wolof keeps translating."""
+    from app import main
+    from app.config import Settings
+    from app.pipeline import Pipeline
+
+    settings = Settings()
+    pipe = Pipeline.__new__(Pipeline)
+    pipe.settings, pipe.channels = settings, {}
+    sent: dict[str, list] = {}
+
+    def chan(code, on):
+        sent[code] = []
+        return SimpleNamespace(code=code, on=on, lang=SimpleNamespace(name=code), activate=lambda: None,
+                               hub=SimpleNamespace(publish=lambda m, remember=False, c=code: sent[c].append(m)))
+    pipe.channels = {"fr": chan("fr", True), "wo": chan("wo", True), "en": chan("en", False)}
+    monkeypatch.setattr(main.S, "pipeline", pipe, raising=False)
+    monkeypatch.setattr(main.S, "operator", SimpleNamespace(publish=lambda m: None), raising=False)
+    monkeypatch.setattr(main, "full_status", lambda: {})
+    assert list(pipe.translating()) == ["fr", "wo"]
+
+    settings.stt.language = "fr"
+    main.set_speaker("fr")
+    assert pipe.channels["en"].on and list(pipe.translating()) == ["wo", "en"]
+    assert {"type": "speaker", "speaker": "fr", "name": "Français"} in sent["fr"]
+    assert [l["code"] for l in sent["fr"][-1]["languages"]] == ["fr", "wo", "en"]   # French is still offered
+
+    main.set_languages(["wo"], persist=False)          # the operator's switches leave English alone
+    assert pipe.channels["en"].on and not pipe.channels["fr"].on
+
+    settings.stt.language = "en"
+    main.set_speaker("en")
+    assert not pipe.channels["en"].on and list(pipe.translating()) == ["wo"]

@@ -33,22 +33,26 @@
           tap: "Touchez pour écouter · utilisez des écouteurs", tapBtn: "Touchez le bouton pour activer le son",
           notLive: "En attente", live: "En direct", loading: "Chargement…", title: "Traduction en direct",
           off: "Cette traduction est arrêtée pour le moment.", liveWait: "En direct — la traduction va s'afficher ici.",
-          done: "La traduction est terminée.", begin: "La traduction commencera au début de la réunion." },
+          done: "La traduction est terminée.", begin: "La traduction commencera au début de la réunion.",
+          speaker: "L'orateur parle {name}. Écoutez dans la salle." },
     en: { conn: ["Connected", "Connecting…", "Reconnecting…"], mute: "Mute", unmute: "Turn sound on",
           tap: "Tap to listen · use headphones", tapBtn: "Tap the button to turn the sound on",
           notLive: "Waiting", live: "Live", loading: "Loading…", title: "Live translation",
           off: "This translation is paused for now.", liveWait: "Live — the translation will appear here.",
-          done: "The translation has ended.", begin: "The translation will begin when the meeting starts." },
+          done: "The translation has ended.", begin: "The translation will begin when the meeting starts.",
+          speaker: "The speaker is speaking {name}. Listen in the room." },
     es: { conn: ["Conectado", "Conectando…", "Reconectando…"], mute: "Silenciar", unmute: "Activar el sonido",
           tap: "Toque para escuchar · use auriculares", tapBtn: "Toque el botón para activar el sonido",
           notLive: "En espera", live: "En vivo", loading: "Cargando…", title: "Traducción en vivo",
           off: "Esta traducción está en pausa por ahora.", liveWait: "En vivo — la traducción aparecerá aquí.",
-          done: "La traducción ha terminado.", begin: "La traducción empezará cuando comience la reunión." },
+          done: "La traducción ha terminado.", begin: "La traducción empezará cuando comience la reunión.",
+          speaker: "El orador está hablando {name}. Escuche en la sala." },
     ru: { conn: ["Подключено", "Подключение…", "Переподключение…"], mute: "Выключить звук", unmute: "Включить звук",
           tap: "Нажмите, чтобы слушать · используйте наушники", tapBtn: "Нажмите кнопку, чтобы включить звук",
           notLive: "Ожидание", live: "В эфире", loading: "Загрузка…", title: "Перевод в прямом эфире",
           off: "Этот перевод пока приостановлен.", liveWait: "В эфире — перевод появится здесь.",
-          done: "Перевод завершён.", begin: "Перевод начнётся, когда начнётся собрание." },
+          done: "Перевод завершён.", begin: "Перевод начнётся, когда начнётся собрание.",
+          speaker: "Выступающий говорит на языке: {name}. Слушайте в зале." },
   };
   const U = BASE ? UI_TEXT[(navigator.language || "en").slice(0, 2)] || UI_TEXT.en : UI_TEXT.fr;
   if (BASE) {
@@ -95,10 +99,19 @@
   let langOn = true;            // the operator can pause a language
   const LANG_OFF = { fr: "La traduction en français est arrêtée pour le moment.",
                      wo: "La traduction en wolof est arrêtée pour le moment." };
+  // The speaker talks in this phone's language right now: nothing to translate, listen in the room.
+  let speaker = "en";
+  function speakerText() {
+    let name = speaker;
+    try { name = new Intl.DisplayNames([document.documentElement.lang || "fr"], { type: "language" }).of(speaker); } catch {}
+    return U.speaker.replace("{name}", name);
+  }
   function updateWaiting() {
     const any = captionsEl.children.length > 0;
-    waitingEl.hidden = live && any && langOn;
-    if (!langOn) waitingEl.textContent = (!BASE && LANG_OFF[lang]) || U.off;
+    const paused = live && speaker === lang;
+    waitingEl.hidden = live && any && langOn && !paused;
+    if (paused) waitingEl.textContent = speakerText();
+    else if (!langOn) waitingEl.textContent = (!BASE && LANG_OFF[lang]) || U.off;
     else if (live) waitingEl.textContent = U.liveWait;
     else if (BASE && !any) waitingEl.textContent = notLiveText();
     else if (any) waitingEl.textContent = U.done;
@@ -191,6 +204,7 @@
             if (t) t.textContent = m.congregation.name;
           }
           langOn = m.on !== false;
+          speaker = m.speaker || "en";
           renderLangs(m.languages || []);
           boot = m.boot;
           session = m.session;
@@ -219,6 +233,7 @@
         case "onair": markOnAir(m.seq); break;
         case "languages": renderLangs(m.languages || []); break;
         case "lang_state": langOn = !!m.on; updateWaiting(); break;
+        case "speaker": speaker = m.speaker || "en"; updateWaiting(); break;
         case "status":
           live = !!m.live;
           if (!live) session = null;  // run over: a reconnect after this must not treat it as current
@@ -333,6 +348,7 @@
     fr: { label: "Commencer", hint: "Touchez pour écouter la traduction en français. Utilisez des écouteurs." },
     wo: { label: "Tàmbali", hint: "Bësal fii ngir déglu tekki bi ci wolof. Jëfandikool ay écouteurs." },
     es: { label: "Empezar", hint: "Toque para escuchar la traducción en español. Use auriculares." },
+    en: { label: "Start", hint: "Tap to hear the translation in English. Use headphones." },
     ru: { label: "Начать", hint: "Нажмите, чтобы слушать перевод на русский. Используйте наушники." },
   };
   const startOverlay = $("startOverlay");

@@ -139,15 +139,16 @@ class Transcriber:
         return res
 
 
-def build_prompt(hints: list[str], previous: str) -> str:
-    """Whisper 'initial prompt': spelling hints + the tail of the previous sentence (≤ ~200 chars)."""
+def build_prompt(hints: list[str], previous: str, lang: str = "en") -> str:
+    """Whisper 'initial prompt': spelling hints + the tail of the previous sentence (≤ ~200 chars).
+    Not English words before a French talk: Whisper follows the prompt's language."""
     hint = ", ".join(hints[:40])
     prev = previous[-200:]
     if prev and " " in prev:
         prev = prev[prev.index(" ") + 1:] if len(previous) > 200 else prev
     parts = []
     if hint:
-        parts.append(f"Church talk. Names: {hint}.")
+        parts.append(f"Church talk. Names: {hint}." if lang == "en" else f"{hint}.")
     if prev:
         parts.append(prev)
     return " ".join(parts)

@@ -468,3 +468,39 @@ def test_the_voice_skips_masked_words():
 
     assert unspoken("Bonjour, **** de ****, ce **** est en retard.") == "Bonjour, de, ce est en retard."
     assert unspoken("**** !") == "" and unspoken("****, ****") == ""
+
+
+def test_prompts_follow_the_speakers_language():
+    g = {"terms": [{"en": "stake", "fr": "pieu"}], "names": [{"en": "Isaiah", "fr": "Ésaïe"}],
+         "books": [{"en": "John", "fr": "Jean"}], "local_names": ["Kouassi"]}
+    en_fr = build_system_prompt(g, "francophones", "fr", "en")
+    assert "talk in English" in en_fr and "- stake → pieu" in en_fr and "says them in" not in en_fr
+    es_fr = build_system_prompt(g, "francophones", "fr", "es")
+    assert "talk in Spanish" in es_fr and "than the Spanish did" in es_fr and "says them in Spanish" in es_fr
+    fr_en = build_system_prompt(g, "", "en", "fr")
+    assert "talk in French" in fr_en and "Your English" in fr_en
+    assert "- pieu → stake" in fr_en and "- Ésaïe → Isaiah" in fr_en and "- Jean → John" in fr_en
+    assert "Kouassi" in fr_en
+    ru_en = build_system_prompt(g, "", "en", "ru")
+    assert "talk in Russian" in ru_en and "pieu" not in ru_en      # the French glossary only helps from French
+    fr_wo = build_system_prompt(g, "", "wo", "fr")
+    assert "talk in French" in fr_wo and "Your Wolof" in fr_wo
+    for p in (en_fr, es_fr, fr_en, ru_en, fr_wo):
+        assert "{" not in p and "}" not in p
+
+
+def test_whisper_prompt_has_no_english_words_before_another_language():
+    from app.stt import build_prompt
+
+    assert build_prompt(["Kouassi"], "", "en") == "Church talk. Names: Kouassi."
+    assert build_prompt(["Kouassi"], "Mes frères", "fr") == "Kouassi. Mes frères"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS voices")
+def test_english_voices_skip_the_novelty_ones():
+    from app.tts.engines import say_voices
+
+    names = [v["name"] for v in say_voices("en")]
+    assert names and not {"Bad News", "Bubbles", "Zarvox", "Albert"} & set(names)
+    assert all(v["lang"].startswith("en") for v in say_voices("en"))
+    assert all(v["lang"].startswith("fr") for v in say_voices("fr"))
