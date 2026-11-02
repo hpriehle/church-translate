@@ -17,10 +17,15 @@
   const MODE = params.get("mode") === "clips" ? "clips" : "stream";
   // Language from the link: /#french or /#wolof (what the printed QR codes use), then ?lang=, then
   // what this phone chose last time; "" = the server's default.
-  const HASH_LANGS = { french: "fr", francais: "fr", "français": "fr", fr: "fr", wolof: "wo", wo: "wo" };
+  const HASH_LANGS = { french: "fr", francais: "fr", "français": "fr", fr: "fr", wolof: "wo", wo: "wo",
+                       spanish: "es", es: "es", russian: "ru", ru: "ru" };
   const hashLang = () => HASH_LANGS[decodeURIComponent(location.hash.slice(1)).toLowerCase()] || "";
   let lang = hashLang() || params.get("lang") || localStorage.getItem("lang") || "";
   if (hashLang()) localStorage.setItem("lang", lang);
+  // /c/<congregation>: a Hear Church page. Its captions and sound come from that congregation's own live
+  // session (when it has one), and it says so when it isn't live.
+  const BASE = (location.pathname.match(/^\/c\/[^/]+/) || [""])[0];
+  let nextMeeting = null;   // {day, time, label} from the server
   const KEEP_LINES = 6;
   const $ = (id) => document.getElementById(id);
   const captionsEl = $("captions"), waitingEl = $("waiting"), connEl = $("conn"), stateEl = $("audioState");
@@ -65,8 +70,28 @@
     waitingEl.hidden = live && any && langOn;
     if (!langOn) waitingEl.textContent = LANG_OFF[lang] || "Cette traduction est arrêtée pour le moment.";
     else if (live) waitingEl.textContent = "En direct — la traduction va s'afficher ici.";
+    else if (BASE && !any) waitingEl.textContent = notLiveText();
     else if (any) waitingEl.textContent = "La traduction est terminée.";
     else waitingEl.textContent = "La traduction commencera au début de la réunion.";
+  }
+
+  const NOT_LIVE = {
+    en: ["Not live right now.", "Next meeting:"],
+    fr: ["Pas en direct pour le moment.", "Prochaine réunion :"],
+    es: ["No está en vivo ahora.", "Próxima reunión:"],
+    ru: ["Сейчас трансляции нет.", "Следующее собрание:"],
+  };
+  const DAY_INDEX = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  function notLiveText() {
+    const code = (navigator.language || "en").slice(0, 2);
+    const [none, nextLabel] = NOT_LIVE[code] || NOT_LIVE.en;
+    const n = nextMeeting;
+    if (!n) return none;
+    let day = n.label;
+    try {
+      day = new Intl.DateTimeFormat(navigator.language, { weekday: "long" }).format(new Date(2024, 0, 1 + DAY_INDEX.indexOf(n.day))) + " " + n.time;
+    } catch {}
+    return `${none} ${nextLabel} ${day}`;
   }
 
   // ------------------------------------------------------------------ language picker
@@ -114,7 +139,7 @@
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     setConn("wait");
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${location.host}/ws/listen`);
+    ws = new WebSocket(`${proto}://${location.host}${BASE}/ws/listen`);
     ws.onopen = () => {
       wsDelay = 1000;
       lastPong = Date.now();
@@ -129,6 +154,12 @@
           // Different server, run or language than what's on screen: start clean.
           if (m.boot !== boot || m.session !== session || (m.lang && m.lang !== shownLang)) clearCaptions();
           if (m.lang) { lang = m.lang; shownLang = m.lang; }
+          nextMeeting = m.next_meeting || null;
+          if (m.congregation) {
+            document.title = m.congregation.name;
+            const t = document.querySelector("header .title");
+            if (t) t.textContent = m.congregation.name;
+          }
           langOn = m.on !== false;
           renderLangs(m.languages || []);
           boot = m.boot;
@@ -136,6 +167,12 @@
           live = !!m.live;
           (m.history || []).forEach(addCaption);
           updateWaiting();
+          if (BASE && live && soundOn) ensureAudio();
+          break;
+        case "reload":   // the congregation just went live: join its session
+          try { ws.onclose = null; ws.close(); } catch {}
+          ws = null;
+          connect();
           break;
         case "session":
           // A new run started: wipe the previous one.
@@ -156,6 +193,7 @@
           live = !!m.live;
           if (!live) session = null;  // run over: a reconnect after this must not treat it as current
           updateWaiting();
+          if (BASE && !live) setTimeout(() => { try { ws.onclose = null; ws.close(); } catch {} ws = null; connect(); }, 2500);
           break;
         case "clip": if (MODE === "clips") enqueueClip(m); break;
       }
@@ -203,8 +241,13 @@
   }
 
   function startStream() {
+    if (BASE && !live) {   // nothing to hear until the congregation goes live
+      audio.removeAttribute("src");
+      setState("Pas en direct", "");
+      return;
+    }
     ignorePauseUntil = Date.now() + 1500;
-    audio.src = (lang ? `/stream/${lang}.mp3` : "/stream.mp3") + "?t=" + Date.now();   // always join at the live point
+    audio.src = (lang ? `${BASE}/stream/${lang}.mp3` : "/stream.mp3") + "?t=" + Date.now();   // always join at the live point
     lastTime = 0; stuckSince = 0;
     const p = audio.play();
     if (p) p.catch((err) => {
@@ -259,6 +302,8 @@
   const START_TEXT = {
     fr: { label: "Commencer", hint: "Touchez pour écouter la traduction en français. Utilisez des écouteurs." },
     wo: { label: "Tàmbali", hint: "Bësal fii ngir déglu tekki bi ci wolof. Jëfandikool ay écouteurs." },
+    es: { label: "Empezar", hint: "Toque para escuchar la traducción en español. Use auriculares." },
+    ru: { label: "Начать", hint: "Нажмите, чтобы слушать перевод на русский. Используйте наушники." },
   };
   const startOverlay = $("startOverlay");
   function showStart(on) {
