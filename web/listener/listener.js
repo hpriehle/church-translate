@@ -25,9 +25,38 @@
   // /c/<congregation>: a Hear Church page. Its captions and sound come from that congregation's own live
   // session (when it has one), and it says so when it isn't live.
   const BASE = (location.pathname.match(/^\/c\/[^/]+/) || [""])[0];
+  const $ = (id) => document.getElementById(id);
+  // The page's own words: French for the legacy ward page; on /c/<slug> the phone's language (en/fr/es/ru).
+  const UI_TEXT = {
+    fr: { conn: ["Connecté", "Connexion…", "Reconnexion…"], mute: "Couper le son", unmute: "Activer le son",
+          tap: "Touchez pour écouter · utilisez des écouteurs", tapBtn: "Touchez le bouton pour activer le son",
+          notLive: "Pas en direct", live: "En direct", loading: "Chargement…", title: "Traduction en direct",
+          off: "Cette traduction est arrêtée pour le moment.", liveWait: "En direct — la traduction va s'afficher ici.",
+          done: "La traduction est terminée.", begin: "La traduction commencera au début de la réunion." },
+    en: { conn: ["Connected", "Connecting…", "Reconnecting…"], mute: "Mute", unmute: "Turn sound on",
+          tap: "Tap to listen · use headphones", tapBtn: "Tap the button to turn the sound on",
+          notLive: "Not live", live: "Live", loading: "Loading…", title: "Live translation",
+          off: "This translation is paused for now.", liveWait: "Live — the translation will appear here.",
+          done: "The translation has ended.", begin: "The translation will begin when the meeting starts." },
+    es: { conn: ["Conectado", "Conectando…", "Reconectando…"], mute: "Silenciar", unmute: "Activar el sonido",
+          tap: "Toque para escuchar · use auriculares", tapBtn: "Toque el botón para activar el sonido",
+          notLive: "No está en vivo", live: "En vivo", loading: "Cargando…", title: "Traducción en vivo",
+          off: "Esta traducción está en pausa por ahora.", liveWait: "En vivo — la traducción aparecerá aquí.",
+          done: "La traducción ha terminado.", begin: "La traducción empezará cuando comience la reunión." },
+    ru: { conn: ["Подключено", "Подключение…", "Переподключение…"], mute: "Выключить звук", unmute: "Включить звук",
+          tap: "Нажмите, чтобы слушать · используйте наушники", tapBtn: "Нажмите кнопку, чтобы включить звук",
+          notLive: "Сейчас нет трансляции", live: "В эфире", loading: "Загрузка…", title: "Перевод в прямом эфире",
+          off: "Этот перевод пока приостановлен.", liveWait: "В эфире — перевод появится здесь.",
+          done: "Перевод завершён.", begin: "Перевод начнётся, когда начнётся собрание." },
+  };
+  const U = BASE ? UI_TEXT[(navigator.language || "en").slice(0, 2)] || UI_TEXT.en : UI_TEXT.fr;
+  if (BASE) {
+    document.documentElement.lang = (navigator.language || "en").slice(0, 2);
+    document.querySelector(".title").textContent = U.title;
+    $("mute").setAttribute("aria-label", U.unmute);
+  }
   let nextMeeting = null;   // {day, time, label} from the server
   const KEEP_LINES = 6;
-  const $ = (id) => document.getElementById(id);
   const captionsEl = $("captions"), waitingEl = $("waiting"), connEl = $("conn"), stateEl = $("audioState");
   const muteBtn = $("mute");
 
@@ -68,11 +97,11 @@
   function updateWaiting() {
     const any = captionsEl.children.length > 0;
     waitingEl.hidden = live && any && langOn;
-    if (!langOn) waitingEl.textContent = LANG_OFF[lang] || "Cette traduction est arrêtée pour le moment.";
-    else if (live) waitingEl.textContent = "En direct — la traduction va s'afficher ici.";
+    if (!langOn) waitingEl.textContent = (!BASE && LANG_OFF[lang]) || U.off;
+    else if (live) waitingEl.textContent = U.liveWait;
     else if (BASE && !any) waitingEl.textContent = notLiveText();
-    else if (any) waitingEl.textContent = "La traduction est terminée.";
-    else waitingEl.textContent = "La traduction commencera au début de la réunion.";
+    else if (any) waitingEl.textContent = U.done;
+    else waitingEl.textContent = U.begin;
   }
 
   const NOT_LIVE = {
@@ -131,7 +160,7 @@
 
   function setConn(state) {
     connEl.className = "pill " + (state === "ok" ? "ok" : state === "wait" ? "wait" : "bad");
-    connEl.textContent = state === "ok" ? "Connecté" : state === "wait" ? "Connexion…" : "Reconnexion…";
+    connEl.textContent = U.conn[state === "ok" ? 0 : state === "wait" ? 1 : 2];
   }
 
   function connect() {
@@ -236,14 +265,14 @@
   function showMute() {
     muteBtn.classList.toggle("on", soundOn);
     muteBtn.setAttribute("aria-pressed", soundOn ? "true" : "false");
-    muteBtn.setAttribute("aria-label", soundOn ? "Couper le son" : "Activer le son");
-    if (!soundOn) setState("Touchez pour écouter · utilisez des écouteurs");
+    muteBtn.setAttribute("aria-label", soundOn ? U.mute : U.unmute);
+    if (!soundOn) setState(U.tap);
   }
 
   function startStream() {
     if (BASE && !live) {   // nothing to hear until the congregation goes live
       audio.removeAttribute("src");
-      setState("Pas en direct", "");
+      setState(U.notLive, "");
       return;
     }
     ignorePauseUntil = Date.now() + 1500;
@@ -253,7 +282,7 @@
     if (p) p.catch((err) => {
       if (err && err.name === "NotAllowedError") {
         soundOn = false; showMute();
-        setState("Touchez le bouton pour activer le son", "warn");
+        setState(U.tapBtn, "warn");
         showStart(true);
       } else {
         restartAudio();
@@ -279,8 +308,8 @@
     audioDelay = 1000;
     showMute();
     if (MODE === "stream") {
-      if (audio.paused || !audio.src) { setState("Chargement…"); startStream(); }
-      else setState("En direct", "live");
+      if (audio.paused || !audio.src) { setState(U.loading); startStream(); }
+      else setState(U.live, "live");
     } else {
       unlockForClips();
       requestWakeLock();
@@ -314,8 +343,8 @@
   }
   $("startBtn").onclick = () => { showStart(false); unmute(); };
 
-  audio.addEventListener("playing", () => { audioDelay = 1000; if (soundOn) setState("En direct", "live"); });
-  audio.addEventListener("waiting", () => { if (soundOn) setState("Chargement…"); });
+  audio.addEventListener("playing", () => { audioDelay = 1000; if (soundOn) setState(U.live, "live"); });
+  audio.addEventListener("waiting", () => { if (soundOn) setState(U.loading); });
   audio.addEventListener("error", () => { if (soundOn && MODE === "stream") restartAudio(); });
   audio.addEventListener("ended", () => {
     if (MODE === "stream") { if (soundOn) restartAudio(); } else playNextClip();
@@ -351,17 +380,17 @@
   }
   function playNextClip() {
     const url = soundOn ? clipQueue.shift() : null;
-    if (!url) { clipPlaying = false; if (soundOn) setState("En direct", "live"); return; }
+    if (!url) { clipPlaying = false; if (soundOn) setState(U.live, "live"); return; }
     clipPlaying = true;
     ignorePauseUntil = Date.now() + 1500;
     audio.src = url;
-    audio.play().catch(() => { clipPlaying = false; setState("Touchez le bouton pour activer le son", "warn"); });
+    audio.play().catch(() => { clipPlaying = false; setState(U.tapBtn, "warn"); });
   }
   function unlockForClips() {
     // Phones only allow sound after a tap: play a short silence on this element now.
     ignorePauseUntil = Date.now() + 1500;
     audio.src = "/static/listener/silence.mp3";
-    audio.play().then(() => setState("En direct", "live")).catch(() => {});
+    audio.play().then(() => setState(U.live, "live")).catch(() => {});
   }
   let wakeLock = null;   // clips mode only: clip-by-clip playback needs the screen on
   async function requestWakeLock() {
@@ -372,7 +401,7 @@
   // ------------------------------------------------------------------ lock screen
   if ("mediaSession" in navigator) {
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: "Traduction en direct", artist: "Français" });
+      navigator.mediaSession.metadata = new MediaMetadata({ title: U.title, artist: BASE ? "" : "Français" });
       navigator.mediaSession.setActionHandler("play", () => unmute());
       navigator.mediaSession.setActionHandler("pause", () => { mute(); audio.pause(); });
       navigator.mediaSession.setActionHandler("stop", () => { mute(); audio.pause(); });

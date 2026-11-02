@@ -309,6 +309,21 @@ async def test_drop_resumes_within_grace_and_ends_after(server, hear):
     assert hear.db.sessions(cong["id"])[0]["ended_at"] is not None
 
 
+async def test_hub_tells_the_engine_when_it_ends_the_session(server, hear):
+    cong, token = make_cong(hear)
+    a = await engine(server, token)
+    assert (await start(a))["type"] == "session_started"
+    hear.live.end(hear.live.get(cong["id"]), why="hidden")                  # e.g. the admin hides the congregation
+    ended = await recv(a, "session_ended")
+    assert ended["message"] == "hidden"
+    await a.send(json.dumps({"type": "hub", "lang": "fr", "msg": {"type": "caption", "seq": 1, "text": "x"}}))
+    assert (await start(a))["type"] == "session_started"                    # a fresh start is possible
+    await a.send(json.dumps({"type": "session_stop"}))                      # the engine's own stop is not echoed back
+    await asyncio.sleep(0.3)
+    with pytest.raises(asyncio.TimeoutError):
+        await recv(a, "session_ended", timeout=0.3)
+
+
 async def test_bad_tokens_hidden_and_incompatible_streams(server, hear):
     cong, token = make_cong(hear)
     with pytest.raises(websockets.InvalidStatus) as e:     # refused before the upgrade, like the legacy path

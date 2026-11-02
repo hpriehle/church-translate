@@ -14,6 +14,7 @@ An engine (the congregation's Mac) connects to /ws/engine with "Authorization: B
                  binary: one byte = index into hello.languages, then MP3 bytes
                  {"type": "session_stop"}
   hub → engine   {"type": "session_started", session, resumed}   {"type": "session_refused", message}
+                 {"type": "session_ended", message}   the hub closed the session itself (congregation hidden)
 A second device starting while the congregation is live is refused. If the engine's link drops the
 session stays open for hearchurch.grace_s (60 s) so a reconnect can resume it, then it ends.
 """
@@ -139,7 +140,7 @@ class Live:
         elif t == "languages" and link.session:
             self._set_offered(link.session, [c for c in (m.get("languages") or []) if c in link.session.hubs])
         elif t == "session_stop" and link.session:
-            self.end(link.session)
+            self.end(link.session, notify=False)
         elif t == "hub" and link.session:
             self._caption(link.session, m)
 
@@ -228,13 +229,17 @@ class Live:
         if s.link is None:
             self.end(s)
 
-    def end(self, s: LiveSession) -> None:
+    def end(self, s: LiveSession, notify: bool = True, why: str = "The server ended this session.") -> None:
+        """Close a session. notify: tell the engine, if it is connected, so it stops sending (not needed when
+        the engine itself asked)."""
         if self.sessions.get(s.cid) is not s:
             return
         del self.sessions[s.cid]
         if s.grace:
             s.grace.cancel()
         if s.link is not None:
+            if notify:
+                s.link.send({"type": "session_ended", "message": why})
             s.link.session = None
         self.db.end_session(s.db_id)
         for h in s.hubs.values():

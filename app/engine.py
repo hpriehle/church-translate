@@ -425,9 +425,10 @@ class PublishClient(EngineClient):
         self.session_code = ""            # the hub's code for the running session, for resuming after a drop
         self.refused_run = 0.0            # started_at of a meeting the hub refused (not asked again)
         self._offered: list[str] = []
+        self.notice = ""                  # the hub's last refusal / ending of our session, for the operator page
 
     def info(self) -> dict[str, Any]:
-        return {**super().info(), "mode": "publish", "live": self.running}
+        return {**super().info(), "mode": "publish", "live": self.running, "notice": self.notice}
 
     async def _session(self, ws) -> None:
         M = _m()
@@ -444,12 +445,16 @@ class PublishClient(EngineClient):
                     continue
                 msg = json.loads(m)
                 if msg.get("type") == "session_started":
-                    self.session_code, self.running, self.last_error = msg.get("session") or "", True, ""
+                    self.session_code, self.running, self.notice = msg.get("session") or "", True, ""
                     log.info("live on %s%s", urlparse(self.url).hostname, " (resumed)" if msg.get("resumed") else "")
                 elif msg.get("type") == "session_refused":
                     self.announced, self.running = False, False
-                    self.refused_run, self.last_error = _m().S.pipeline.started_at, str(msg.get("message") or "refused")
-                    log.warning("hub refused the meeting: %s", self.last_error)
+                    self.refused_run, self.notice = _m().S.pipeline.started_at, str(msg.get("message") or "refused")
+                    log.warning("hub refused the meeting: %s", self.notice)
+                elif msg.get("type") == "session_ended":  # the hub closed it (e.g. hidden): stop sending, don't re-announce
+                    self.announced, self.running, self.session_code = False, False, ""
+                    self.refused_run, self.notice = _m().S.pipeline.started_at, str(msg.get("message") or "ended by the server")
+                    log.warning("hub ended the session: %s", self.notice)
         finally:
             sender.cancel()
             watcher.cancel()

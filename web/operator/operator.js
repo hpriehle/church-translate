@@ -386,7 +386,7 @@
     } else {
       const c = eng.client;
       $("engineInfo").textContent = c.connected
-        ? `Linked to ${c.hub}: this computer runs its meetings${c.running ? " (one is running now)" : ""}.`
+        ? `Linked to ${c.hub}: this computer runs its meetings${c.running ? " (one is running now)" : ""}.${c.notice ? " " + c.notice : ""}`
         : `Not linked to ${c.hub} yet${c.error ? " (" + c.error + ")" : ""}; retrying.`;
       $("engineUseRow").hidden = true;
     }

@@ -361,5 +361,5 @@ async def admin_hide(request: Request, cid: int):
         raise HTTPException(404)
     s = h.live.get(cid)
     if hidden and s is not None:
-        h.live.end(s)  # a hidden congregation stops being live
+        h.live.end(s, why="This congregation was hidden by the administrator.")  # it stops being live
     return {"ok": True, "hidden": hidden}
