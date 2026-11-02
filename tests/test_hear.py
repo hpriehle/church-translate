@@ -26,6 +26,17 @@ SIGNUP = {"church": "Latter-day Saints", "name": "Dakar Ward", "unit_type": "war
           "meeting_times": [{"day": "sun", "time": "10:00"}], "timezone": "Africa/Dakar"}
 
 
+class FakeGeocoder:
+    """Stands in for app.hear.geo.Geocoder: answers from a dict, remembers what it was asked."""
+
+    def __init__(self, known=None):
+        self.known, self.asked = known or {}, []
+
+    async def geocode(self, address):
+        self.asked.append(address)
+        return self.known.get(address)
+
+
 @pytest.fixture
 def hear(tmp_path):
     main.S.settings = Settings.model_validate({"server": {"operator_pin": "boss", "public_url": "https://hear.test/"},
@@ -33,7 +44,8 @@ def hear(tmp_path):
     main.S.local_addrs = set()
     main.S.operator = Hub("operator")
     db = Database(tmp_path / "t.db")
-    hear_api.H = Hear(db, Mailer(tmp_path / "outbox.log"), Live(db, main.S.settings.stream, grace_s=0.4))
+    hear_api.H = Hear(db, Mailer(tmp_path / "outbox.log"), Live(db, main.S.settings.stream, grace_s=0.4),
+                      geocoder=FakeGeocoder())   # never the real Nominatim
     yield hear_api.H
     hear_api.H = None
 
@@ -411,3 +423,265 @@ async def test_publish_client_publishes_a_locally_started_meeting(server, hear):
     finally:
         task.cancel()
         del main.S.pipeline
+
+
+# ------------------------------------------------------------------ location (phase 2)
+
+from app.hear import geo as hear_geo  # noqa: E402
+
+
+def _mock_http(monkeypatch, handler):
+    """Route the Geocoder's httpx traffic to `handler(request) -> httpx.Response` (no network)."""
+    real = httpx.AsyncClient
+    monkeypatch.setattr(hear_geo.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+
+
+async def test_nominatim_geocoder_policy_cache_and_failures(monkeypatch):
+    seen = []
+
+    def handler(req):
+        seen.append(req)
+        q = req.url.params["q"]
+        if q == "boom":
+            return httpx.Response(503)
+        return httpx.Response(200, json=[{"lat": "40.7128", "lon": "-74.0060"}] if q != "nowhere" else [])
+
+    _mock_http(monkeypatch, handler)
+    g = hear_geo.Geocoder(mapbox_token="", min_interval_s=0.2)
+    assert g.provider == "nominatim"
+    assert await g.geocode("1 Main St, New York") == (40.7128, -74.006)
+    assert seen[0].headers["user-agent"] == "HearChurch/1.0 (hearchurch.com)"
+    assert seen[0].url.host == "nominatim.openstreetmap.org" and seen[0].url.params["limit"] == "1"
+    assert await g.geocode("  1 MAIN st,  new york ") == (40.7128, -74.006) and len(seen) == 1   # cached
+    t0 = time.monotonic()
+    assert await g.geocode("nowhere") is None            # not found is cached too
+    assert await g.geocode("nowhere") is None and len(seen) == 2
+    assert time.monotonic() - t0 >= 0.19                 # at most one request per interval
+    assert await g.geocode("boom") is None               # a provider error gives None...
+    assert await g.geocode("boom") is None and len(seen) == 4   # ...and is not cached, so it can be retried
+    assert await g.geocode("x") is None and len(seen) == 4      # too short to ask about
+
+
+async def test_mapbox_geocoder_when_token_set(monkeypatch):
+    seen = []
+
+    def handler(req):
+        seen.append(req)
+        return httpx.Response(200, json={"features": [{"center": [-111.89, 40.76]}]})
+
+    _mock_http(monkeypatch, handler)
+    monkeypatch.setenv("HEARCHURCH_MAPBOX_TOKEN", "pk.test")
+    g = hear_geo.Geocoder(min_interval_s=0)
+    assert g.provider == "mapbox"
+    assert await g.geocode("50 N Temple, Salt Lake City") == (40.76, -111.89)   # mapbox gives lng, lat
+    assert seen[0].url.host == "api.mapbox.com" and seen[0].url.params["access_token"] == "pk.test"
+    assert "50%20N%20Temple" in str(seen[0].url)
+
+
+def test_signup_geocodes_and_never_blocks(client, hear):
+    hear.geocoder.known["1 Rue Exemple, Dakar"] = (14.69, -17.44)
+    r = client.post("/api/hc/signup", json=SIGNUP).json()
+    assert r["located"] and (r["lat"], r["lng"]) == (14.69, -17.44)
+    assert (hear.db.by_slug(r["slug"])["lat"], hear.db.by_slug(r["slug"])["lng"]) == (14.69, -17.44)
+    # not found: sign-up still works, the answer says a pin is needed
+    r = client.post("/api/hc/signup", json={**SIGNUP, "name": "Other Ward", "address": "Nowhere 1", "email": "o@example.org"}).json()
+    assert r["ok"] and not r["located"] and r["lat"] is None and "pin" in r["message"]
+    assert hear.db.by_slug(r["slug"])["lat"] is None
+    # a pin that came with the request is kept and nothing is looked up
+    hear.geocoder.asked.clear()
+    r = client.post("/api/hc/signup", json={**SIGNUP, "name": "Pinned Ward", "lat": 1.5, "lng": 2.5, "email": "p@example.org"}).json()
+    assert r["located"] and (r["lat"], r["lng"]) == (1.5, 2.5) and hear.geocoder.asked == []
+
+
+def test_signup_survives_a_broken_geocoder(client, hear):
+    async def boom(address):
+        raise RuntimeError("provider down")
+
+    hear.geocoder.geocode = boom
+    r = client.post("/api/hc/signup", json=SIGNUP)
+    assert r.status_code == 200 and r.json()["located"] is False
+
+
+def test_location_update_needs_a_device_token(client, hear):
+    cong, token = make_cong(hear)
+    auth = {"Authorization": f"Bearer {token}"}
+    assert client.post("/api/hc/location", json={"lat": 1, "lng": 2}).status_code == 403
+    assert client.post("/api/hc/location", json={"lat": 1, "lng": 2}, headers={"Authorization": "Bearer nope"}).status_code == 403
+    r = client.post("/api/hc/location", json={"lat": 40.7, "lng": -74.0, "address": "5 Pine St"}, headers=auth)
+    assert r.status_code == 200 and r.json()["lat"] == 40.7
+    c = hear.db.congregation(cong["id"])
+    assert (c["lat"], c["lng"], c["address"]) == (40.7, -74.0, "5 Pine St")
+    client.post("/api/hc/location", json={"lat": 41.0, "lng": -73.0}, headers=auth)   # no address: the old one stays
+    assert hear.db.congregation(cong["id"])["address"] == "5 Pine St"
+    assert client.post("/api/hc/location", json={"lat": 41.0}, headers=auth).status_code == 400
+    assert client.post("/api/hc/location", json={}, headers=auth).status_code == 400
+    assert client.post("/api/hc/location", json={"lat": 99, "lng": 0}, headers=auth).status_code == 422
+    hear.geocoder.known["9 Elm St"] = (10.0, 20.0)
+    r = client.post("/api/hc/location", json={"address": "9 Elm St"}, headers=auth)
+    assert (r.json()["lat"], r.json()["lng"]) == (10.0, 20.0) and hear.db.congregation(cong["id"])["address"] == "9 Elm St"
+    assert client.post("/api/hc/location", json={"address": "Atlantis"}, headers=auth).status_code == 422
+    hear.db.set_hidden(cong["id"], True)
+    assert client.post("/api/hc/location", json={"lat": 1, "lng": 2}, headers=auth).status_code == 403
+
+
+def place(hear, name, lat, lng, *, verified=True, hidden=False, times=None, tz="", stake=None):
+    c = hear.db.create_congregation(church="LDS", name=name, unit_type="ward", email=f"{slugify(name)}@x.org", stake=stake,
+                                    lat=lat, lng=lng, meeting_times=times or [], timezone=tz)
+    if verified:
+        hear.db.set_verified(c["id"])
+    if hidden:
+        hear.db.set_hidden(c["id"], True)
+    return c
+
+
+def go_live(hear, cong, languages=("fr",)):
+    link = type("L", (), {"device": {"id": 1}, "name": "Mac", "send": lambda self, m: None, "session": None})()
+    s = hear_live_session(hear, cong, link, list(languages))
+    return s
+
+
+def hear_live_session(hear, cong, link, languages):
+    from app.hear.live import LiveSession
+
+    s = LiveSession(cong, link, hear.db.start_session(cong["id"], languages), "20261102-100000", languages, languages,
+                    main.S.settings.stream)
+    hear.live.sessions[cong["id"]] = s
+    return s
+
+
+def test_live_widens_the_radius_and_says_which(client, hear):
+    near = place(hear, "Near Ward", 40.7000, -74.0000)
+    mid = place(hear, "Mid Ward", 40.7000 + 3 / 69, -74.0)          # ~3 miles north
+    far = place(hear, "Far Ward", 40.7000 + 15 / 69, -74.0)         # ~15 miles north
+    place(hear, "Dark Ward", 40.7001, -74.0)                        # right here but not live
+    r = client.get("/api/live", params={"lat": 40.7, "lng": -74.0})
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    assert r.json() == {"radius_mi": 25, "radii_mi": [1, 5, 25], "results": []}      # nothing live anywhere yet
+    go_live(hear, far)
+    j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
+    assert j["radius_mi"] == 25 and [x["slug"] for x in j["results"]] == ["far-ward"]
+    go_live(hear, mid, ("fr", "es"))
+    j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
+    assert j["radius_mi"] == 5 and [x["slug"] for x in j["results"]] == ["mid-ward"]
+    go_live(hear, near)
+    j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
+    assert j["radius_mi"] == 1 and [x["slug"] for x in j["results"]] == ["near-ward"]
+    row = j["results"][0]
+    assert row["live"] and row["name"] == "Near Ward" and row["church"] == "LDS" and row["unit_type"] == "ward"
+    assert (row["lat"], row["lng"]) == (40.7, -74.0) and row["languages"] == [{"code": "fr", "name": "Français"}]
+    assert row["starts_at"] > 0
+    assert set(row) >= {"slug", "name", "church", "unit_type", "lat", "lng", "languages", "live", "starts_soon", "starts_at"}
+
+
+def test_live_hides_hidden_and_unverified_and_unlocated(client, hear):
+    ok = place(hear, "Ok Ward", 40.7, -74.0)
+    for c in (place(hear, "Hidden Ward", 40.7, -74.0, hidden=True), place(hear, "Unverified Ward", 40.7, -74.0, verified=False),
+              place(hear, "Nowhere Ward", None, None), ok):
+        go_live(hear, c)
+    j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
+    assert [x["slug"] for x in j["results"]] == ["ok-ward"]
+
+
+def test_live_flags_meetings_starting_within_30_minutes(client, hear):
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    def at(minutes):
+        t = datetime.fromtimestamp(now.timestamp() + minutes * 60, timezone.utc)
+        return [{"day": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][t.weekday()], "time": t.strftime("%H:%M")}]
+    place(hear, "Soon Ward", 40.7, -74.0, times=at(15), tz="UTC")
+    place(hear, "Later Ward", 40.7, -74.0, times=at(90), tz="UTC")
+    place(hear, "Notz Ward", 40.7, -74.0, times=at(15))              # no time zone: start unknown, not listed
+    j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
+    assert [(x["slug"], x["live"], x["starts_soon"]) for x in j["results"]] == [("soon-ward", False, True)]
+    assert abs(j["results"][0]["starts_at"] - (now.timestamp() + 900)) < 120
+
+
+def test_live_validates_and_rate_limits_per_ip(client, hear):
+    assert client.get("/api/live").status_code == 422
+    assert client.get("/api/live", params={"lat": 95, "lng": 0}).status_code == 422
+    assert client.get("/api/live", params={"lat": "x", "lng": 0}).status_code == 422
+    hear.limits["live"] = RateLimiter(3, 60)
+    codes = [client.get("/api/live", params={"lat": 1, "lng": 1}).status_code for _ in range(4)]
+    assert codes == [200, 200, 200, 429]
+    other = client.get("/api/live", params={"lat": 1, "lng": 1}, headers={"cf-connecting-ip": "9.9.9.9"})
+    assert other.status_code == 200                                                      # another IP is unaffected
+
+
+def test_live_works_across_the_date_line(client, hear):
+    c = place(hear, "Fiji Ward", -17.7, -179.9)
+    go_live(hear, c)
+    j = client.get("/api/live", params={"lat": -17.7, "lng": 179.95}).json()
+    assert j["radius_mi"] == 25 and [x["slug"] for x in j["results"]] == ["fiji-ward"]
+
+
+def test_access_log_never_carries_the_position(hear):
+    import logging
+
+    class Grab(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.INFO)
+            self.lines = []
+
+        def emit(self, record):
+            self.lines.append(record.getMessage())
+
+    grab, lg = Grab(), logging.getLogger("uvicorn.access")
+    lg.addHandler(grab)
+    old = lg.level
+    lg.setLevel(logging.INFO)
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    srv = uvicorn.Server(uvicorn.Config(main.app, host="127.0.0.1", port=port, lifespan="off", log_level="info", access_log=True, log_config=None))
+    t = threading.Thread(target=srv.run, daemon=True)
+    t.start()
+    try:
+        for _ in range(100):
+            if srv.started:
+                break
+            time.sleep(0.05)
+        assert httpx.get(f"http://127.0.0.1:{port}/api/live?lat=40.123456&lng=-74.654321").status_code == 200
+        assert httpx.get(f"http://127.0.0.1:{port}/api/hc/search?q=abc").status_code == 200
+    finally:
+        srv.should_exit = True
+        t.join(5)
+        lg.removeHandler(grab)
+        lg.setLevel(old)
+    joined = "\n".join(grab.lines)
+    assert "/api/live" in joined and "40.1234" not in joined and "74.6543" not in joined and "lat=" not in joined
+    assert "/api/hc/search?q=abc" in joined      # other paths are logged as usual
+
+
+def test_search_by_name_verified_and_visible_only(client, hear):
+    a = place(hear, "Brooklyn First Ward", 40.65, -73.95, stake="Brooklyn Stake")
+    place(hear, "Brooklyn Second Ward", 40.66, -73.96)
+    place(hear, "Queens Ward", 40.7, -73.8, stake="Brooklyn Heights Stake")
+    place(hear, "Secret Brooklyn Ward", 40.7, -73.8, hidden=True)
+    place(hear, "Unverified Brooklyn Ward", 40.7, -73.8, verified=False)
+    place(hear, "Percent 100% Ward", None, None)
+    names = [x["name"] for x in client.get("/api/hc/search", params={"q": "brooklyn"}).json()["results"]]
+    assert names == ["Brooklyn First Ward", "Brooklyn Second Ward", "Queens Ward"]       # name matches first, stake too
+    assert [x["name"] for x in client.get("/api/hc/search", params={"q": "  FIRST  ward"}).json()["results"]] == ["Brooklyn First Ward"]
+    assert client.get("/api/hc/search", params={"q": "%"}).json()["results"] == []         # wildcards are literal
+    assert [x["name"] for x in client.get("/api/hc/search", params={"q": "100%"}).json()["results"]] == ["Percent 100% Ward"]
+    assert client.get("/api/hc/search", params={"q": "b"}).json()["results"] == []         # too short
+    go_live(hear, a)
+    first = client.get("/api/hc/search", params={"q": "brooklyn"}).json()["results"][0]
+    assert first["live"] and first["slug"] == "brooklyn-first-ward" and first["lat"] == 40.65
+    for i in range(12):
+        place(hear, f"Many {i:02d} Ward", 1, 1)
+    assert len(client.get("/api/hc/search", params={"q": "many"}).json()["results"]) == 10      # limited
+    hear.limits["search"] = RateLimiter(1, 60)
+    client.get("/api/hc/search", params={"q": "many"})
+    assert client.get("/api/hc/search", params={"q": "many"}).status_code == 429
+
+
+def test_find_page_and_legacy_root_unchanged(client, hear):
+    r = client.get("/find")
+    assert r.status_code == 200 and "/static/find/find.js?v=" in r.text and "Find my congregation" in r.text
+    assert client.get("/static/find/find.js").status_code == 200
+    root = client.get("/")
+    assert root.status_code == 200 and "/static/listener/listener.js?v=" in root.text and "Find my congregation" not in root.text

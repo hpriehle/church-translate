@@ -157,6 +157,26 @@ class Database:
     def set_verified(self, cid: int) -> None:
         self._x("UPDATE congregations SET email_verified = 1 WHERE id = ?", (cid,))
 
+    def set_location(self, cid: int, lat: float, lng: float, address: str | None = None) -> None:
+        self._x("UPDATE congregations SET lat = ?, lng = ?, address = COALESCE(?, address) WHERE id = ?",
+                (lat, lng, address, cid))
+
+    def in_box(self, south: float, north: float, west: float, east: float) -> list[dict[str, Any]]:
+        """Visible (verified, not hidden) congregations with a location inside a box. west > east = across ±180°."""
+        lng_sql = "lng BETWEEN ? AND ?" if west <= east else "(lng >= ? OR lng <= ?)"
+        rows = self._q("SELECT * FROM congregations WHERE email_verified = 1 AND hidden = 0 AND lat BETWEEN ? AND ?"
+                       f" AND {lng_sql}", (south, north, west, east))
+        return [_cong(r) for r in rows]
+
+    def search(self, q: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Visible congregations whose name, stake or church contains q (case-insensitive)."""
+        like = "%" + q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        rows = self._q("SELECT * FROM congregations WHERE email_verified = 1 AND hidden = 0 AND (lower(name) LIKE :like"
+                       " ESCAPE '\\' OR lower(stake) LIKE :like ESCAPE '\\' OR lower(church) LIKE :like ESCAPE '\\')"
+                       " ORDER BY (lower(name) LIKE :pfx ESCAPE '\\') DESC, name LIMIT :lim",
+                       {"like": like, "pfx": like[1:], "lim": limit})
+        return [_cong(r) for r in rows]
+
     def set_hidden(self, cid: int, hidden: bool) -> bool:
         return self._x("UPDATE congregations SET hidden = ? WHERE id = ?", (int(hidden), cid)).rowcount > 0
 

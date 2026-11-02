@@ -5,9 +5,15 @@ Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
                             device_name] → {slug, claim}; an e-mail with a verification link is sent
   GET  /api/hc/verify?token=…   (the link in the e-mail) marks the e-mail verified; the congregation is live-capable
   POST /api/hc/claim        {claim} → 202 {pending} until the link was clicked, then once {device_token, slug}
+  POST /api/hc/location     (device token) {lat, lng, [address]} or {address} (geocoded) → moves the building's pin
   POST /api/hc/device-link  {email, [slug, device_name]} → e-mails a magic link to add another Mac; the new Mac
                             then polls /api/hc/claim with the returned {claim} exactly like above
 The claim secret stays with the app that asked, so a link opened by a mail scanner yields no token.
+Sign-up geocodes an address that came without lat/lng (Nominatim, or Mapbox with HEARCHURCH_MAPBOX_TOKEN). The
+answer says whether it worked ("located"); if not, lat/lng stay empty and the app should ask for a map pin and
+send it to /api/hc/location.
+Listener side: GET /api/live?lat&lng (what is live near a phone; the phone computes exact distances; the
+position is never stored or logged), GET /api/hc/search?q= (by name), GET /api/hc/c/<slug>, pages /c/<slug>, /find.
 meeting_times: [{"day": "sun", "time": "10:00"}], timezone: an IANA name (used for "next meeting").
 """
 from __future__ import annotations
@@ -22,12 +28,13 @@ from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import LOG_DIR, ROOT, WEB_DIR
 from .db import Database
+from .geo import Geocoder, bounding_box, hide_coordinates_in_access_log, in_box
 from .live import Live
 from .mail import Mailer, RateLimiter
 
@@ -37,12 +44,17 @@ router = APIRouter()
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 LINK_TTL_S = 24 * 3600
+RADII_MI = (1, 5, 25)       # /api/live widens through these until something is found
+SOON_S = 30 * 60            # a meeting starting within this long counts as "starting soon"
+hide_coordinates_in_access_log()
 
 
 class Hear:
-    def __init__(self, db: Database, mailer: Mailer, live: Live):
+    def __init__(self, db: Database, mailer: Mailer, live: Live, geocoder: Geocoder | None = None):
         self.db, self.mailer, self.live = db, mailer, live
-        self.limits = {"signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
+        self.geocoder = geocoder or Geocoder()
+        self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
+                       "signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
                        "email_addr": RateLimiter(3, 3600), "claim": RateLimiter(1200, 3600),
                        "verify": RateLimiter(60, 3600)}
 
@@ -140,13 +152,63 @@ async def signup(request: Request, body: SignUp):
     h = _hear()
     if (body.lat is None) != (body.lng is None):
         raise HTTPException(400, "Give both lat and lng, or neither.")
+    lat, lng = body.lat, body.lng
+    if lat is None and body.address:   # a failed lookup never blocks sign-up: the app asks for a map pin instead
+        found = await _geocode(body.address)
+        lat, lng = found if found else (None, None)
     cong = h.db.create_congregation(
         church=body.church, name=body.name, unit_type=body.unit_type, email=body.email, stake=body.stake,
-        address=body.address, lat=body.lat, lng=body.lng, timezone=body.timezone,
+        address=body.address, lat=lat, lng=lng, timezone=body.timezone,
         meeting_times=[m.model_dump() for m in body.meeting_times])
     claim = _send_link(request, cong, "verify", body.device_name)
-    return {"ok": True, "slug": cong["slug"], "claim": claim,
-            "message": "Check your e-mail for the verification link."}
+    return {"ok": True, "slug": cong["slug"], "claim": claim, "located": lat is not None, "lat": lat, "lng": lng,
+            "message": "Check your e-mail for the verification link."
+            + ("" if lat is not None else " We could not find the building on the map: please place its pin.")}
+
+
+async def _geocode(address: str) -> tuple[float, float] | None:
+    try:
+        return await asyncio.wait_for(_hear().geocoder.geocode(address), 15)
+    except Exception as e:
+        log.warning("geocode gave up: %s", e)
+        return None
+
+
+def _device_congregation(request: Request) -> dict[str, Any]:
+    h = _hear()
+    auth = request.headers.get("authorization", "")
+    device = h.db.device_by_token(auth[7:]) if auth.startswith("Bearer ") else None
+    cong = h.db.congregation(device["congregation_id"]) if device else None
+    if cong is None or cong["hidden"]:
+        raise HTTPException(403, "Unknown device: sign in again.")
+    return cong
+
+
+class Location(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+    address: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/api/hc/location")
+async def set_location(request: Request, body: Location):
+    """The app confirms or drags the building's pin. With only an address, it is geocoded."""
+    cong = _device_congregation(request)
+    _limit(request, "location", f"cong{cong['id']}")
+    h = _hear()
+    if (body.lat is None) != (body.lng is None):
+        raise HTTPException(400, "Give both lat and lng, or neither.")
+    lat, lng = body.lat, body.lng
+    if lat is None:
+        if not body.address:
+            raise HTTPException(400, "Give lat and lng, or an address.")
+        found = await _geocode(body.address)
+        if not found:
+            raise HTTPException(422, "We could not find that address: place the pin on the map instead.")
+        lat, lng = found
+    h.db.set_location(cong["id"], lat, lng, body.address)
+    return {"ok": True, "lat": lat, "lng": lng, "address": body.address if body.address is not None else cong["address"]}
 
 
 def _page(title: str, text: str, status: int = 200) -> HTMLResponse:
@@ -253,6 +315,53 @@ async def listener_page(slug: str):
 
     _congregation(slug)
     return main.page(WEB_DIR / "listener" / "index.html")
+
+
+def _entry(c: dict[str, Any], now: float) -> dict[str, Any]:
+    """One congregation for the nearby list / search: what a phone needs to show a row and compute its distance."""
+    s = _hear().live.get(c["id"])
+    nm = next_meeting(c["meeting_times"], c["timezone"])
+    soon = bool(nm and nm["starts"] and 0 <= nm["starts"] - now <= SOON_S)
+    return {"slug": c["slug"], "name": c["name"], "church": c["church"], "unit_type": c["unit_type"],
+            "stake": c["stake"], "lat": c["lat"], "lng": c["lng"], "live": s is not None,
+            "starts_soon": soon and s is None, "languages": s.languages_public() if s else [],
+            "starts_at": s.started if s else (nm["starts"] if nm else None),
+            "next_meeting": {k: nm[k] for k in ("label", "day", "time")} if nm else None}
+
+
+@router.get("/api/live")
+async def nearby(request: Request, lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180)):
+    """Live (or about to start) congregations around a phone, widening 1 → 5 → 25 miles until some are found.
+    The reply is a rough box, not distances: the phone works those out. Nothing about the request is kept."""
+    _limit(request, "live")
+    h, now = _hear(), time.time()
+    radius, out = RADII_MI[-1], []
+    for radius in RADII_MI:
+        box = bounding_box(lat, lng, radius)
+        s, n, w, e = box
+        w2, e2 = (-180.0, 180.0) if e - w >= 360 else (((w + 180) % 360) - 180, ((e + 180) % 360) - 180)
+        out = [x for x in (_entry(c, now) for c in h.db.in_box(s, n, w2, e2))
+               if (x["live"] or x["starts_soon"]) and in_box(x["lat"], x["lng"], box)]
+        if out:
+            break
+    return JSONResponse({"radius_mi": radius, "radii_mi": list(RADII_MI), "results": out}, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/hc/search")
+async def search(request: Request, q: str = Query(default="", max_length=80)):
+    _limit(request, "search")
+    q = " ".join(q.split())
+    if len(q) < 2:
+        return {"results": []}
+    now = time.time()
+    return {"results": [_entry(c, now) for c in _hear().db.search(q, 10)]}
+
+
+@router.get("/find", response_class=HTMLResponse)
+async def find_page():
+    from .. import main
+
+    return main.page(WEB_DIR / "find" / "index.html")
 
 
 @router.get("/api/hc/c/{slug}")
