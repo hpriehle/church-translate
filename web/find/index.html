@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Find my congregation</title>
+<link rel="stylesheet" href="/static/find/find.css">
+</head>
+<body>
+<header><span class="title" id="title">Find my congregation</span></header>
+<main>
+  <p id="intro" class="intro">Listen to a meeting in your language, live.</p>
+  <button id="locate" class="big" type="button">Find my congregation</button>
+  <p id="privacy" class="privacy">Your location stays on your phone.</p>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+  <ul id="results" class="results"></ul>
+  <form id="searchForm" class="search" role="search" hidden>
+    <label id="searchLabel" for="q">Search by name</label>
+    <input id="q" type="search" autocomplete="off" autocapitalize="words" maxlength="80" placeholder="Ward, branch or parish name">
+  </form>
+  <ul id="found" class="results"></ul>
+  <p id="searchLink"><button id="showSearch" class="link" type="button">Search by name instead</button></p>
+</main>
+<script src="/static/find/find.js"></script>
+</body>
+</html>
