@@ -45,6 +45,20 @@ class EngineCfg(BaseModel):
     use: bool = True       # public server: hand meetings to the engine while it is connected
     hub_url: str = ""      # engine: the public server to serve, e.g. wss://live.example.org/ws/engine
     name: str = ""         # engine: how the public server's pages name it, e.g. "Harrison's Mac"
+    device_token: str = "" # engine: a Hear Church device token. With hub_url set, this computer publishes its
+                           # own locally started meetings as that congregation's session (instead of `token`)
+
+
+class HearCfg(BaseModel):
+    """Hear Church (many congregations) on a public server. E-mail goes to logs/outbox.log unless smtp_host
+    (or HEARCHURCH_SMTP_HOST) is set; the SMTP password is only read from HEARCHURCH_SMTP_PASSWORD."""
+    db_path: str = "data/hearchurch.db"
+    smtp_host: str = ""
+    smtp_port: int = 0               # 0 = 587 (or HEARCHURCH_SMTP_PORT)
+    smtp_user: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    grace_s: float = 60.0            # a session whose engine dropped stays open this long for a reconnect
 
 
 class AudioCfg(BaseModel):
@@ -131,6 +145,7 @@ class Settings(BaseModel):
     backlog: BacklogCfg = BacklogCfg()
     stream: StreamCfg = StreamCfg()
     engine: EngineCfg = EngineCfg()
+    hearchurch: HearCfg = HearCfg()
 
 
 def tts_for(settings: "Settings", code: str) -> TtsCfg:

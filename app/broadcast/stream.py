@@ -98,6 +98,18 @@ class Mp3Broadcaster:
             pass
         sub.queue.put_nowait(None)
 
+    def close_all(self) -> None:
+        """End every listener's stream (the session it belonged to is over); their pages reconnect."""
+        for sub in list(self.subs):
+            self.subs.discard(sub)
+            try:
+                while True:
+                    sub.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            sub.queue.put_nowait(None)
+        self.burst.clear()
+
     def subscribe(self) -> tuple[Subscriber, bytes]:
         sub = Subscriber(maxsize=150)  # 15 s of audio before we give up on a phone
         self.subs.add(sub)
