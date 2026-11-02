@@ -19,6 +19,7 @@ from .languages import Language
 from .metrics import ChunkRecord
 from .translate.router import Translator
 from .tts.engines import TtsRunner
+from .profanity import unspoken
 from .tts.normalize import speechify
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -141,9 +142,14 @@ class Channel:
                 res.status, res.note = "dropped", f"audio skipped (would start {projected:.0f}s behind)"
                 self.p.lang_done(rec)
                 continue
+            spoken = unspoken(res.text)   # masked swear words are skipped, not read out
+            if not spoken:
+                res.status, res.note = "dropped", "only masked words: nothing to say"
+                self.p.lang_done(rec)
+                continue
             speed = self.backlog.speed_for(self.total_backlog())
             try:
-                pcm, ms = await self.tts.synth(speechify(self.code, res.text), speed)
+                pcm, ms = await self.tts.synth(speechify(self.code, spoken), speed)
             except Exception as e:
                 log.warning("[%s] tts failed: %s", self.code, e)
                 res.status, res.note = "failed", (res.note + f" tts: {e}").strip()

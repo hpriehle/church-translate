@@ -20,6 +20,7 @@ from ..languages import LANGUAGES, Language
 from .api_session import ApiSession
 from .claude_session import ClaudeSession, Usage, claude_binary
 from .ollama import OllamaClient
+from ..profanity import censor
 from .prompts import build_system_prompt, clean_output, seed_message, user_message
 
 log = logging.getLogger("translate")
@@ -300,6 +301,8 @@ class Translator:
     def _finish(self, raw: str, engine: str, t0: float, english: str,
                 session: ClaudeSession | None, note: str) -> TranslationResult:
         text = clean_output(raw)
+        if text:
+            text = censor(text, self.lang.code)   # swear words → ****, whatever the model wrote
         if not text:
             note = (note + " " + ("translator skipped it as noise" if raw and "<skip>" in raw else "empty reply")).strip()
         if engine == "claude":

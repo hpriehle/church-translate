@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
+from .profanity import censor
 from .audio_in import CaptureWorker, FileSource, MicSource, Source
 from .backlog import BacklogPolicy
 from .channel import Channel
@@ -231,7 +232,7 @@ class Pipeline:
                 rec.status, rec.note = "skipped", res.dropped_reason
                 self._finalize(rec)
                 continue
-            rec.en = res.text
+            rec.en = censor(res.text, "en")   # masked before translation: no translation can carry the word
             self.prev_en = res.text
             chans = self.on_channels
             rec.out = {code: LangResult() for code in chans}

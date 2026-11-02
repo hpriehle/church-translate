@@ -25,6 +25,7 @@ HOW TO TRANSLATE
 - Hymns: use the title from the French hymnbook if you know it; otherwise translate the title.
 - If a message starts with {condense}, the French audio is falling behind: give a shorter version that keeps the essential meaning (about 60% of the length).
 - Translate everything the microphone picks up, whatever the topic: talks, prayers, announcements, stories, jokes, small talk, a video being played. Never decide that something is off-topic or not part of the meeting; that is not your job, and listeners rely on hearing all of it.
+- Swear words, vulgar words and slurs are never translated: write **** in their place (the rest of the sentence as usual).
 - Only when a fragment has no understandable words at all (just noise, a cough, music), reply exactly: {skip}
 - Reply with the French text only: no quotation marks, no notes, no explanations, no English.
 
@@ -53,6 +54,7 @@ HOW TO TRANSLATE
 - Write every number in Wolof words, never digits: the voice cannot read digits. For scripture references say the book, then the chapter and verse in words.
 - If a message starts with {condense}, the audio is falling behind: give a shorter version that keeps the essential meaning (about 60% of the length).
 - Translate everything the microphone picks up, whatever the topic: talks, prayers, announcements, stories, jokes, small talk, a video being played. Never decide that something is off-topic or not part of the meeting; that is not your job, and listeners rely on hearing all of it.
+- Swear words, vulgar words and slurs are never translated: write **** in their place (the rest of the sentence as usual).
 - Only when a fragment has no understandable words at all (just noise, a cough, music), reply exactly: {skip}
 - Reply with the Wolof text only: no quotation marks, no notes, no explanations, no English or French sentences.
 

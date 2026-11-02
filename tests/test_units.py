@@ -431,3 +431,40 @@ def test_clean_output_never_lets_markup_through():
     for ok in ("de l'Église de Jésus-Christ des Saints des Derniers Jours.", "Jean 3:16, « Car Dieu a tant aimé »",
                "Yàlla mooy sunu Boroom, ñu ngi koy sant.", "Il est 10 h 30 : la réunion commence."):
         assert clean_output(ok) == ok.strip("«» ") or clean_output(ok) == ok, ok
+
+
+def test_swear_words_are_masked_in_every_language():
+    from app.profanity import censor
+
+    assert censor("Bonjour, putain de merde, ce con est en retard.", "fr") == "Bonjour, **** de ****, ce **** est en retard."
+    assert censor("Va te faire foutre, fils de pute, enculé !", "fr") == "Va te faire ****, ****, **** !"
+    assert censor("J’en ai marre de ces CONNERIES.", "fr") == "J’en ai marre de ces ****."
+    assert censor("That was a fucking shitshow, holy shit.", "en") == "That was a **** ****, holy ****."
+    assert censor("Это пиздец, блять, сука.", "ru") == "Это ****, ****, ****."
+    assert censor("El hijo de puta, joder, coño.", "es") == "El ****, ****, ****."
+    assert censor("Yàlla mooy sunu Boroom. fuck", "wo") == "Yàlla mooy sunu Boroom. ****"   # English is always checked
+
+
+def test_scripture_and_everyday_words_are_never_masked():
+    from app.profanity import censor
+
+    keep = {
+        "en": ["The ass and the cock crowed; hell and damnation; Titus 3:5.", "Kick against the pricks.",
+               "Babylon, the great whore.", "Shiitake, Scunthorpe, class, assess, cocktail, dickens."],
+        "fr": ["Il est descendu en enfer, délivré de la gueule du lion, au bout d'un cul-de-sac.",
+               "Les fous disent : il n'y a point de Dieu.", "Je suis en retard ; la culture, le culte, conseil, construire.",
+               "La chatte du voisin ; une bâtisse ; la prostituée de toute la terre ; contre, concile."],
+        "es": ["Las zorras tienen guaridas; la hostia; un negro; con amor; el cono."],
+        "ru": ["Небеса и хлеб, хуже, победа, вебсайт, себе, требовать, худой."],
+        "wo": ["Yàlla mooy sunu Boroom, ñu ngi koy sant."],
+    }
+    for lang, lines in keep.items():
+        for line in lines:
+            assert censor(line, lang) == line, (lang, line)
+
+
+def test_the_voice_skips_masked_words():
+    from app.profanity import unspoken
+
+    assert unspoken("Bonjour, **** de ****, ce **** est en retard.") == "Bonjour, de, ce est en retard."
+    assert unspoken("**** !") == "" and unspoken("****, ****") == ""
