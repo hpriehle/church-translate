@@ -7,7 +7,8 @@ enum HubClient {
         var errorDescription: String? { message }
     }
 
-    struct SignUpResult { let slug: String; let claim: String; let located: Bool }
+    /// With e-mail verification off (for now) the device token comes back at once; otherwise a claim to poll.
+    struct SignUpResult { let slug: String; let deviceToken: String?; let claim: String; let located: Bool }
     enum ClaimResult { case pending; case token(String, slug: String, name: String) }
 
     static func signUp(_ p: Profile, deviceName: String) async throws -> SignUpResult {
@@ -19,8 +20,8 @@ enum HubClient {
         if !p.stake.isEmpty { body["stake"] = p.stake }
         if let lat = p.lat, let lng = p.lng { body["lat"] = lat; body["lng"] = lng }
         let (json, _) = try await post("/api/hc/signup", body)
-        return SignUpResult(slug: json["slug"] as? String ?? "", claim: json["claim"] as? String ?? "",
-                            located: json["located"] as? Bool ?? false)
+        return SignUpResult(slug: json["slug"] as? String ?? "", deviceToken: json["device_token"] as? String,
+                            claim: json["claim"] as? String ?? "", located: json["located"] as? Bool ?? false)
     }
 
     /// Another Mac for a congregation that already exists: e-mails a link, returns the claim to poll.

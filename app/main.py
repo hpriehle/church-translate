@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import netinfo
@@ -40,7 +40,7 @@ EDITABLE = {
     "translate": {"mode", "claude_model", "claude_effort", "claude_timeout_s", "ollama_model", "claude_session_turns"},
     "tts": {"engine", "voice", "rate", "volume"},
     "backlog": {"speedup_start_s", "speedup_full_s", "max_speed", "condense_on_s", "condense_off_s", "drop_above_s"},
-    "server": {"lan_ip", "use_public_url"},
+    "server": {"lan_ip", "use_public_url", "sharing"},
     "engine": {"use"},
 }
 
@@ -57,6 +57,7 @@ class State:
     port_override: int | None = None
     mode_override: str | None = None
     app_mode: bool = False                       # run by the Hear Church Mac app (see `python -m app --app`)
+    listen_key: str = ""                         # local sharing: this meeting's key (/s/<key>), new after each meeting
     tunnel: dict = {"state": "unknown"}
     engine_hub: EngineHub = EngineHub()          # a faster computer running our meetings (if linked)
     engine_client: EngineClient | None = None    # this computer running another server's meetings
@@ -100,7 +101,20 @@ def set_languages(codes: list[str], persist: bool = True) -> list[str]:
     return on
 
 
+def local_sharing() -> bool:
+    return S.app_mode and S.settings.server.sharing == "local"
+
+
+def new_listen_key() -> None:
+    import secrets
+
+    S.listen_key = secrets.token_urlsafe(6)
+
+
 def listener_url() -> str:
+    if local_sharing():
+        ip = netinfo.best_lan_ip(S.settings.server.lan_ip)
+        return f"http://{ip}:{S.settings.server.port}/s/{S.listen_key}"
     if S.settings.server.public_url and S.settings.server.use_public_url:
         return S.settings.server.public_url
     ip = netinfo.best_lan_ip(S.settings.server.lan_ip)
@@ -158,6 +172,7 @@ def full_status() -> dict[str, Any]:
         "tunnel": S.tunnel,
         "claude_access": claude_access(),
         "app_mode": S.app_mode,
+        "sharing": S.settings.server.sharing,
     }
 
 
@@ -196,8 +211,12 @@ async def lifespan(app: FastAPI):
         S.settings.translate.backend = "api"
     S.started = time.time()
     hear_api.setup(S.settings)
+    from .packages import PACKAGES
+
+    PACKAGES.stt_model, PACKAGES.on_ready = S.settings.stt.model, _load_missing_voices
     S.version = _code_version()
     S.local_addrs = netinfo.local_addresses()
+    new_listen_key()
     st = S.settings
     # A channel for every language; the ones in settings.languages are translated (switchable live).
     langs = list(LANGUAGES.values())
@@ -275,7 +294,22 @@ def _shutdown() -> None:
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
-app.include_router(hear_api.router)  # Hear Church: sign-up, /c/<slug>, /ws/engine, /admin
+app.include_router(hear_api.router)  # Hear Church: sign-up, /find, /ws/engine, /admin (and /<slug> at the end)
+
+
+_LISTEN_PATHS = re.compile(r"^/(|s/[^/]+|stream\.mp3|stream/[a-z]+\.mp3|clips/[a-z]+/\d+\.mp3|qr\.svg"
+                           r"|static/listener/.*|favicon\.ico)$")
+
+
+@app.middleware("http")
+async def app_mode_lan(request: Request, call_next):
+    """The Hear Church app listens on the Wi-Fi for local sharing: other devices reach the listening page
+    and nothing else (operator pages, settings and the hub's routes stay on this Mac)."""
+    if S.app_mode and not _LISTEN_PATHS.match(request.url.path):
+        host = request.client.host if request.client else ""
+        if host.split("%")[0] not in S.local_addrs or any(h in request.headers for h in _PROXY_HEADERS):
+            return JSONResponse({"detail": "Not available on the network."}, status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -470,18 +504,66 @@ async def login(request: Request):
 
 # ------------------------------------------------------------------ listener side
 
+LISTEN_COOKIE = "hc_listen"
+_NO_ENTRY = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hear Church</title><body style="font:18px -apple-system,system-ui,sans-serif;max-width:30em;margin:3em auto;
+padding:0 1em;color:#ddd;background:#111"><h2>Lien expiré · Link expired</h2>
+<p>Scannez le code QR affiché pour cette réunion.</p><p>Scan the QR code shown for this meeting.</p>"""
+
+
+def _may_listen(host: str | None, headers, cookies) -> bool:
+    """Listening on the Hear Church app's own port: this Mac always; other devices only with local sharing
+    and this meeting's key. A ward server (not the app) stays open to all, as before."""
+    if not S.app_mode:
+        return True
+    if host and host.split("%")[0] in S.local_addrs and not any(h in headers for h in _PROXY_HEADERS):
+        return True
+    import hmac
+
+    return local_sharing() and hmac.compare_digest(cookies.get(LISTEN_COOKIE, ""), S.listen_key)
+
+
+def require_listener(request: Request) -> None:
+    if not _may_listen(request.client.host if request.client else None, request.headers, request.cookies):
+        raise HTTPException(403, "Scan the QR code shown for this meeting.")
+
+
+@app.get("/s/{key}", response_class=HTMLResponse)
+async def listen_with_key(key: str):
+    """The local link in the QR code: remember the key, then open the listening page."""
+    import hmac
+
+    if not (local_sharing() and hmac.compare_digest(key, S.listen_key)):
+        return HTMLResponse(_NO_ENTRY, status_code=403)
+    resp = RedirectResponse("/", status_code=303)
+    resp.set_cookie(LISTEN_COOKIE, key, httponly=True, samesite="lax", max_age=12 * 3600)
+    return resp
+
+
+def _site(request: Request) -> bool:
+    """A request for hearchurch.com itself (the many-congregation site), not this ward's own address."""
+    host = (request.headers.get("host") or "").split(":")[0].lower().removeprefix("www.")
+    return not S.app_mode and host == S.settings.hearchurch.site_host.lower()
+
+
 @app.get("/", response_class=HTMLResponse)
-async def listener_page():
+async def listener_page(request: Request):
+    if _site(request):   # hearchurch.com: find the congregation first (location, then name)
+        return page(WEB_DIR / "find" / "index.html")
+    if not _may_listen(request.client.host if request.client else None, request.headers, request.cookies):
+        return HTMLResponse(_NO_ENTRY, status_code=403)
     return page(WEB_DIR / "listener" / "index.html")
 
 
 @app.get("/stream.mp3")
 async def stream_default(request: Request):
+    require_listener(request)
     return _stream(channel())
 
 
 @app.get("/stream/{code}.mp3")
-async def stream_lang(code: str):
+async def stream_lang(request: Request, code: str):
+    require_listener(request)
     if code not in S.pipeline.channels:
         raise HTTPException(404)
     return _stream(channel(code))
@@ -513,7 +595,8 @@ def mp3_response(broadcaster: Mp3Broadcaster, name: str) -> StreamingResponse:
 
 
 @app.get("/clips/{code}/{seq}.mp3")
-async def clip(code: str, seq: int):
+async def clip(request: Request, code: str, seq: int):
+    require_listener(request)
     data = channel(code).clips.get(seq) if code in S.pipeline.channels else None
     if data is None:
         raise HTTPException(404)
@@ -523,6 +606,9 @@ async def clip(code: str, seq: int):
 
 @app.websocket("/ws/listen")
 async def ws_listen(ws: WebSocket):
+    if not _may_listen(ws.client.host if ws.client else None, ws.headers, ws.cookies):
+        await ws.close(code=4403)
+        return
     await ws.accept()
     try:
         hello = await asyncio.wait_for(ws.receive_json(), timeout=10)
@@ -541,7 +627,8 @@ async def ws_listen(ws: WebSocket):
 
 
 @app.get("/qr.svg")
-async def qr(dark: str = "#000", light: str = "#fff"):
+async def qr(request: Request, dark: str = "#000", light: str = "#fff"):
+    require_listener(request)   # with local sharing it holds the key
     return Response(netinfo.qr_svg(listener_url(), dark=dark, light=light), media_type="image/svg+xml",
                     headers={"Cache-Control": "no-cache"})
 
@@ -682,29 +769,40 @@ async def api_status(request: Request):
     return full_status()
 
 
+def _package_languages(given: Any) -> list[str]:
+    """Which languages' packages to report: the ones asked for (the app's setup) or the switched-on ones."""
+    if isinstance(given, str):
+        given = [c for c in given.split(",") if c]
+    return [c for c in given if c in LANGUAGES] if isinstance(given, list) and given else list(S.settings.languages)
+
+
 @app.get("/api/packages")
-async def api_packages(request: Request):
-    """Whether the models for the switched-on languages are on this computer (the Mac app's preflight)."""
+async def api_packages(request: Request, languages: str = ""):
+    """Size and download state of the models for some languages (speech recognition is always included)."""
     require_operator(request)
     from .packages import PACKAGES
 
-    return {"packages": await PACKAGES.status(S.settings)}
+    return {"packages": await PACKAGES.status(_package_languages(languages))}
 
 
 @app.post("/api/packages/download")
 async def api_packages_download(request: Request):
+    """Start downloading what is missing for {"languages": [...]} (default: the switched-on languages)."""
     require_operator(request)
     from .packages import PACKAGES
 
-    def load_missing_voices() -> None:
-        for ch in S.pipeline.channels.values():
-            if ch.on and ch.tts.engine is None:
-                asyncio.create_task(ch.tts.load())
+    body = await request.json() if await request.body() else {}
+    langs = _package_languages(body.get("languages"))
+    await PACKAGES.status(langs)
+    PACKAGES.download_missing(langs)
+    return {"packages": await PACKAGES.status(langs)}
 
-    PACKAGES.on_ready = load_missing_voices
-    await PACKAGES.status(S.settings)
-    PACKAGES.download_missing(S.settings)
-    return {"packages": await PACKAGES.status(S.settings)}
+
+def _load_missing_voices() -> None:
+    """A download finished: load the voices that could not load before (no restart needed)."""
+    for ch in S.pipeline.channels.values():
+        if ch.on and ch.tts.engine is None:
+            asyncio.create_task(ch.tts.load())
 
 
 @app.post("/api/start")
@@ -733,6 +831,8 @@ async def api_stop(request: Request):
     require_speaker(request)
     S.engine_hub.stop_run()
     S.pipeline.stop()
+    if S.app_mode:
+        new_listen_key()   # local sharing: the next meeting gets a new link
     return {"ok": True}
 
 
@@ -931,3 +1031,7 @@ async def api_report(request: Request):
 
     recs = S.pipeline.metrics.records if S.pipeline.metrics else []
     return JSONResponse({c: summarize(recs, c) for c in S.pipeline.channels})
+
+
+# Last, so it never shadows a route above: hearchurch.com/<slug>, a congregation's own page.
+app.include_router(hear_api.pages)

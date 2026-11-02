@@ -22,6 +22,7 @@ log = logging.getLogger("hear.geo")
 
 USER_AGENT = "HearChurch/1.0 (hearchurch.com)"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 MAPBOX_URL = "https://api.mapbox.com/geocoding/v5/mapbox.places/{q}.json"
 MILES_PER_DEG_LAT = 69.0
 
@@ -64,6 +65,40 @@ class Geocoder:
                 self._cache.popitem(last=False)
         return found
 
+    async def town(self, lat: float, lng: float) -> str:
+        """The town at a building's pin, for search results: "New York, NY", "Dakar, Senegal"; "" if unknown.
+        Shares geocode()'s spacing (Nominatim: max 1 request a second)."""
+        async with self._lock:
+            wait = self._last + self.min_interval_s - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            try:
+                return await self._town(lat, lng)
+            except Exception as e:
+                log.warning("reverse geocoding failed (%s): %s", self.provider, e)
+                return ""
+            finally:
+                self._last = time.monotonic()
+
+    async def _town(self, lat: float, lng: float) -> str:
+        async with httpx.AsyncClient(timeout=self.timeout_s, headers={"User-Agent": USER_AGENT}) as http:
+            if self.mapbox_token:
+                r = await http.get(MAPBOX_URL.format(q=f"{lng},{lat}"),
+                                   params={"access_token": self.mapbox_token, "types": "place", "limit": 1})
+                r.raise_for_status()
+                feats = r.json().get("features") or []
+                if not feats:
+                    return ""
+                ctx = {c["id"].split(".")[0]: c for c in feats[0].get("context", [])}
+                region, country = ctx.get("region", {}), ctx.get("country", {})
+                if country.get("short_code") == "us" and region.get("short_code"):
+                    return f"{feats[0]['text']}, {region['short_code'].split('-')[-1]}"
+                return ", ".join(x for x in (feats[0]["text"], country.get("text", "")) if x)
+            r = await http.get(NOMINATIM_REVERSE_URL, params={"lat": lat, "lon": lng, "format": "jsonv2", "zoom": 10,
+                                                              "accept-language": "en"})
+            r.raise_for_status()
+            return town_from_nominatim(r.json().get("address") or {})
+
     async def _lookup(self, address: str) -> tuple[float, float] | None:
         async with httpx.AsyncClient(timeout=self.timeout_s, headers={"User-Agent": USER_AGENT}) as http:
             if self.mapbox_token:
@@ -82,6 +117,17 @@ class Geocoder:
                     return None
                 lat, lng = float(rows[0]["lat"]), float(rows[0]["lon"])
         return (lat, lng) if -90 <= lat <= 90 and -180 <= lng <= 180 else None
+
+
+def town_from_nominatim(a: dict) -> str:
+    """Nominatim's address parts → "New York, NY" in the US, "Dakar, Senegal" elsewhere."""
+    town = a.get("city") or a.get("town") or a.get("village") or a.get("municipality") or a.get("county") or ""
+    if not town:
+        return ""
+    if a.get("country_code") == "us":
+        state = (a.get("ISO3166-2-lvl4") or "").removeprefix("US-") or a.get("state", "")
+        return f"{town}, {state}" if state else town
+    return f"{town}, {a['country']}" if a.get("country") and a.get("country") != town else town
 
 
 def bounding_box(lat: float, lng: float, miles: float) -> tuple[float, float, float, float]:

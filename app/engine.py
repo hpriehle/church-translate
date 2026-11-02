@@ -485,7 +485,11 @@ class PublishClient(EngineClient):
         p = M.S.pipeline
         while True:
             await asyncio.sleep(0.5)
-            if p.running and not self.announced and p.started_at != self.refused_run:
+            local = M.S.app_mode and M.S.settings.server.sharing == "local"   # this Wi-Fi only: not on the hub
+            if local and self.announced:
+                self._send({"type": "session_stop"})
+                self.announced, self.running, self.session_code = False, False, ""
+            elif p.running and not local and not self.announced and p.started_at != self.refused_run:
                 self._offered = list(p.on_channels)
                 self.announced = True
                 self._send({"type": "session_start", "languages": self._offered, "resume": self.session_code})

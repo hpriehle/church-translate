@@ -2,7 +2,9 @@
 
 Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
   POST /api/hc/signup       church, name, unit_type, email, [stake, address, lat, lng, meeting_times, timezone,
-                            device_name] → {slug, claim}; an e-mail with a verification link is sent
+                            device_name] → {slug, claim}; an e-mail with a verification link is sent.
+                            With [hearchurch] verify_email = false (for now: no e-mail service yet) it answers
+                            {slug, device_token} at once and the congregation counts as verified.
   GET  /api/hc/verify?token=…   (the link in the e-mail) marks the e-mail verified; the congregation is live-capable
   POST /api/hc/claim        {claim} → 202 {pending} until the link was clicked, then once {device_token, slug}
   POST /api/hc/location     (device token) {lat, lng, [address]} or {address} (geocoded) → moves the building's pin
@@ -12,8 +14,10 @@ The claim secret stays with the app that asked, so a link opened by a mail scann
 Sign-up geocodes an address that came without lat/lng (Nominatim, or Mapbox with HEARCHURCH_MAPBOX_TOKEN). The
 answer says whether it worked ("located"); if not, lat/lng stay empty and the app should ask for a map pin and
 send it to /api/hc/location.
-Listener side: GET /api/live?lat&lng (what is live near a phone; the phone computes exact distances; the
-position is never stored or logged), GET /api/hc/search?q= (by name), GET /api/hc/c/<slug>, pages /c/<slug>, /find.
+Listener side: hearchurch.com/ (the finder: by location, then by name), hearchurch.com/<slug> (one congregation:
+its live meeting, or "wait for the meeting to start"; /c/<slug> redirects there), GET /api/live?lat&lng
+(congregations within a mile of a phone; the phone computes exact distances; the position is never stored or
+logged), GET /api/hc/search?q= (by name or town), GET /api/hc/c/<slug>.
 meeting_times: [{"day": "sun", "time": "10:00"}], timezone: an IANA name (used for "next meeting").
 """
 from __future__ import annotations
@@ -29,29 +33,32 @@ from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import HOME, LOG_DIR, WEB_DIR
-from .db import Database
+from .db import RESERVED_SLUGS, Database
 from .geo import Geocoder, bounding_box, hide_coordinates_in_access_log, in_box
 from .live import Live
 from .mail import Mailer, RateLimiter
 
 log = logging.getLogger("hear")
 router = APIRouter()
+pages = APIRouter()   # hearchurch.com/<slug>: included after every other route (app/main.py), so it never shadows one
 
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 LINK_TTL_S = 24 * 3600
-RADII_MI = (1, 5, 25)       # /api/live widens through these until something is found
+NEARBY_MI = 1.0             # /api/live: congregations within this of the phone (it is normally at the chapel)
 SOON_S = 30 * 60            # a meeting starting within this long counts as "starting soon"
 hide_coordinates_in_access_log()
 
 
 class Hear:
-    def __init__(self, db: Database, mailer: Mailer, live: Live, geocoder: Geocoder | None = None):
+    def __init__(self, db: Database, mailer: Mailer, live: Live, geocoder: Geocoder | None = None,
+                 verify_email: bool = True):
         self.db, self.mailer, self.live = db, mailer, live
+        self.verify_email = verify_email
         self.geocoder = geocoder or Geocoder()
         self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
                        "signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
@@ -68,8 +75,22 @@ def setup(settings) -> Hear:
     cfg = settings.hearchurch
     path = HOME / cfg.db_path
     db = Database(path)
-    H = Hear(db, Mailer.from_settings(cfg, LOG_DIR / "outbox.log"), Live(db, settings.stream, cfg.grace_s))
+    H = Hear(db, Mailer.from_settings(cfg, LOG_DIR / "outbox.log"), Live(db, settings.stream, cfg.grace_s),
+             verify_email=cfg.verify_email)
+    try:
+        asyncio.get_running_loop().create_task(backfill_towns())
+    except RuntimeError:   # no event loop (a plain script): skip
+        pass
     return H
+
+
+async def backfill_towns() -> None:
+    """Congregations from before search showed the town: look it up from their pins, one at a time."""
+    h = _hear()
+    for c in h.db.missing_towns():
+        town = await _town(c["lat"], c["lng"])
+        if town:
+            h.db.set_town(c["id"], town)
 
 
 def _hear() -> Hear:
@@ -158,12 +179,17 @@ async def signup(request: Request, body: SignUp):
         lat, lng = found if found else (None, None)
     cong = h.db.create_congregation(
         church=body.church, name=body.name, unit_type=body.unit_type, email=body.email, stake=body.stake,
-        address=body.address, lat=lat, lng=lng, timezone=body.timezone,
+        address=body.address, lat=lat, lng=lng, timezone=body.timezone, city=await _town(lat, lng),
         meeting_times=[m.model_dump() for m in body.meeting_times])
+    located = {"located": lat is not None, "lat": lat, "lng": lng}
+    pin_note = "" if lat is not None else " We could not find the building on the map: please place its pin."
+    if not h.verify_email:  # no e-mail confirmation for now: the congregation is live-capable at once
+        h.db.set_verified(cong["id"])
+        return {"ok": True, "slug": cong["slug"], "device_token": h.db.add_device(cong["id"], body.device_name),
+                "congregation": _public(cong), **located, "message": "Signed up." + pin_note}
     claim = _send_link(request, cong, "verify", body.device_name)
-    return {"ok": True, "slug": cong["slug"], "claim": claim, "located": lat is not None, "lat": lat, "lng": lng,
-            "message": "Check your e-mail for the verification link."
-            + ("" if lat is not None else " We could not find the building on the map: please place its pin.")}
+    return {"ok": True, "slug": cong["slug"], "claim": claim, **located,
+            "message": "Check your e-mail for the verification link." + pin_note}
 
 
 async def _geocode(address: str) -> tuple[float, float] | None:
@@ -172,6 +198,18 @@ async def _geocode(address: str) -> tuple[float, float] | None:
     except Exception as e:
         log.warning("geocode gave up: %s", e)
         return None
+
+
+async def _town(lat: float | None, lng: float | None) -> str:
+    """The town at the building, for "Harlem First Ward — New York, NY" in search; "" if unknown."""
+    town = getattr(_hear().geocoder, "town", None)
+    if lat is None or lng is None or town is None:
+        return ""
+    try:
+        return await asyncio.wait_for(town(lat, lng), 10)
+    except Exception as e:
+        log.warning("reverse geocode gave up: %s", e)
+        return ""
 
 
 def _device_congregation(request: Request) -> dict[str, Any]:
@@ -207,7 +245,7 @@ async def set_location(request: Request, body: Location):
         if not found:
             raise HTTPException(422, "We could not find that address: place the pin on the map instead.")
         lat, lng = found
-    h.db.set_location(cong["id"], lat, lng, body.address)
+    h.db.set_location(cong["id"], lat, lng, body.address, city=await _town(lat, lng))
     return {"ok": True, "lat": lat, "lng": lng, "address": body.address if body.address is not None else cong["address"]}
 
 
@@ -309,11 +347,30 @@ def _congregation(slug: str) -> dict[str, Any]:
     return c
 
 
-@router.get("/c/{slug}", response_class=HTMLResponse)
+UNIT_WORDS = {"ward": "Ward", "branch": "Branch", "parish": "Parish"}
+SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
+
+def display_name(c: dict[str, Any]) -> str:
+    """"Harlem First" + ward → "Harlem First Ward" (unless the name already says it)."""
+    word = UNIT_WORDS.get(c["unit_type"], "")
+    said = c["name"].lower().split()[-1:] in (["ward"], ["branch"], ["parish"], ["congregation"])
+    return c["name"] if not word or said else f"{c['name']} {word}"
+
+
+@router.get("/c/{slug}")
+async def old_listener_link(slug: str):
+    return RedirectResponse(f"/{slug}", status_code=301)
+
+
+@pages.get("/{slug}", response_class=HTMLResponse)
 async def listener_page(slug: str):
+    """hearchurch.com/<slug>: the congregation's page (from its QR code or link). Not live → it waits."""
     from .. import main
 
-    _congregation(slug)
+    c = _hear().db.by_slug(slug) if SLUG_RE.fullmatch(slug) and slug not in RESERVED_SLUGS else None
+    if c is None or c["hidden"] or not c["email_verified"]:
+        return _page("Not found", "No congregation has this address. Find yours on hearchurch.com.", 404)
     return main.page(WEB_DIR / "listener" / "index.html")
 
 
@@ -322,8 +379,8 @@ def _entry(c: dict[str, Any], now: float) -> dict[str, Any]:
     s = _hear().live.get(c["id"])
     nm = next_meeting(c["meeting_times"], c["timezone"])
     soon = bool(nm and nm["starts"] and 0 <= nm["starts"] - now <= SOON_S)
-    return {"slug": c["slug"], "name": c["name"], "church": c["church"], "unit_type": c["unit_type"],
-            "stake": c["stake"], "lat": c["lat"], "lng": c["lng"], "live": s is not None,
+    return {"slug": c["slug"], "name": c["name"], "title": display_name(c), "city": c["city"], "church": c["church"],
+            "unit_type": c["unit_type"], "stake": c["stake"], "lat": c["lat"], "lng": c["lng"], "live": s is not None,
             "starts_soon": soon and s is None, "languages": s.languages_public() if s else [],
             "starts_at": s.started if s else (nm["starts"] if nm else None),
             "next_meeting": {k: nm[k] for k in ("label", "day", "time")} if nm else None}
@@ -331,20 +388,16 @@ def _entry(c: dict[str, Any], now: float) -> dict[str, Any]:
 
 @router.get("/api/live")
 async def nearby(request: Request, lat: float = Query(ge=-90, le=90), lng: float = Query(ge=-180, le=180)):
-    """Live (or about to start) congregations around a phone, widening 1 → 5 → 25 miles until some are found.
-    The reply is a rough box, not distances: the phone works those out. Nothing about the request is kept."""
+    """Congregations within a mile of a phone (normally the one whose chapel it is in), live ones first. The
+    reply is a rough box, not distances: the phone works those out. Nothing about the request is kept."""
     _limit(request, "live")
     h, now = _hear(), time.time()
-    radius, out = RADII_MI[-1], []
-    for radius in RADII_MI:
-        box = bounding_box(lat, lng, radius)
-        s, n, w, e = box
-        w2, e2 = (-180.0, 180.0) if e - w >= 360 else (((w + 180) % 360) - 180, ((e + 180) % 360) - 180)
-        out = [x for x in (_entry(c, now) for c in h.db.in_box(s, n, w2, e2))
-               if (x["live"] or x["starts_soon"]) and in_box(x["lat"], x["lng"], box)]
-        if out:
-            break
-    return JSONResponse({"radius_mi": radius, "radii_mi": list(RADII_MI), "results": out}, headers={"Cache-Control": "no-store"})
+    box = bounding_box(lat, lng, NEARBY_MI)
+    s, n, w, e = box
+    w2, e2 = (-180.0, 180.0) if e - w >= 360 else (((w + 180) % 360) - 180, ((e + 180) % 360) - 180)
+    out = [x for x in (_entry(c, now) for c in h.db.in_box(s, n, w2, e2)) if in_box(x["lat"], x["lng"], box)]
+    out.sort(key=lambda x: (not x["live"], not x["starts_soon"], x["title"].lower()))
+    return JSONResponse({"radius_mi": NEARBY_MI, "results": out}, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/hc/search")
@@ -398,7 +451,7 @@ async def ws_listen(ws: WebSocket, slug: str):
     s = h.live.get(c["id"])
     init: dict[str, Any] = {
         "type": "init", "boot": h.live.started, "server_time": time.time(),
-        "congregation": {"name": c["name"], "church": c["church"], "slug": c["slug"]},
+        "congregation": {"name": display_name(c), "church": c["church"], "slug": c["slug"]},
         "next_meeting": next_meeting(c["meeting_times"], c["timezone"]),
         "session": None, "live": False, "lang": "", "on": True, "languages": [], "history": []}
     if s is None:  # not live: wait on the congregation's room; the page reloads when a session starts

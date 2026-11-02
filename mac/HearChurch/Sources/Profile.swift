@@ -25,7 +25,27 @@ struct Profile: Codable {
     var approved = false
     var slug: String = ""
     var claim: String = ""                  // while waiting for the e-mail link to be clicked
+    var languagesPicked = false             // the operator chose languages, so their downloads may start
     var setupDone = false
+
+    init() {}
+
+    /// Every field is optional in the file, so profiles saved by older versions still load.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func v<T: Decodable>(_ k: CodingKeys, _ d: T) -> T { ((try? c.decodeIfPresent(T.self, forKey: k)) ?? nil) ?? d }
+        church = v(.church, ""); unitType = v(.unitType, "ward"); name = v(.name, ""); stake = v(.stake, "")
+        address = v(.address, ""); lat = v(.lat, nil); lng = v(.lng, nil)
+        meetingTimes = v(.meetingTimes, [MeetingTime()]); timezone = v(.timezone, TimeZone.current.identifier)
+        languages = v(.languages, ["fr"]); email = v(.email, ""); approved = v(.approved, false)
+        slug = v(.slug, ""); claim = v(.claim, ""); languagesPicked = v(.languagesPicked, false)
+        setupDone = v(.setupDone, false)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case church, unitType, name, stake, address, lat, lng, meetingTimes, timezone, languages, email, approved,
+             slug, claim, languagesPicked, setupDone
+    }
 
     static var url: URL { AppPaths.home.appendingPathComponent("profile.json") }
 
@@ -61,12 +81,14 @@ struct OutputLanguage: Identifiable {
     let id: String
     let name: String
     let available: Bool
+    let sizeMB: Double        // its voice download (app/packages.py SIZES_MB)
     static let all = [
-        OutputLanguage(id: "fr", name: "French", available: true),
-        OutputLanguage(id: "wo", name: "Wolof", available: true),
-        OutputLanguage(id: "es", name: "Spanish", available: false),
-        OutputLanguage(id: "ru", name: "Russian", available: false),
+        OutputLanguage(id: "fr", name: "French", available: true, sizeMB: 127),
+        OutputLanguage(id: "wo", name: "Wolof", available: true, sizeMB: 634),
+        OutputLanguage(id: "es", name: "Spanish", available: false, sizeMB: 0),
+        OutputLanguage(id: "ru", name: "Russian", available: false, sizeMB: 0),
     ]
+    static func name(_ code: String) -> String { all.first { $0.id == code }?.name ?? code.uppercased() }
 }
 
 enum AppPaths {

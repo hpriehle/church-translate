@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS congregations (
     email TEXT NOT NULL,
     email_verified INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
-    hidden INTEGER NOT NULL DEFAULT 0
+    hidden INTEGER NOT NULL DEFAULT 0,
+    city TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,8 +67,31 @@ CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
 CREATE INDEX IF NOT EXISTS devices_cong ON devices(congregation_id);
 """
 
-CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", "lat", "lng", "meeting_times",
+CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", "city", "lat", "lng", "meeting_times",
                "timezone", "email", "email_verified", "created_at", "hidden")
+
+# Listener pages live at hearchurch.com/<slug>, so a slug may never be one of the site's own top-level paths
+# (tests/test_hear.py checks this list against the routes).
+RESERVED_SLUGS = frozenset({
+    "about", "admin", "api", "c", "clips", "favicon-ico", "find", "guide", "health", "help", "listener", "login",
+    "logout", "operator", "print", "privacy", "qr", "robots", "s", "signs", "signup", "speak", "static", "stream",
+    "support", "terms", "voices", "ws", "www"})
+
+
+def city_of(address: str) -> str:
+    """The town for search results, from the address the congregation gave:
+    "123 W 125th St, New York, NY 10027" → "New York, NY"; "Rue 10, Dakar, Senegal" → "Dakar, Senegal"."""
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    if parts and parts[-1].lower() in ("usa", "us", "u.s.a.", "united states", "united states of america"):
+        parts.pop()
+    if len(parts) < 2:
+        return ""
+    region = re.sub(r"\s*\b\d[\d -]*$", "", parts[-1]).strip()       # drop a ZIP / postcode
+    region = re.sub(r"^\d[\d -]*\s+", "", region).strip()             # "75001 Paris" → "Paris"
+    if len(parts) == 2 and parts[0][:1].isdigit():   # "12 Main St, Springfield": the second part is the town
+        return region
+    city = re.sub(r"^\d[\d -]*\s+", "", parts[-2]).strip()   # "New York, NY" or "…, New York, NY 10027"
+    return f"{city}, {region}" if region and region != city else city
 
 
 def hash_token(token: str) -> str:
@@ -103,6 +127,11 @@ class Database:
         with self._lock:
             self._db.execute("PRAGMA foreign_keys = ON")
             self._db.executescript(SCHEMA)
+            cols = {r[1] for r in self._db.execute("PRAGMA table_info(congregations)")}
+            if "city" not in cols:   # databases made before search showed the town
+                self._db.execute("ALTER TABLE congregations ADD COLUMN city TEXT NOT NULL DEFAULT ''")
+                for cid, address in self._db.execute("SELECT id, address FROM congregations").fetchall():
+                    self._db.execute("UPDATE congregations SET city = ? WHERE id = ?", (city_of(address or ""), cid))
         self.close_stale_sessions()
 
     def _q(self, sql: str, args: tuple = ()) -> list[sqlite3.Row]:
@@ -118,20 +147,20 @@ class Database:
         base, n = slugify(name), 1
         while True:
             slug = base if n == 1 else f"{base}-{n}"
-            if not self._q("SELECT 1 FROM congregations WHERE slug = ?", (slug,)):
+            if slug not in RESERVED_SLUGS and not self._q("SELECT 1 FROM congregations WHERE slug = ?", (slug,)):
                 return slug
             n += 1
 
     def create_congregation(self, *, church: str, name: str, unit_type: str, email: str, stake: str | None = None,
                             address: str = "", lat: float | None = None, lng: float | None = None,
-                            meeting_times: list | None = None, timezone: str = "") -> dict[str, Any]:
+                            meeting_times: list | None = None, timezone: str = "", city: str = "") -> dict[str, Any]:
         for _ in range(5):  # two sign-ups with the same name at once: retry with the next free slug
             slug = self.unique_slug(name)
             try:
                 cur = self._x(
-                    "INSERT INTO congregations (slug, church, name, unit_type, stake, address, lat, lng, meeting_times,"
-                    " timezone, email, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (slug, church, name, unit_type, stake or None, address, lat, lng,
+                    "INSERT INTO congregations (slug, church, name, unit_type, stake, address, city, lat, lng,"
+                    " meeting_times, timezone, email, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (slug, church, name, unit_type, stake or None, address, city or city_of(address), lat, lng,
                      json.dumps(meeting_times or []), timezone, email.lower(), time.time()))
                 return self.congregation(cur.lastrowid)
             except sqlite3.IntegrityError:
@@ -157,9 +186,17 @@ class Database:
     def set_verified(self, cid: int) -> None:
         self._x("UPDATE congregations SET email_verified = 1 WHERE id = ?", (cid,))
 
-    def set_location(self, cid: int, lat: float, lng: float, address: str | None = None) -> None:
-        self._x("UPDATE congregations SET lat = ?, lng = ?, address = COALESCE(?, address) WHERE id = ?",
-                (lat, lng, address, cid))
+    def set_location(self, cid: int, lat: float, lng: float, address: str | None = None, city: str = "") -> None:
+        """city: the town at the pin (reverse geocoded); otherwise taken from the address, if it says."""
+        town = city or (city_of(address) if address is not None else "") or None
+        self._x("UPDATE congregations SET lat = ?, lng = ?, address = COALESCE(?, address),"
+                " city = COALESCE(?, city) WHERE id = ?", (lat, lng, address, town, cid))
+
+    def missing_towns(self) -> list[dict[str, Any]]:
+        return [_cong(r) for r in self._q("SELECT * FROM congregations WHERE city = '' AND lat IS NOT NULL")]
+
+    def set_town(self, cid: int, town: str) -> None:
+        self._x("UPDATE congregations SET city = ? WHERE id = ?", (town, cid))
 
     def in_box(self, south: float, north: float, west: float, east: float) -> list[dict[str, Any]]:
         """Visible (verified, not hidden) congregations with a location inside a box. west > east = across ±180°."""
@@ -169,10 +206,11 @@ class Database:
         return [_cong(r) for r in rows]
 
     def search(self, q: str, limit: int = 10) -> list[dict[str, Any]]:
-        """Visible congregations whose name, stake or church contains q (case-insensitive)."""
+        """Visible congregations whose name, stake, church or town contains q (case-insensitive)."""
         like = "%" + q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         rows = self._q("SELECT * FROM congregations WHERE email_verified = 1 AND hidden = 0 AND (lower(name) LIKE :like"
-                       " ESCAPE '\\' OR lower(stake) LIKE :like ESCAPE '\\' OR lower(church) LIKE :like ESCAPE '\\')"
+                       " ESCAPE '\\' OR lower(stake) LIKE :like ESCAPE '\\' OR lower(church) LIKE :like ESCAPE '\\'"
+                       " OR lower(city) LIKE :like ESCAPE '\\')"
                        " ORDER BY (lower(name) LIKE :pfx ESCAPE '\\') DESC, name LIMIT :lim",
                        {"like": like, "pfx": like[1:], "lim": limit})
         return [_cong(r) for r in rows]

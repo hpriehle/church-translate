@@ -36,3 +36,15 @@ main { max-width: 34rem; margin: 0 auto; padding: 1.2rem 1.1rem 3rem; }
 }
 .link { background: none; border: 0; color: var(--accent); font: inherit; font-size: .95rem; padding: .3rem 0; text-decoration: underline; }
 [hidden] { display: none !important; }
+h1.intro { font-weight: 600; }
+.actions { display: flex; gap: 1.2rem; flex-wrap: wrap; margin: .4rem 0; }
+.combo { position: relative; }
+.dropdown {
+  list-style: none; margin: .3rem 0 0; padding: .3rem 0; background: #151515; border: 1px solid #333; border-radius: 12px;
+  max-height: 22rem; overflow-y: auto;
+}
+.dropdown a { display: block; padding: .75rem 1rem; color: inherit; text-decoration: none; font-size: 1.05rem; }
+.dropdown li[aria-selected="true"] a, .dropdown a:active, .dropdown a:hover { background: #222; }
+.opt-name { font-weight: 600; }
+.opt-city { color: var(--dim); }
+.dropdown .badge { margin-left: .5rem; vertical-align: 1px; }

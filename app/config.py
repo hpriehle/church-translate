@@ -6,7 +6,7 @@ import os
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -53,6 +53,9 @@ class ServerCfg(BaseModel):
     tunnel_metrics: str = "127.0.0.1:20241"  # cloudflared --metrics address, for the "Public link" status
     update_from_git: bool = False  # "Restart server" first runs git pull (for a server that is a plain git clone)
     open_browser: bool = True
+    # Hear Church app: "cloud" publishes meetings on hearchurch.com (anyone with the link, anywhere); "local"
+    # keeps them on this Wi-Fi, for phones that scanned this meeting's QR code (/s/<key>).
+    sharing: Literal["cloud", "local"] = "cloud"
 
 
 class EngineCfg(BaseModel):
@@ -75,6 +78,8 @@ class HearCfg(BaseModel):
     smtp_from: str = ""
     smtp_starttls: bool = True
     grace_s: float = 60.0            # a session whose engine dropped stays open this long for a reconnect
+    verify_email: bool = False       # off until e-mail works: sign-up hands the app its device token at once
+    site_host: str = "hearchurch.com"  # requests for this host get the finder at /, not the ward's listening page
 
 
 class AudioCfg(BaseModel):
@@ -239,7 +244,7 @@ ENV_OVERRIDES = {
     "HEARCHURCH_HUB_URL": ("engine", "hub_url"),
     "HEARCHURCH_DEVICE_TOKEN": ("engine", "device_token"),
     "HEARCHURCH_DEVICE_NAME": ("engine", "name"),
-    "HEARCHURCH_LISTENER_URL": ("server", "public_url"),   # the congregation's hearchurch.com/c/<slug> page
+    "HEARCHURCH_LISTENER_URL": ("server", "public_url"),   # the congregation's hearchurch.com/<slug> page
 }
 
 

@@ -31,7 +31,7 @@ async function load() {
     const tr = document.createElement("tr");
     if (c.hidden) tr.className = "hidden";
     const cell = (t) => { const td = document.createElement("td"); td.textContent = t; tr.appendChild(td); return td; };
-    const name = cell(""); const a = document.createElement("a"); a.href = "/c/" + c.slug; a.textContent = c.name; name.appendChild(a);
+    const name = cell(""); const a = document.createElement("a"); a.href = "/" + c.slug; a.textContent = c.name; name.appendChild(a);
     cell(c.church + (c.stake ? " · " + c.stake : ""));
     cell(c.email + (c.email_verified ? "" : " (not verified)"));
     cell(c.devices);

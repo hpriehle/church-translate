@@ -3,7 +3,7 @@
 #
 #   mac/build.sh                 → mac/build/Hear Church.app (signed with your Apple Development identity)
 #   SIGN_ID="Developer ID Application" mac/build.sh     (sign for distribution; notarizing is Phase 6)
-#   mac/build.sh --app-only      → rebuild the Swift app, reuse the last bundled engine
+#   mac/build.sh --app-only      → rebuild the Swift app and engine code, reuse the last bundled Python
 #
 # The app contains a standalone CPython (python-build-standalone, via uv) with the locked dependencies,
 # and the engine code (app/, web/, models shipped in the repo). Voices and speech models are downloaded
@@ -41,13 +41,15 @@ if [[ "${1:-}" != "--app-only" || ! -d "$STAGE/python" ]]; then
     t="$(readlink "$l")"; if [[ "$t" == /* ]]; then ln -sfn "$(basename "$t")" "$l"; fi
   done
 
-  step "Engine code"
-  mkdir -p "$STAGE/engine/models"
-  rsync -a --exclude "__pycache__" "$REPO/app" "$REPO/web" "$STAGE/engine/"
-  rsync -a "$REPO/models/silero_vad.onnx" "$REPO/models/wolof" "$STAGE/engine/models/"
-  cp "$REPO/config.toml" "$REPO/glossary.json" "$REPO/glossary.wo.json" "$REPO/LICENSE" "$REPO/THIRD_PARTY_NOTICES.md" "$STAGE/engine/"
-  "$PY" -m compileall -q "$STAGE/engine/app"
 fi
+
+# The engine code is small, so it is copied every time (--app-only too).
+step "Engine code"
+mkdir -p "$STAGE/engine/models"
+rsync -a --delete --exclude "__pycache__" "$REPO/app" "$REPO/web" "$STAGE/engine/"
+rsync -a "$REPO/models/silero_vad.onnx" "$REPO/models/wolof" "$STAGE/engine/models/"
+cp "$REPO/config.toml" "$REPO/glossary.json" "$REPO/glossary.wo.json" "$REPO/LICENSE" "$REPO/THIRD_PARTY_NOTICES.md" "$STAGE/engine/"
+"$STAGE/python/bin/python3" -m compileall -q "$STAGE/engine/app"
 
 step "Swift app"
 xcodegen generate --quiet

@@ -1,38 +1,48 @@
-"""Models a meeting needs on this computer, and downloading the missing ones (the Mac app's preflight).
+"""Models a meeting needs on this computer, and downloading the missing ones (the Mac app).
 
 Speech recognition and the Wolof voice come from the Hugging Face cache (~/.cache/huggingface); the French
-Piper voices go to PIPER_DIR. Phase 4 adds sizes, hashes, more languages and our own download host.
+Piper voices go to PIPER_DIR. Each package reports its size and, while downloading, the bytes on disk so far.
+Phase 4 adds hashes, more languages and our own download host.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 import httpx
 
-from .config import PIPER_DIR, Settings
+from .config import PIPER_DIR
 
 log = logging.getLogger("packages")
 
 PIPER_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/{v}/medium/fr_FR-{v}-medium.{ext}"
 FRENCH_VOICES = ("tom", "siwis")
 WOLOF_REPOS = ("bilalfaye/speecht5_tts-wolof", "microsoft/speecht5_hifigan")
+# Download sizes in MB (measured), shown before a download starts and used for its progress.
+SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634}
 
 
 @dataclass
 class Package:
     id: str
     name: str
+    size_mb: int
     hf_repos: tuple[str, ...] = ()
     piper_voices: tuple[str, ...] = ()
     state: str = "unknown"       # "ready" | "missing" | "downloading" | "failed"
     error: str = ""
+    done_bytes: int = 0
     task: asyncio.Task | None = field(default=None, repr=False)
 
     def public(self) -> dict[str, Any]:
-        return {"id": self.id, "name": self.name, "state": self.state, "error": self.error}
+        total = self.size_mb * 1_000_000
+        done = total if self.state == "ready" else min(self.done_bytes, int(total * 0.99))
+        return {"id": self.id, "name": self.name, "state": self.state, "error": self.error,
+                "size_mb": self.size_mb, "done_mb": round(done / 1e6, 1)}
 
 
 def _hf_cached(repo: str) -> bool:
@@ -45,35 +55,65 @@ def _hf_cached(repo: str) -> bool:
         return False
 
 
-def _piper_files(voice: str) -> list[tuple[str, Any]]:
+def _hf_dir(repo: str) -> Path:
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    return Path(HF_HUB_CACHE) / ("models--" + repo.replace("/", "--"))
+
+
+def _bytes_in(path: Path) -> int:
+    """Bytes of the real files under a folder (links not followed, so nothing counts twice)."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            p = os.path.join(root, f)
+            if not os.path.islink(p):
+                try:
+                    total += os.path.getsize(p)
+                except OSError:
+                    pass
+    return total
+
+
+def _piper_files(voice: str) -> list[tuple[str, Path]]:
     return [(PIPER_URL.format(v=voice, ext=ext), PIPER_DIR / f"fr_FR-{voice}-medium.{ext}") for ext in ("onnx", "onnx.json")]
 
 
+def package_for(code: str, stt_model: str) -> Package | None:
+    if code == "speech":
+        return Package("speech", "Speech recognition", SIZES_MB["speech"], hf_repos=(stt_model,))
+    if code == "fr":
+        return Package("fr", "French voices", SIZES_MB["fr"], piper_voices=FRENCH_VOICES)
+    if code == "wo":
+        return Package("wo", "Wolof voice", SIZES_MB["wo"], hf_repos=WOLOF_REPOS)
+    return None
+
+
 class Packages:
-    def __init__(self) -> None:
+    def __init__(self, stt_model: str = "mlx-community/whisper-large-v3-turbo") -> None:
+        self.stt_model = stt_model
         self.items: dict[str, Package] = {}
         self.on_ready: Callable[[], None] | None = None   # e.g. load the voices that were missing
 
-    def wanted(self, settings: Settings) -> list[Package]:
-        """The packages for the languages switched on (speech recognition is always needed)."""
-        want = [Package("speech", "Speech recognition", hf_repos=(settings.stt.model,))]
-        if "fr" in settings.languages:
-            want.append(Package("fr", "French voices", piper_voices=FRENCH_VOICES))
-        if "wo" in settings.languages:
-            want.append(Package("wo", "Wolof voice", hf_repos=WOLOF_REPOS))
+    def wanted(self, languages: list[str]) -> list[Package]:
+        """Speech recognition (always needed) plus a package per language that has one."""
         out = []
-        for p in want:
-            known = self.items.get(p.id)
-            if known is None or known.hf_repos != p.hf_repos:
-                self.items[p.id] = known = p
-            out.append(known)
+        for code in ["speech", *languages]:
+            if code not in self.items:
+                p = package_for(code, self.stt_model)
+                if p is None:
+                    continue
+                self.items[code] = p
+            out.append(self.items[code])
         return out
 
-    async def status(self, settings: Settings) -> list[dict[str, Any]]:
-        for p in self.wanted(settings):
-            if p.state != "downloading":
+    async def status(self, languages: list[str]) -> list[dict[str, Any]]:
+        for p in self.wanted(languages):
+            if p.state == "downloading":
+                p.done_bytes = await asyncio.to_thread(self._done_bytes, p)
+            else:
                 p.state = "ready" if await asyncio.to_thread(self._present, p) else ("failed" if p.error else "missing")
-        return [p.public() for p in self.wanted(settings)]
+        return [p.public() for p in self.wanted(languages)]
 
     @staticmethod
     def _present(p: Package) -> bool:
@@ -81,10 +121,20 @@ class Packages:
             return False
         return all(dest.exists() for v in p.piper_voices for _, dest in _piper_files(v))
 
-    def download_missing(self, settings: Settings) -> None:
-        for p in self.wanted(settings):
+    @staticmethod
+    def _done_bytes(p: Package) -> int:
+        n = sum(_bytes_in(_hf_dir(r)) for r in p.hf_repos)
+        for v in p.piper_voices:
+            for _, dest in _piper_files(v):
+                for f in (dest, dest.with_name(dest.name + ".part")):
+                    if f.exists():
+                        n += f.stat().st_size
+        return n
+
+    def download_missing(self, languages: list[str]) -> None:
+        for p in self.wanted(languages):
             if p.state in ("missing", "failed") and (p.task is None or p.task.done()):
-                p.state, p.error = "downloading", ""
+                p.state, p.error, p.done_bytes = "downloading", "", 0
                 p.task = asyncio.create_task(self._download(p))
 
     async def _download(self, p: Package) -> None:
@@ -106,7 +156,7 @@ class Packages:
             log.warning("download of %s failed: %s", p.name, p.error)
 
 
-async def _fetch(url: str, dest) -> None:
+async def _fetch(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:

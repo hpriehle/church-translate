@@ -125,7 +125,6 @@ def test_app_flag_is_parsed():
 
 async def test_packages_follow_the_languages(monkeypatch, tmp_path):
     from app import packages
-    from app.config import Settings
 
     monkeypatch.setattr(packages, "PIPER_DIR", tmp_path)
     monkeypatch.setattr(packages, "_hf_cached", lambda repo: repo != "bilalfaye/speecht5_tts-wolof")
@@ -140,10 +139,57 @@ async def test_packages_follow_the_languages(monkeypatch, tmp_path):
     p = packages.Packages()
     ready = []
     p.on_ready = lambda: ready.append(1)
-    st = {x["id"]: x["state"] for x in await p.status(Settings(languages=["fr", "wo"]))}
-    assert st == {"speech": "ready", "fr": "missing", "wo": "missing"}
-    p.download_missing(Settings(languages=["fr", "wo"]))
+    st = {x["id"]: x for x in await p.status(["fr", "wo", "xx"])}
+    assert {k: v["state"] for k, v in st.items()} == {"speech": "ready", "fr": "missing", "wo": "missing"}
+    assert st["speech"]["done_mb"] == st["speech"]["size_mb"] == 1615 and st["fr"]["done_mb"] == 0
+    p.download_missing(["fr", "wo"])
     await asyncio.gather(*(x.task for x in p.items.values() if x.task))
-    st = {x["id"]: (x["state"], x["error"]) for x in await p.status(Settings(languages=["fr", "wo"]))}
+    st = {x["id"]: (x["state"], x["error"]) for x in await p.status(["fr", "wo"])}
     assert st["fr"] == ("ready", "") and st["wo"] == ("failed", "offline") and len(fetched) == 4 and ready == [1]
-    assert [x["id"] for x in await p.status(Settings(languages=["fr"]))] == ["speech", "fr"]
+    assert [x["id"] for x in await p.status(["fr"])] == ["speech", "fr"]
+
+
+def test_download_progress_counts_real_files_once(tmp_path):
+    from app import packages
+
+    (tmp_path / "blobs").mkdir()
+    (tmp_path / "blobs" / "abc.incomplete").write_bytes(b"x" * 1000)
+    (tmp_path / "snapshots").mkdir()
+    (tmp_path / "snapshots" / "w").symlink_to(tmp_path / "blobs" / "abc.incomplete")
+    assert packages._bytes_in(tmp_path) == 1000
+    pkg = packages.Package("x", "X", size_mb=100, state="downloading", done_bytes=500_000_000)
+    assert pkg.public()["done_mb"] == 99.0                     # never shows 100% before it is ready
+
+
+def test_local_sharing_lets_in_only_this_meetings_key(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app.config import Settings
+
+    s = Settings()
+    s.server.sharing = "local"
+    monkeypatch.setattr(main.S, "settings", s, raising=False)
+    monkeypatch.setattr(main.S, "app_mode", True)
+    monkeypatch.setattr(main.S, "local_addrs", {"127.0.0.1"}, raising=False)
+    monkeypatch.setattr(main.S, "listen_key", "k3y")
+    lan = "192.168.1.20"
+    assert main._may_listen("127.0.0.1", {}, {})                      # this Mac
+    assert not main._may_listen("127.0.0.1", {"cf-ray": "x"}, {})     # relayed: not this Mac
+    assert not main._may_listen(lan, {}, {})
+    assert not main._may_listen(lan, {}, {"hc_listen": "old"})
+    assert main._may_listen(lan, {}, {"hc_listen": "k3y"})
+    assert main.listener_url().endswith("/s/k3y")
+
+    c = TestClient(main.app)   # its client address ("testclient") counts as another device on the Wi-Fi
+    assert c.get("/s/nope", follow_redirects=False).status_code == 403
+    r = c.get("/s/k3y", follow_redirects=False)
+    assert r.status_code == 303 and r.cookies.get("hc_listen") == "k3y"
+    assert c.get("/static/listener/listener.js").status_code == 200
+    for path in ("/operator", "/api/state", "/api/hc/signup", "/admin", "/static/operator/operator.js"):
+        assert c.get(path).status_code == 403, path
+
+    s.server.sharing = "cloud"    # on hearchurch.com instead: nobody on the Wi-Fi gets in
+    assert not main._may_listen(lan, {}, {"hc_listen": "k3y"})
+    main.new_listen_key()
+    assert main.S.listen_key != "k3y"

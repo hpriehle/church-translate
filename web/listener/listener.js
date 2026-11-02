@@ -22,30 +22,31 @@
   const hashLang = () => HASH_LANGS[decodeURIComponent(location.hash.slice(1)).toLowerCase()] || "";
   let lang = hashLang() || params.get("lang") || localStorage.getItem("lang") || "";
   if (hashLang()) localStorage.setItem("lang", lang);
-  // /c/<congregation>: a Hear Church page. Its captions and sound come from that congregation's own live
-  // session (when it has one), and it says so when it isn't live.
-  const BASE = (location.pathname.match(/^\/c\/[^/]+/) || [""])[0];
+  // hearchurch.com/<slug>: a congregation's page. It follows that congregation's live session (when it has one)
+  // and says to wait when it isn't live. Also the older /c/<slug>. Captions and sound come from /c/<slug>/….
+  const SLUG = (location.pathname.match(/^\/(?:c\/)?([a-z0-9]+(?:-[a-z0-9]+)*)\/?$/) || [])[1];
+  const BASE = SLUG ? "/c/" + SLUG : "";
   const $ = (id) => document.getElementById(id);
   // The page's own words: French for the legacy ward page; on /c/<slug> the phone's language (en/fr/es/ru).
   const UI_TEXT = {
     fr: { conn: ["Connecté", "Connexion…", "Reconnexion…"], mute: "Couper le son", unmute: "Activer le son",
           tap: "Touchez pour écouter · utilisez des écouteurs", tapBtn: "Touchez le bouton pour activer le son",
-          notLive: "Pas en direct", live: "En direct", loading: "Chargement…", title: "Traduction en direct",
+          notLive: "En attente", live: "En direct", loading: "Chargement…", title: "Traduction en direct",
           off: "Cette traduction est arrêtée pour le moment.", liveWait: "En direct — la traduction va s'afficher ici.",
           done: "La traduction est terminée.", begin: "La traduction commencera au début de la réunion." },
     en: { conn: ["Connected", "Connecting…", "Reconnecting…"], mute: "Mute", unmute: "Turn sound on",
           tap: "Tap to listen · use headphones", tapBtn: "Tap the button to turn the sound on",
-          notLive: "Not live", live: "Live", loading: "Loading…", title: "Live translation",
+          notLive: "Waiting", live: "Live", loading: "Loading…", title: "Live translation",
           off: "This translation is paused for now.", liveWait: "Live — the translation will appear here.",
           done: "The translation has ended.", begin: "The translation will begin when the meeting starts." },
     es: { conn: ["Conectado", "Conectando…", "Reconectando…"], mute: "Silenciar", unmute: "Activar el sonido",
           tap: "Toque para escuchar · use auriculares", tapBtn: "Toque el botón para activar el sonido",
-          notLive: "No está en vivo", live: "En vivo", loading: "Cargando…", title: "Traducción en vivo",
+          notLive: "En espera", live: "En vivo", loading: "Cargando…", title: "Traducción en vivo",
           off: "Esta traducción está en pausa por ahora.", liveWait: "En vivo — la traducción aparecerá aquí.",
           done: "La traducción ha terminado.", begin: "La traducción empezará cuando comience la reunión." },
     ru: { conn: ["Подключено", "Подключение…", "Переподключение…"], mute: "Выключить звук", unmute: "Включить звук",
           tap: "Нажмите, чтобы слушать · используйте наушники", tapBtn: "Нажмите кнопку, чтобы включить звук",
-          notLive: "Сейчас нет трансляции", live: "В эфире", loading: "Загрузка…", title: "Перевод в прямом эфире",
+          notLive: "Ожидание", live: "В эфире", loading: "Загрузка…", title: "Перевод в прямом эфире",
           off: "Этот перевод пока приостановлен.", liveWait: "В эфире — перевод появится здесь.",
           done: "Перевод завершён.", begin: "Перевод начнётся, когда начнётся собрание." },
   };
@@ -105,10 +106,10 @@
   }
 
   const NOT_LIVE = {
-    en: ["Not live right now.", "Next meeting:"],
-    fr: ["Pas en direct pour le moment.", "Prochaine réunion :"],
-    es: ["No está en vivo ahora.", "Próxima reunión:"],
-    ru: ["Сейчас трансляции нет.", "Следующее собрание:"],
+    en: ["Wait for the meeting to start.", "Next meeting:"],
+    fr: ["Attendez le début de la réunion.", "Prochaine réunion :"],
+    es: ["Espere a que empiece la reunión.", "Próxima reunión:"],
+    ru: ["Дождитесь начала собрания.", "Следующее собрание:"],
   };
   const DAY_INDEX = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
   function notLiveText() {

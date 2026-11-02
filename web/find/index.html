@@ -5,23 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#000000">
 <meta name="color-scheme" content="dark">
-<title>Find my congregation</title>
+<title>Hear Church</title>
 <link rel="stylesheet" href="/static/find/find.css">
 </head>
 <body>
-<header><span class="title" id="title">Find my congregation</span></header>
+<header><span class="title">Hear Church</span></header>
 <main>
-  <p id="intro" class="intro">Listen to a meeting in your language, live.</p>
-  <button id="locate" class="big" type="button">Find my congregation</button>
-  <p id="privacy" class="privacy">Your location stays on your phone.</p>
+  <h1 id="intro" class="intro">Listen to your meeting in your language.</h1>
   <p id="status" class="status" role="status" aria-live="polite"></p>
   <ul id="results" class="results"></ul>
   <form id="searchForm" class="search" role="search" hidden>
-    <label id="searchLabel" for="q">Search by name</label>
-    <input id="q" type="search" autocomplete="off" autocapitalize="words" maxlength="80" placeholder="Ward, branch or parish name">
+    <label id="searchLabel" for="q">Your congregation's name</label>
+    <div class="combo">
+      <input id="q" type="search" autocomplete="off" autocapitalize="words" maxlength="80" placeholder="Harlem First Ward"
+             role="combobox" aria-autocomplete="list" aria-controls="found" aria-expanded="false">
+      <ul id="found" class="dropdown" role="listbox" hidden></ul>
+    </div>
   </form>
-  <ul id="found" class="results"></ul>
-  <p id="searchLink"><button id="showSearch" class="link" type="button">Search by name instead</button></p>
+  <p class="actions">
+    <button id="locate" class="link" type="button" hidden>Use my location</button>
+    <button id="showSearch" class="link" type="button" hidden>Search by name instead</button>
+  </p>
+  <p id="privacy" class="privacy">Your location stays on your phone.</p>
 </main>
 <script src="/static/find/find.js"></script>
 </body>

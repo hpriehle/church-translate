@@ -55,8 +55,9 @@ def main() -> None:
     appmod.S.argv = sys.argv[1:]
     appmod.S.app_mode = args.app
 
-    # The app shows the operator page itself, and only this Mac may open it.
-    host = "127.0.0.1" if args.app else settings.server.host
+    # The app shows the operator page itself, and only this Mac may open it (app/main.py _role). Other devices
+    # on the Wi-Fi may only listen, with local sharing and the meeting's key (_may_listen).
+    host = "0.0.0.0" if args.app else settings.server.host
     if settings.server.open_browser and not args.no_browser and not args.exit_when_done and not args.app:
         def _open():
             time.sleep(2.5)

@@ -1,22 +1,20 @@
+import AVFoundation
 import CoreLocation
 import MapKit
 import SwiftUI
 
-/// First launch: describe the congregation, add a Claude key, verify the e-mail, get a device token.
+/// First launch: describe the congregation, pick languages (they start downloading), allow the microphone,
+/// add a Claude key, sign up with hearchurch.com and get this Mac's device token.
 struct OnboardingView: View {
     @EnvironmentObject var model: AppModel
     @State private var step: Step = .welcome
-    @State private var newCongregation = true
     @State private var error: String?
     @State private var busy = false
 
-    enum Step: Int { case welcome, church, name, place, times, languages, claude, approval, email, waiting, finish }
+    enum Step: Int, CaseIterable { case welcome, church, name, place, times, languages, microphone, claude, approval, email, waiting, finish }
 
-    private var order: [Step] {
-        newCongregation
-            ? [.welcome, .church, .name, .place, .times, .languages, .claude, .approval, .email, .waiting, .finish]
-            : [.welcome, .email, .waiting, .languages, .claude, .finish]
-    }
+    /// `waiting` only appears if hearchurch.com asks for e-mail confirmation (off for now).
+    private let order: [Step] = [.welcome, .church, .name, .place, .times, .languages, .microphone, .claude, .approval, .email, .finish]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,30 +34,39 @@ struct OnboardingView: View {
                 }
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
-                if step != .welcome && step != .waiting {
-                    Button(step == .finish ? "Start using Hear Church" : step == .email ? "Send the link" : "Continue") {
-                        Task { await next() }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canContinue || busy)
+                if step != .waiting {
+                    Button(buttonTitle) { Task { await next() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!canContinue || busy)
                 }
             }
             .padding(16)
         }
     }
 
+    private var buttonTitle: String {
+        switch step {
+        case .welcome: return "Get started"
+        case .email: return "Sign up"
+        case .finish: return "Open Hear Church"
+        case .microphone where model.mic.permission != .authorized: return "Skip for now"
+        default: return "Continue"
+        }
+    }
+
     @ViewBuilder private var content: some View {
         switch step {
-        case .welcome: WelcomeStep { isNew in newCongregation = isNew; move(1) }
+        case .welcome: WelcomeStep()
         case .church: ChurchStep(profile: $model.profile)
         case .name: NameStep(profile: $model.profile)
         case .place: PlaceStep(profile: $model.profile)
         case .times: TimesStep(profile: $model.profile)
-        case .languages: LanguagesStep(profile: $model.profile)
+        case .languages: LanguagesStep()
+        case .microphone: MicrophoneStep()
         case .claude: ClaudeStep()
         case .approval: ApprovalStep(profile: $model.profile)
-        case .email: EmailStep(profile: $model.profile, newCongregation: newCongregation)
-        case .waiting: WaitingStep(newCongregation: newCongregation, onToken: { move(1) }, onBack: { move(-1) })
+        case .email: EmailStep(profile: $model.profile)
+        case .waiting: WaitingStep(onToken: { step = .finish }, onBack: { step = .email })
         case .finish: FinishStep()
         }
     }
@@ -70,7 +77,6 @@ struct OnboardingView: View {
         case .church: return !p.church.trimmingCharacters(in: .whitespaces).isEmpty
         case .name: return p.name.trimmingCharacters(in: .whitespaces).count >= 2
         case .place: return p.lat != nil
-        case .times: return true
         case .languages: return !p.languages.isEmpty
         case .claude: return model.keyState == .ok
         case .approval: return p.approved
@@ -93,24 +99,22 @@ struct OnboardingView: View {
             busy = true
             defer { busy = false }
             do {
-                if newCongregation {
-                    let r = try await HubClient.signUp(model.profile, deviceName: model.deviceName)
-                    model.profile.slug = r.slug
-                    model.profile.claim = r.claim
+                let r = try await HubClient.signUp(model.profile, deviceName: model.deviceName)
+                model.profile.slug = r.slug
+                if let token = r.deviceToken {
+                    Keychain.set(.deviceToken, token)
+                    model.profile.claim = ""
+                    move(1)
                 } else {
-                    model.profile.claim = try await HubClient.deviceLink(email: model.profile.email, slug: "",
-                                                                         deviceName: model.deviceName)
+                    model.profile.claim = r.claim
+                    step = .waiting
                 }
-                move(1)
+                model.profile.save()
             } catch {
                 self.error = error.localizedDescription
             }
         case .finish:
-            model.profile.claim = ""
-            model.profile.setupDone = true
-            model.profile.save()
-            model.writeLanguages()
-            model.launch()
+            model.finishSetup()
         default:
             move(1)
         }
@@ -132,18 +136,12 @@ private struct StepTitle: View {
 }
 
 private struct WelcomeStep: View {
-    let choose: (Bool) -> Void
     var body: some View {
         StepTitle(title: "Welcome to Hear Church",
-                  subtitle: "This Mac listens to your meeting and translates it live. Members hear the translation and read captions on their own phones.")
-        Button { choose(true) } label: {
-            Label("Set up our congregation", systemImage: "plus.circle").frame(maxWidth: .infinity, minHeight: 36)
-        }
-        .buttonStyle(.borderedProminent)
-        Button { choose(false) } label: {
-            Label("Our congregation already uses Hear Church: add this Mac", systemImage: "laptopcomputer")
-                .frame(maxWidth: .infinity, minHeight: 36)
-        }
+                  subtitle: "This Mac listens to your meeting and translates it live. Members hear the translation and read captions on their own phones, through hearchurch.com.")
+        Label("About 5 minutes to set up", systemImage: "clock")
+        Label("You'll need an Anthropic API key for Claude, which does the translating", systemImage: "key")
+        Label("Voices download while you finish setting up", systemImage: "arrow.down.circle")
     }
 }
 
@@ -294,22 +292,92 @@ private struct TimesStep: View {
     }
 }
 
-private struct LanguagesStep: View {
-    @Binding var profile: Profile
+/// A language row with its download size and state; used in setup and on the operator page.
+struct LanguageToggle: View {
+    @EnvironmentObject var model: AppModel
+    let language: OutputLanguage
 
     var body: some View {
-        StepTitle(title: "Languages", subtitle: "The meeting is in English; listeners pick one of these. Each language uses its own share of the Claude API.")
-        ForEach(OutputLanguage.all) { lang in
-            Toggle(isOn: Binding(get: { profile.languages.contains(lang.id) }, set: { on in
-                profile.languages.removeAll { $0 == lang.id }
-                if on { profile.languages.append(lang.id) }
-            })) {
-                Text(lang.name) + Text(lang.available ? "" : "  coming soon").foregroundStyle(.secondary)
+        let on = model.profile.languages.contains(language.id)
+        let pkg = model.engine.packages.first { $0.id == language.id }
+        Toggle(isOn: Binding(get: { on }, set: { model.setLanguage(language.id, on: $0) })) {
+            HStack {
+                Text(language.name)
+                Spacer()
+                if !language.available {
+                    Text("coming soon").foregroundStyle(.secondary)
+                } else {
+                    PackageBadge(package: pkg, sizeMB: language.sizeMB, selected: on)
+                }
             }
-            .disabled(!lang.available)
         }
-        Text("Voices download in the background the first time (about 2 GB with speech recognition).")
-            .font(.callout).foregroundStyle(.secondary)
+        .disabled(!language.available || (on && model.profile.languages.count == 1 && model.profile.setupDone))
+    }
+}
+
+struct PackageBadge: View {
+    let package: PackageStatus?
+    let sizeMB: Double
+    let selected: Bool
+
+    var body: some View {
+        switch package?.state {
+        case "ready" where selected: Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
+        case "downloading":
+            HStack(spacing: 6) {
+                ProgressView(value: min(1, (package?.done_mb ?? 0) / max(1, package?.size_mb ?? 1))).frame(width: 70)
+                Text(Format.size(package?.size_mb ?? sizeMB)).foregroundStyle(.secondary).font(.callout)
+            }
+        case "failed": Label("Download failed", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout)
+        default: Text(Format.size(package?.size_mb ?? sizeMB)).foregroundStyle(.secondary).font(.callout)
+        }
+    }
+}
+
+private struct LanguagesStep: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        StepTitle(title: "Languages",
+                  subtitle: "The meeting is in English; listeners pick one of these. A language starts downloading as soon as you choose it. Keep going while it does.")
+        ForEach(OutputLanguage.all) { LanguageToggle(language: $0) }
+        Divider()
+        HStack {
+            Text("Speech recognition").foregroundStyle(.secondary)
+            Text("needed for every language").font(.callout).foregroundStyle(.tertiary)
+            Spacer()
+            PackageBadge(package: model.engine.packages.first { $0.id == "speech" }, sizeMB: 1615, selected: model.profile.languagesPicked)
+        }
+    }
+}
+
+private struct MicrophoneStep: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        StepTitle(title: "Microphone",
+                  subtitle: "Hear Church listens through this Mac's microphone, or a cable from the sound system. The sound itself never leaves this Mac: only the words go out, as text, to be translated.")
+        switch model.mic.permission {
+        case .authorized:
+            Label("Microphone allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            Text("Say something to check the level:").foregroundStyle(.secondary)
+            MicMeter(level: model.mic.level).frame(maxWidth: 400)
+        case .notDetermined:
+            Button { Task { await model.mic.requestPermission(); model.mic.start() } } label: {
+                Label("Allow the microphone", systemImage: "mic").frame(minWidth: 220, minHeight: 32)
+            }
+            .buttonStyle(.borderedProminent)
+        default:
+            Label("The microphone is blocked for Hear Church.", systemImage: "xmark.circle.fill").foregroundStyle(.red)
+            Button("Open System Settings → Microphone") { MicMonitor.openPrivacySettings() }
+            Text("Turn Hear Church on there, then come back.").font(.callout).foregroundStyle(.secondary)
+        }
+        EmptyView()
+            .onAppear { model.mic.start() }
+            .onDisappear { model.mic.stop() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                model.mic.start()   // back from System Settings
+            }
     }
 }
 
@@ -370,50 +438,37 @@ private struct ApprovalStep: View {
 
 private struct EmailStep: View {
     @Binding var profile: Profile
-    let newCongregation: Bool
 
     var body: some View {
-        if newCongregation {
-            StepTitle(title: "Your e-mail",
-                      subtitle: "We send a link to confirm it. The same address lets you add another Mac later.")
-        } else {
-            StepTitle(title: "Add this Mac",
-                      subtitle: "Enter the e-mail your congregation signed up with. We send a link to it.")
-        }
+        StepTitle(title: "Your e-mail",
+                  subtitle: "In case we need to reach you about your congregation's page on hearchurch.com. We don't send newsletters.")
         TextField("name@example.com", text: $profile.email)
             .textContentType(.emailAddress)
     }
 }
 
+/// Only when hearchurch.com asks for e-mail confirmation (off for now).
 private struct WaitingStep: View {
     @EnvironmentObject var model: AppModel
-    let newCongregation: Bool
     let onToken: () -> Void
     let onBack: () -> Void
     @State private var error: String?
-    @State private var resent = false
 
     var body: some View {
         StepTitle(title: "Check your e-mail",
                   subtitle: "We sent a link to \(model.profile.email). Open it on any device; this screen continues by itself.")
         ProgressView().controlSize(.small)
         if let error { Text(error).foregroundStyle(.red) }
-        HStack {
-            Button("Change the e-mail") { onBack() }
-            Button(resent ? "Sent again" : "Send the link again") { Task { await resend() } }.disabled(resent)
-        }
-        .task { await poll() }
+        Button("Change the e-mail") { onBack() }
+            .task { await poll() }
     }
 
     private func poll() async {
         while !Task.isCancelled {
             do {
-                switch try await HubClient.claim(model.profile.claim) {
-                case .pending: break
-                case .token(let token, let slug, let name):
+                if case .token(let token, let slug, _) = try await HubClient.claim(model.profile.claim) {
                     Keychain.set(.deviceToken, token)
                     model.profile.slug = slug
-                    if !newCongregation && !name.isEmpty { model.profile.name = name }
                     model.profile.claim = ""
                     model.profile.save()
                     onToken()
@@ -426,27 +481,26 @@ private struct WaitingStep: View {
             try? await Task.sleep(for: .seconds(3))
         }
     }
-
-    private func resend() async {
-        do {
-            model.profile.claim = try await HubClient.deviceLink(email: model.profile.email, slug: model.profile.slug,
-                                                                 deviceName: model.deviceName)
-            model.profile.save()
-            resent = true
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
 }
 
 private struct FinishStep: View {
+    @EnvironmentObject var model: AppModel
     @State private var atLogin = true
 
     var body: some View {
         StepTitle(title: "All set",
-                  subtitle: "On Sunday, open the lid, check the list, and press Start. Keep the Mac plugged in with the lid open during the meeting.")
+                  subtitle: "On Sunday, open the lid, check the list, and press Start meeting. Keep the Mac plugged in with the lid open during the meeting.")
+        if let url = model.listenerURL {
+            LabeledContent("Your listeners' page") { Link(url.absoluteString, destination: url) }
+        }
         Toggle("Open Hear Church when this Mac starts", isOn: $atLogin)
             .onChange(of: atLogin) { _, on in LoginItem.set(on) }
             .onAppear { if !LoginItem.enabled { LoginItem.set(true) } }
+    }
+}
+
+enum Format {
+    static func size(_ mb: Double) -> String {
+        mb >= 1000 ? String(format: "%.1f GB", mb / 1000) : "\(Int(mb.rounded())) MB"
     }
 }

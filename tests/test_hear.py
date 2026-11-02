@@ -36,6 +36,9 @@ class FakeGeocoder:
         self.asked.append(address)
         return self.known.get(address)
 
+    async def town(self, lat, lng):
+        return "New York, NY" if (round(lat), round(lng)) == (41, -74) else ""
+
 
 @pytest.fixture
 def hear(tmp_path):
@@ -126,6 +129,15 @@ def test_signup_verify_claim_flow(client, hear):
     assert client.get("/api/hc/verify?token=bogus").status_code == 410
     assert client.get(f"/c/{slug}").status_code == 200
     assert client.post("/api/hc/signup", json={**SIGNUP}).json()["slug"] == "dakar-ward-2"
+
+
+def test_signup_without_email_verification_hands_out_the_token(client, hear):
+    hear.verify_email = False
+    r = client.post("/api/hc/signup", json={**SIGNUP, "lat": 14.69, "lng": -17.44}).json()
+    assert "claim" not in r and r["congregation"]["name"] == SIGNUP["name"]
+    assert hear.db.device_by_token(r["device_token"])["congregation_id"] == hear.db.by_slug(r["slug"])["id"]
+    assert hear.db.by_slug(r["slug"])["email_verified"] and not hear.mailer.outbox.exists()
+    assert client.get(f"/c/{r['slug']}").status_code == 200
 
 
 def test_signup_validation(client):
@@ -550,28 +562,23 @@ def hear_live_session(hear, cong, link, languages):
     return s
 
 
-def test_live_widens_the_radius_and_says_which(client, hear):
+def test_live_lists_congregations_within_a_mile_live_first(client, hear):
     near = place(hear, "Near Ward", 40.7000, -74.0000)
-    mid = place(hear, "Mid Ward", 40.7000 + 3 / 69, -74.0)          # ~3 miles north
-    far = place(hear, "Far Ward", 40.7000 + 15 / 69, -74.0)         # ~15 miles north
-    place(hear, "Dark Ward", 40.7001, -74.0)                        # right here but not live
+    place(hear, "Dark Ward", 40.7001, -74.0)                        # right here, not live: still listed (wait page)
+    place(hear, "Mid Ward", 40.7000 + 3 / 69, -74.0)                # ~3 miles north: too far
     r = client.get("/api/live", params={"lat": 40.7, "lng": -74.0})
     assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
-    assert r.json() == {"radius_mi": 25, "radii_mi": [1, 5, 25], "results": []}      # nothing live anywhere yet
-    go_live(hear, far)
-    j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
-    assert j["radius_mi"] == 25 and [x["slug"] for x in j["results"]] == ["far-ward"]
-    go_live(hear, mid, ("fr", "es"))
-    j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
-    assert j["radius_mi"] == 5 and [x["slug"] for x in j["results"]] == ["mid-ward"]
+    j = r.json()
+    assert j["radius_mi"] == 1 and [x["slug"] for x in j["results"]] == ["dark-ward", "near-ward"]
     go_live(hear, near)
     j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
-    assert j["radius_mi"] == 1 and [x["slug"] for x in j["results"]] == ["near-ward"]
+    assert [x["slug"] for x in j["results"]] == ["near-ward", "dark-ward"]     # live first
     row = j["results"][0]
-    assert row["live"] and row["name"] == "Near Ward" and row["church"] == "LDS" and row["unit_type"] == "ward"
+    assert row["live"] and row["name"] == "Near Ward" and row["title"] == "Near Ward" and row["church"] == "LDS"
     assert (row["lat"], row["lng"]) == (40.7, -74.0) and row["languages"] == [{"code": "fr", "name": "Français"}]
     assert row["starts_at"] > 0
-    assert set(row) >= {"slug", "name", "church", "unit_type", "lat", "lng", "languages", "live", "starts_soon", "starts_at"}
+    assert set(row) >= {"slug", "name", "title", "city", "church", "unit_type", "lat", "lng", "languages", "live",
+                        "starts_soon", "starts_at"}
 
 
 def test_live_hides_hidden_and_unverified_and_unlocated(client, hear):
@@ -592,9 +599,10 @@ def test_live_flags_meetings_starting_within_30_minutes(client, hear):
         return [{"day": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][t.weekday()], "time": t.strftime("%H:%M")}]
     place(hear, "Soon Ward", 40.7, -74.0, times=at(15), tz="UTC")
     place(hear, "Later Ward", 40.7, -74.0, times=at(90), tz="UTC")
-    place(hear, "Notz Ward", 40.7, -74.0, times=at(15))              # no time zone: start unknown, not listed
+    place(hear, "Notz Ward", 40.7, -74.0, times=at(15))              # no time zone: start unknown
     j = client.get("/api/live", params={"lat": 40.7, "lng": -74.0}).json()
-    assert [(x["slug"], x["live"], x["starts_soon"]) for x in j["results"]] == [("soon-ward", False, True)]
+    assert [(x["slug"], x["live"], x["starts_soon"]) for x in j["results"]] == [
+        ("soon-ward", False, True), ("later-ward", False, False), ("notz-ward", False, False)]
     assert abs(j["results"][0]["starts_at"] - (now.timestamp() + 900)) < 120
 
 
@@ -610,10 +618,10 @@ def test_live_validates_and_rate_limits_per_ip(client, hear):
 
 
 def test_live_works_across_the_date_line(client, hear):
-    c = place(hear, "Fiji Ward", -17.7, -179.9)
+    c = place(hear, "Fiji Ward", -17.7, -179.995)
     go_live(hear, c)
-    j = client.get("/api/live", params={"lat": -17.7, "lng": 179.95}).json()
-    assert j["radius_mi"] == 25 and [x["slug"] for x in j["results"]] == ["fiji-ward"]
+    j = client.get("/api/live", params={"lat": -17.7, "lng": 179.995}).json()   # ~0.7 mile, across ±180°
+    assert [x["slug"] for x in j["results"]] == ["fiji-ward"]
 
 
 def test_access_log_never_carries_the_position(hear):
@@ -681,10 +689,10 @@ def test_search_by_name_verified_and_visible_only(client, hear):
 
 def test_find_page_and_legacy_root_unchanged(client, hear):
     r = client.get("/find")
-    assert r.status_code == 200 and "/static/find/find.js?v=" in r.text and "Find my congregation" in r.text
+    assert r.status_code == 200 and "/static/find/find.js?v=" in r.text
     assert client.get("/static/find/find.js").status_code == 200
-    root = client.get("/")
-    assert root.status_code == 200 and "/static/listener/listener.js?v=" in root.text and "Find my congregation" not in root.text
+    root = client.get("/")   # any address but hearchurch.com: the ward's own listening page, as before
+    assert root.status_code == 200 and "/static/listener/listener.js?v=" in root.text and "find.js" not in root.text
 
 
 async def test_hub_reports_listener_counts_to_the_engine(server, hear, monkeypatch):
@@ -699,3 +707,102 @@ async def test_hub_reports_listener_counts_to_the_engine(server, hear, monkeypat
     assert m == {"type": "listeners", "stream": 0, "captions": 1}
     await ws_l.close()
     assert (await recv(eng, "listeners"))["captions"] == 0                 # only sent again when it changes
+
+
+# ------------------------------------------------------------------ finding a congregation on hearchurch.com
+
+def test_congregation_page_is_at_its_slug_and_the_old_link_redirects(client, hear):
+    make_cong(hear, "Harlem First")
+    assert client.get("/harlem-first").status_code == 200
+    assert "listener.js" in client.get("/harlem-first").text
+    r = client.get("/c/harlem-first", follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "/harlem-first"
+    assert client.get("/nobody-here").status_code == 404
+    assert client.get("/Harlem-First").status_code == 404                       # slugs are lowercase
+    # The slug route comes last: the site's own pages still answer.
+    assert "find.js" in client.get("/find").text
+    assert client.get("/login").status_code == 200 and "listener.js" not in client.get("/login").text
+
+
+def test_hearchurch_com_opens_the_finder_and_the_ward_address_keeps_its_page(client, hear):
+    assert "find.js" in client.get("/", headers={"host": "hearchurch.com"}).text
+    assert "find.js" in client.get("/", headers={"host": "www.hearchurch.com"}).text
+    assert "listener.js" in client.get("/", headers={"host": "live.clntacq.com"}).text
+
+
+def test_search_lists_name_and_town_while_typing(client, hear):
+    c = hear.db.create_congregation(church="LDS", name="Harlem First", unit_type="ward", email="h@x.org",
+                                    address="267 Lenox Ave, New York, NY 10027, USA")
+    hear.db.set_verified(c["id"])
+    make_cong(hear, "Dakar Branch")
+    rows = client.get("/api/hc/search", params={"q": "Har"}).json()["results"]
+    assert [(r["title"], r["city"], r["slug"]) for r in rows] == [("Harlem First Ward", "New York, NY", "harlem-first")]
+    assert [r["slug"] for r in client.get("/api/hc/search", params={"q": "new york"}).json()["results"]] == ["harlem-first"]
+    assert client.get("/api/hc/search", params={"q": "dakar"}).json()["results"][0]["title"] == "Dakar Branch"
+
+
+def test_city_comes_from_the_address():
+    from app.hear.db import city_of
+
+    assert city_of("267 Lenox Ave, New York, NY 10027, USA") == "New York, NY"
+    assert city_of("New York, NY") == "New York, NY"
+    assert city_of("Rue 10, Dakar, Senegal") == "Dakar, Senegal"
+    assert city_of("12 rue X, 75001 Paris, France") == "Paris, France"
+    assert city_of("12 Main St, Springfield") == "Springfield"
+    assert city_of("") == city_of("Harlem") == ""
+
+
+def test_slugs_never_take_a_site_path(hear):
+    from app.hear.db import RESERVED_SLUGS
+
+    def paths(routes):
+        for r in routes:
+            inner = getattr(r, "original_router", None)
+            if inner is not None:
+                yield from paths(inner.routes)
+            elif getattr(r, "path", None):
+                yield r.path
+    tops = {p.strip("/").split("/")[0].split(".")[0] for p in paths(main.app.routes)} - {"", "{slug}"}
+    assert {slugify(t) for t in tops} <= RESERVED_SLUGS, {slugify(t) for t in tops} - RESERVED_SLUGS
+    c = hear.db.create_congregation(church="LDS", name="Find", unit_type="ward", email="f@x.org")
+    assert c["slug"] == "find-2"
+
+
+def test_old_database_gets_the_town_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE congregations (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE,"
+               " church TEXT NOT NULL, name TEXT NOT NULL, unit_type TEXT NOT NULL, stake TEXT, address TEXT NOT NULL"
+               " DEFAULT '', lat REAL, lng REAL, meeting_times TEXT NOT NULL DEFAULT '[]', timezone TEXT NOT NULL"
+               " DEFAULT '', email TEXT NOT NULL, email_verified INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL,"
+               " hidden INTEGER NOT NULL DEFAULT 0)")
+    db.execute("INSERT INTO congregations (slug, church, name, unit_type, address, email, created_at)"
+               " VALUES ('a', 'LDS', 'A', 'ward', '1 Main St, Dakar, Senegal', 'a@x.org', 0)")
+    db.commit()
+    db.close()
+    assert Database(path).by_slug("a")["city"] == "Dakar, Senegal"
+
+
+def test_town_comes_from_the_pin_at_sign_up(client, hear):
+    body = {"church": "LDS", "name": "Harlem First", "unit_type": "ward", "email": "h@x.org", "address": "360 Malcolm X",
+            "lat": 40.81, "lng": -73.94}
+    slug = client.post("/api/hc/signup", json=body).json()["slug"]
+    assert hear.db.by_slug(slug)["city"] == "New York, NY"
+
+
+def test_town_from_nominatim_address_parts():
+    from app.hear.geo import town_from_nominatim
+
+    assert town_from_nominatim({"city": "New York", "state": "New York", "ISO3166-2-lvl4": "US-NY",
+                                "country": "United States", "country_code": "us"}) == "New York, NY"
+    assert town_from_nominatim({"city": "Dakar", "country": "Senegal", "country_code": "sn"}) == "Dakar, Senegal"
+    assert town_from_nominatim({"country": "Senegal"}) == ""
+
+
+async def test_older_congregations_get_their_town_from_the_pin(hear):
+    c = place(hear, "Old Ward", 40.81, -73.94)
+    hear.db.set_town(c["id"], "")
+    await hear_api.backfill_towns()
+    assert hear.db.by_slug("old-ward")["city"] == "New York, NY"

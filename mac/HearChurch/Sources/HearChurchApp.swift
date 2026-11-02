@@ -56,9 +56,9 @@ struct RootView: View {
     var body: some View {
         Group {
             if model.profile.setupDone {
-                MainView()
+                MainView()   // its download bar sits under the top bar, so Start meeting stays top-left
             } else {
-                OnboardingView()
+                VStack(spacing: 0) { DownloadBar(); OnboardingView() }
             }
         }
         .onAppear { model.openSettings = { openSettings() } }
