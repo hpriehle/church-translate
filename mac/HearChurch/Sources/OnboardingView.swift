@@ -355,29 +355,31 @@ private struct MicrophoneStep: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        StepTitle(title: "Microphone",
-                  subtitle: "Hear Church listens through this Mac's microphone, or a cable from the sound system. The sound itself never leaves this Mac: only the words go out, as text, to be translated.")
-        switch model.mic.permission {
-        case .authorized:
-            Label("Microphone allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-            Text("Say something to check the level:").foregroundStyle(.secondary)
-            MicMeter(level: model.mic.level).frame(maxWidth: 400)
-        case .notDetermined:
-            Button { Task { await model.mic.requestPermission(); model.mic.start() } } label: {
-                Label("Allow the microphone", systemImage: "mic").frame(minWidth: 220, minHeight: 32)
+        // A real container (not EmptyView) carries onAppear, so the meter starts as soon as the step shows.
+        VStack(alignment: .leading, spacing: 16) {
+            StepTitle(title: "Microphone",
+                      subtitle: "Hear Church listens through this Mac's microphone, or a cable from the sound system. The sound itself never leaves this Mac: only the words go out, as text, to be translated.")
+            switch model.mic.permission {
+            case .authorized:
+                Label("Microphone allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Say something to check the level:").foregroundStyle(.secondary)
+                MicMeter(level: model.mic.level).frame(maxWidth: 400)
+            case .notDetermined:
+                Button { Task { await model.mic.requestPermission(); model.startMicPreview() } } label: {
+                    Label("Allow the microphone", systemImage: "mic").frame(minWidth: 220, minHeight: 32)
+                }
+                .buttonStyle(.borderedProminent)
+            default:
+                Label("The microphone is blocked for Hear Church.", systemImage: "xmark.circle.fill").foregroundStyle(.red)
+                Button("Open System Settings → Microphone") { MicMonitor.openPrivacySettings() }
+                Text("Turn Hear Church on there, then come back.").font(.callout).foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-        default:
-            Label("The microphone is blocked for Hear Church.", systemImage: "xmark.circle.fill").foregroundStyle(.red)
-            Button("Open System Settings → Microphone") { MicMonitor.openPrivacySettings() }
-            Text("Turn Hear Church on there, then come back.").font(.callout).foregroundStyle(.secondary)
         }
-        EmptyView()
-            .onAppear { model.mic.start() }
-            .onDisappear { model.mic.stop() }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                model.mic.start()   // back from System Settings
-            }
+        .onAppear { model.startMicPreview() }
+        .onDisappear { model.mic.stop() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.startMicPreview()   // back from System Settings
+        }
     }
 }
 

@@ -193,3 +193,14 @@ def test_local_sharing_lets_in_only_this_meetings_key(monkeypatch):
     assert not main._may_listen(lan, {}, {"hc_listen": "k3y"})
     main.new_listen_key()
     assert main.S.listen_key != "k3y"
+
+
+async def test_api_session_forgets_a_reply_with_markup():
+    client = FakeClient([_reply("Bonjour."), _reply("antml:reasoning_effort>5"), _reply("Merci.")])
+    s = ApiSession("SYSTEM", "sonnet", "", client=client)
+    await s.start()
+    assert await s.ask("Hello.") == "Bonjour."
+    await s.ask("Last days.")               # the router's clean_output drops it; the context must not keep it
+    assert [m["role"] for m in s.messages] == ["user", "assistant"]
+    assert await s.ask("Thank you.") == "Merci."
+    assert "antml" not in str(client.calls[2]["messages"])

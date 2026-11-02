@@ -1,8 +1,11 @@
 """Prompts shared by the Claude and Ollama translators."""
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+log = logging.getLogger("translate")
 
 CONDENSE_TAG = "[ABRÉGER]"
 SKIP = "<skip>"
@@ -115,6 +118,13 @@ def seed_message(history: list[tuple[str, str]]) -> str:
 
 
 _PREFIX = re.compile(r"^(?:traduction|translation|fr|français)\s*:\s*", re.I)
+# Model or tool markup that slipped into a reply ("antml:reasoning_effort>5", "<thinking>", "function_calls").
+# Spoken French or Wolof never contains these, so a line that does is never read aloud or captioned.
+_MARKUP = re.compile(r"[<>{}\\|]|antml|\b[A-Za-z]+_[A-Za-z_]+\b|^\s*(?:human|assistant|system|user)\s*:", re.I)
+
+
+def has_markup(text: str) -> bool:
+    return any(_MARKUP.search(line) for line in text.replace(SKIP, "").splitlines())
 
 
 def clean_output(text: str) -> str | None:
@@ -128,6 +138,12 @@ def clean_output(text: str) -> str | None:
     t = t.replace(CONDENSE_TAG, "").strip()
     # One line only: models occasionally add a note after a blank line.
     t = t.split("\n\n")[0].strip()
+    if has_markup(t):
+        kept = [line for line in t.splitlines() if not _MARKUP.search(line)]
+        log.warning("dropped markup from a translation: %r", t[:200])
+        t = "\n".join(kept).strip()
+        if not any(ch.isalpha() for ch in t):
+            return None
     if len(t) >= 2 and t[0] in "\"«“" and t[-1] in "\"»”":
         t = t[1:-1].strip()
     return t or None

@@ -14,6 +14,8 @@ from typing import Any
 
 import anthropic
 
+from .prompts import has_markup
+
 from .claude_session import Usage, _Pending
 
 log = logging.getLogger("claude")
@@ -118,7 +120,12 @@ class ApiSession:
         self._count(resp.usage)
         if resp.stop_reason == "refusal":
             raise RuntimeError("claude error: declined to translate this sentence")
-        return "".join(b.text for b in resp.content if b.type == "text")
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        if has_markup(text):
+            # Forget this exchange, so the slip isn't in the context the next sentence is translated with
+            # (clean_output keeps it from listeners).
+            del self.messages[-2:]
+        return text
 
     def _count(self, u: Any) -> None:
         step = Usage(input=u.input_tokens or 0, cache_read=getattr(u, "cache_read_input_tokens", 0) or 0,

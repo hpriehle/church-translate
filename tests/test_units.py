@@ -418,3 +418,16 @@ def test_voice_speed_setting():
     import pytest
     with pytest.raises(Exception):
         VoiceCfg(engine="mms", voice="default", speed=3)
+
+
+def test_clean_output_never_lets_markup_through():
+    # Seen live (2026-11-02): the model wrote this as a whole reply between two real sentences.
+    assert clean_output("antml:reasoning_effort>5") is None
+    for junk in ("<thinking>", "</function_calls>", "reasoning_effort", "{\"text\": \"x\"}", "Assistant: Bonjour",
+                 "<parameter name=\"x\">"):
+        assert clean_output(junk) is None, junk
+    assert clean_output("Dernier jour.\nantml:reasoning_effort>5") == "Dernier jour."
+    # Real French and Wolof pass untouched.
+    for ok in ("de l'Église de Jésus-Christ des Saints des Derniers Jours.", "Jean 3:16, « Car Dieu a tant aimé »",
+               "Yàlla mooy sunu Boroom, ñu ngi koy sant.", "Il est 10 h 30 : la réunion commence."):
+        assert clean_output(ok) == ok.strip("«» ") or clean_output(ok) == ok, ok
