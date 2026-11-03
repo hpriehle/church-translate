@@ -199,6 +199,7 @@ class Translator:
             self.standby = s
             self._reload_pending = False
             self._spawn_failures = 0
+            self.last_error = ""  # pages re-log a lingering error when they reconnect
         except Exception as e:
             self._spawn_failures += 1
             backoff = min(120.0, 5.0 * 2 ** (self._spawn_failures - 1))
