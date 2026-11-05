@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import UserNotifications
 
 /// Everything the windows show: the congregation, the engine, downloads and the checks before Start.
 @MainActor
@@ -21,6 +22,7 @@ final class AppModel: ObservableObject {
     private let keepAwake = KeepAwake()
     private var bag: Set<AnyCancellable> = []
     private var lastHubCheck = Date.distantPast
+    private var micWarningShown = false
 
     enum KeyState: Equatable { case unknown, checking, ok, missing, bad(String) }
 
@@ -30,8 +32,33 @@ final class AppModel: ObservableObject {
         mic.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         network.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         Timer.publish(every: 3, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.tick() }.store(in: &bag)
+        engine.$status.sink { [weak self] st in self?.micWarningChanged(st) }.store(in: &bag)
         engine.onRunning = { [weak self] in self?.resumeDownloads() }
         mic.onDevicesChanged = { [weak self] in Task { await self?.engine.loadSettings() } }
+    }
+
+    /// The engine's sentence when the microphone is silent or gone, during a meeting.
+    var micWarning: String? {
+        guard running, let w = engine.status?.mic_warning, !w.isEmpty else { return nil }
+        return w
+    }
+    var micName: String? { running ? engine.status?.mic_name.flatMap { $0.isEmpty ? nil : $0 } : nil }
+
+    /// One notification when a warning first appears; the next one only after it has cleared.
+    private func micWarningChanged(_ st: EngineStatus?) {
+        guard let st else { return }   // briefly unreachable: keep what we know
+        guard st.pipeline.running, let w = st.mic_warning, !w.isEmpty else { micWarningShown = false; return }
+        guard !micWarningShown else { return }
+        micWarningShown = true
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let c = UNMutableNotificationContent()
+            c.title = "Hear Church: check the microphone"
+            c.body = w
+            c.sound = .default
+            center.add(UNNotificationRequest(identifier: "mic-warning", content: c, trigger: nil))
+        }
     }
 
     var running: Bool { engine.status?.pipeline.running ?? false }
@@ -49,6 +76,9 @@ final class AppModel: ObservableObject {
 
     func setSharing(local: Bool) async {
         await engine.set(["server": ["sharing": local ? "local" : "cloud"]])
+        // The engine picks its network address when it starts (this Mac only, or the Wi-Fi for local
+        // sharing), so a change needs a restart. The picker is disabled during a meeting.
+        if !running { relaunchEngine() }
     }
 
     /// The language the speaker talks in (en, fr, es, ru). Switchable during the meeting.
@@ -176,7 +206,10 @@ final class AppModel: ObservableObject {
         keyState = .checking
         switch await HubClient.checkAnthropicKey(key) {
         case .success:
-            Keychain.set(.apiKey, key)
+            guard Keychain.set(.apiKey, key) else {
+                keyState = .missing
+                return "Could not save the key in this Mac's Keychain. Unlock the Keychain (or allow access) and try again."
+            }
             keyState = .ok
             relaunchEngine()
             return nil

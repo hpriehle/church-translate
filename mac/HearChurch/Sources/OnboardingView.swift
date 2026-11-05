@@ -7,17 +7,42 @@ import SwiftUI
 /// add a Claude key, sign up with hearchurch.com and get this Mac's device token.
 struct OnboardingView: View {
     @EnvironmentObject var model: AppModel
-    @State private var step: Step = .welcome
+    @State private var step: Step
+    @State private var joined: Bool
     @State private var error: String?
     @State private var busy = false
+    // "I already set up my congregation"
+    @State private var joinSlug = ""
+    @State private var joinTitle = ""
+    @State private var joinCode = ""
+    @State private var connectCode = Keychain.get(.connectCode) ?? ""
 
-    enum Step: Int, CaseIterable { case welcome, church, name, place, times, languages, microphone, claude, approval, email, waiting, finish }
+    enum Step: String { case welcome, church, name, place, times, languages, microphone, claude, approval, email, connect, join, finish }
 
-    /// `waiting` only appears if hearchurch.com asks for e-mail confirmation (off for now).
-    private let order: [Step] = [.welcome, .church, .name, .place, .times, .languages, .microphone, .claude, .approval, .email, .finish]
+    /// Setting up a new congregation. (No "check your e-mail" step: the hub hands the device token back at once.)
+    private static let createOrder: [Step] = [.welcome, .church, .name, .place, .times, .languages, .microphone, .claude, .approval, .email, .connect, .finish]
+    /// Connecting to one that already exists: the congregation's details come from the hub.
+    private static let joinOrder: [Step] = [.welcome, .join, .languages, .microphone, .claude, .finish]
+    private var order: [Step] { joined ? Self.joinOrder : Self.createOrder }
+
+    init() {
+        let joined = OnboardingProgress.joined
+        var s = OnboardingProgress.step ?? .welcome
+        if let token = Keychain.get(.deviceToken), !token.isEmpty {   // already signed up: go past sign-up
+            if joined {
+                if s == .welcome || s == .join { s = .languages }
+            } else if let i = Self.createOrder.firstIndex(of: s), i <= Self.createOrder.firstIndex(of: .email)! {
+                s = (Keychain.get(.connectCode) ?? "").isEmpty ? .finish : .connect
+            }
+        }
+        if !joined && s == .join { s = .welcome }
+        _step = State(initialValue: s)
+        _joined = State(initialValue: joined)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            EngineFailedBanner()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     content
@@ -29,25 +54,26 @@ struct OnboardingView: View {
             }
             Divider()
             HStack {
-                if step != .welcome && step != .waiting && step != .finish {
+                if step != .welcome && step != .connect && step != .finish {
                     Button("Back") { move(-1) }
                 }
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
-                if step != .waiting {
-                    Button(buttonTitle) { Task { await next() } }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!canContinue || busy)
-                }
+                Button(buttonTitle) { Task { await next() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canContinue || busy)
             }
             .padding(16)
         }
+        .onChange(of: step) { _, s in OnboardingProgress.step = s }
+        .onChange(of: joined) { _, j in OnboardingProgress.joined = j }
     }
 
     private var buttonTitle: String {
         switch step {
         case .welcome: return "Get started"
         case .email: return "Sign up"
+        case .join: return "Connect"
         case .finish: return "Open Hear Church"
         case .microphone where model.mic.permission != .authorized: return "Skip for now"
         default: return "Continue"
@@ -56,7 +82,8 @@ struct OnboardingView: View {
 
     @ViewBuilder private var content: some View {
         switch step {
-        case .welcome: WelcomeStep()
+        case .welcome:
+            WelcomeStep(onJoin: { error = nil; joined = true; step = .join })
         case .church: ChurchStep(profile: $model.profile)
         case .name: NameStep(profile: $model.profile)
         case .place: PlaceStep(profile: $model.profile)
@@ -66,7 +93,8 @@ struct OnboardingView: View {
         case .claude: ClaudeStep()
         case .approval: ApprovalStep(profile: $model.profile)
         case .email: EmailStep(profile: $model.profile)
-        case .waiting: WaitingStep(onToken: { step = .finish }, onBack: { step = .email })
+        case .connect: ConnectCodeStep(code: connectCode, congregation: model.profile.name)
+        case .join: JoinStep(slug: $joinSlug, title: $joinTitle, code: $joinCode)
         case .finish: FinishStep()
         }
     }
@@ -81,14 +109,18 @@ struct OnboardingView: View {
         case .claude: return model.keyState == .ok
         case .approval: return p.approved
         case .email: return p.email.contains("@") && p.email.contains(".")
+        case .join: return !joinSlug.isEmpty && joinCode.filter(\.isNumber).count == 6
         default: return true
         }
     }
+
+    private static let keychainError = "Could not save to this Mac's Keychain. Unlock the Keychain (or allow access) and try again."
 
     private func move(_ by: Int) {
         error = nil
         guard let i = order.firstIndex(of: step) else { return }
         step = order[max(0, min(order.count - 1, i + by))]
+        if step == .welcome { joined = false }
         model.profile.save()
     }
 
@@ -100,20 +132,48 @@ struct OnboardingView: View {
             defer { busy = false }
             do {
                 let r = try await HubClient.signUp(model.profile, deviceName: model.deviceName)
-                model.profile.slug = r.slug
-                if let token = r.deviceToken {
-                    Keychain.set(.deviceToken, token)
-                    model.profile.claim = ""
-                    move(1)
-                } else {
-                    model.profile.claim = r.claim
-                    step = .waiting
+                guard let token = r.deviceToken, !token.isEmpty else {
+                    // The hub asked for e-mail confirmation, which this version has no way to finish.
+                    error = "hearchurch.com asked for e-mail confirmation, which this version of Hear Church can't complete yet. Try again later."
+                    return
                 }
+                guard Keychain.set(.deviceToken, token) else { error = Self.keychainError; return }
+                model.profile.slug = r.slug
+                model.profile.claim = ""
                 model.profile.save()
+                if let code = r.connectCode, !code.isEmpty {
+                    if !Keychain.set(.connectCode, code) { Keychain.delete(.connectCode) }
+                    connectCode = code
+                    step = .connect
+                } else {
+                    connectCode = ""
+                    step = .finish
+                }
             } catch {
                 self.error = error.localizedDescription
             }
+        case .join:
+            busy = true
+            defer { busy = false }
+            do {
+                let j = try await HubClient.connect(slug: joinSlug, code: joinCode.filter(\.isNumber), deviceName: model.deviceName)
+                guard Keychain.set(.deviceToken, j.token) else { error = Self.keychainError; return }
+                Keychain.delete(.connectCode)
+                model.profile.slug = j.slug
+                if !j.name.isEmpty { model.profile.name = j.name }
+                if !j.church.isEmpty { model.profile.church = j.church }
+                model.profile.approved = true   // whoever set the congregation up already confirmed it
+                model.profile.claim = ""
+                model.profile.save()
+                joinCode = ""
+                move(1)
+            } catch {
+                self.error = error.localizedDescription
+            }
+        case .connect:
+            move(1)
         case .finish:
+            OnboardingProgress.clear()
             model.finishSetup()
         default:
             move(1)
@@ -136,12 +196,123 @@ private struct StepTitle: View {
 }
 
 private struct WelcomeStep: View {
+    let onJoin: () -> Void
+
     var body: some View {
         StepTitle(title: "Welcome to Hear Church",
                   subtitle: "This Mac listens to your meeting and translates it live. Members hear the translation and read captions on their own phones, through hearchurch.com.")
         Label("About 5 minutes to set up", systemImage: "clock")
         Label("You'll need an Anthropic API key for Claude, which does the translating", systemImage: "key")
         Label("Voices download while you finish setting up", systemImage: "arrow.down.circle")
+        Divider()
+        Button("I already set up my congregation", action: onJoin)
+        Text("Use this to connect another computer to a congregation that is already on hearchurch.com.")
+            .font(.callout).foregroundStyle(.secondary)
+        HelpLinks()
+    }
+}
+
+/// Privacy, Terms and support, opened in the default browser / mail app.
+struct HelpLinks: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            Link("Privacy", destination: URL(string: "https://hearchurch.com/privacy")!)
+            Link("Terms", destination: URL(string: "https://hearchurch.com/terms")!)
+            Link("Contact support", destination: URL(string: "mailto:support@hearchurch.com")!)
+        }
+        .font(.callout)
+    }
+}
+
+/// Shown once after sign-up: the code another computer needs to connect to this congregation.
+private struct ConnectCodeStep: View {
+    let code: String
+    let congregation: String
+
+    var body: some View {
+        StepTitle(title: "Your connect code",
+                  subtitle: "You're signed up. Write this code down: you'll need it if you ever set up Hear Church on another computer.")
+        Text(HubClient.spaced(code))
+            .font(.system(size: 54, weight: .bold, design: .monospaced))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+        Text("Use this code to connect another computer to \(congregation.isEmpty ? "your congregation" : congregation). Keep it private.")
+            .foregroundStyle(.secondary)
+        Text("It is saved in this Mac's Keychain, and you can see it again or make a new one in Settings.")
+            .font(.callout).foregroundStyle(.secondary)
+    }
+}
+
+/// "I already set up my congregation": find it by name or pasted link, then the code.
+private struct JoinStep: View {
+    @Binding var slug: String
+    @Binding var title: String
+    @Binding var code: String
+    @State private var query = ""
+    @State private var results: [HubClient.Match] = []
+    @State private var searching = false
+    @State private var note = ""
+
+    var body: some View {
+        StepTitle(title: "Connect to your congregation",
+                  subtitle: "Find it by name, or paste its listener link (hearchurch.com/c/…). Then enter the connect code that came with the first setup.")
+        if slug.isEmpty {
+            HStack {
+                TextField("Congregation name, town, or listener link", text: $query).onSubmit { Task { await find() } }
+                Button("Find") { Task { await find() } }.disabled(query.trimmingCharacters(in: .whitespaces).count < 2 || searching)
+            }
+            if searching { ProgressView().controlSize(.small) }
+            ForEach(results) { m in
+                Button { slug = m.slug; title = m.title } label: {
+                    HStack {
+                        Text(m.title)
+                        if !m.city.isEmpty { Text(m.city).foregroundStyle(.secondary) }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider()
+            }
+            if !note.isEmpty { Text(note).font(.callout).foregroundStyle(.secondary) }
+        } else {
+            LabeledContent("Congregation") {
+                HStack {
+                    Text(title.isEmpty ? slug : title).bold()
+                    Button("Change") { slug = ""; title = ""; code = "" }.buttonStyle(.link)
+                }
+            }
+            TextField("Connect code (6 digits)", text: $code)
+                .font(.system(.title2, design: .monospaced))
+                .onChange(of: code) { _, v in
+                    let digits = String(v.filter(\.isNumber).prefix(6))
+                    let shown = HubClient.spaced(digits)
+                    if shown != v { code = shown }
+                }
+            Text("Ask whoever set up Hear Church for the current code.").font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private func find() async {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        note = ""
+        if let s = HubClient.slug(fromLink: q) {
+            slug = s
+            title = ""
+            if let m = (try? await HubClient.search(s))?.first(where: { $0.slug == s }) { title = m.title }
+            return
+        }
+        searching = true
+        defer { searching = false }
+        do {
+            results = try await HubClient.search(q)
+            if results.isEmpty { note = "No congregation found. Try the town, or paste its listener link." }
+        } catch {
+            note = error.localizedDescription
+        }
     }
 }
 
@@ -449,42 +620,6 @@ private struct EmailStep: View {
     }
 }
 
-/// Only when hearchurch.com asks for e-mail confirmation (off for now).
-private struct WaitingStep: View {
-    @EnvironmentObject var model: AppModel
-    let onToken: () -> Void
-    let onBack: () -> Void
-    @State private var error: String?
-
-    var body: some View {
-        StepTitle(title: "Check your e-mail",
-                  subtitle: "We sent a link to \(model.profile.email). Open it on any device; this screen continues by itself.")
-        ProgressView().controlSize(.small)
-        if let error { Text(error).foregroundStyle(.red) }
-        Button("Change the e-mail") { onBack() }
-            .task { await poll() }
-    }
-
-    private func poll() async {
-        while !Task.isCancelled {
-            do {
-                if case .token(let token, let slug, _) = try await HubClient.claim(model.profile.claim) {
-                    Keychain.set(.deviceToken, token)
-                    model.profile.slug = slug
-                    model.profile.claim = ""
-                    model.profile.save()
-                    onToken()
-                    return
-                }
-                error = nil
-            } catch {
-                self.error = error.localizedDescription
-            }
-            try? await Task.sleep(for: .seconds(3))
-        }
-    }
-}
-
 private struct FinishStep: View {
     @EnvironmentObject var model: AppModel
     @State private var atLogin = true
@@ -504,5 +639,22 @@ private struct FinishStep: View {
 enum Format {
     static func size(_ mb: Double) -> String {
         mb >= 1000 ? String(format: "%.1f GB", mb / 1000) : "\(Int(mb.rounded())) MB"
+    }
+}
+
+/// Where setup stopped, so quitting in the middle resumes there.
+enum OnboardingProgress {
+    private static let stepKey = "OnboardingStep", joinedKey = "OnboardingJoined"
+    fileprivate static var step: OnboardingView.Step? {
+        get { UserDefaults.standard.string(forKey: stepKey).flatMap(OnboardingView.Step.init(rawValue:)) }
+        set { UserDefaults.standard.set(newValue?.rawValue, forKey: stepKey) }
+    }
+    static var joined: Bool {
+        get { UserDefaults.standard.bool(forKey: joinedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: joinedKey) }
+    }
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: stepKey)
+        UserDefaults.standard.removeObject(forKey: joinedKey)
     }
 }

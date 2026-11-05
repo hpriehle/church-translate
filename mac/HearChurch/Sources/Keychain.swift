@@ -8,6 +8,7 @@ enum Keychain {
     enum Item: String {
         case apiKey = "anthropic-api-key"
         case deviceToken = "device-token"
+        case connectCode = "connect-code"
     }
 
     static func get(_ item: Item) -> String? {

@@ -54,6 +54,9 @@ private struct GeneralSettings: View {
                 Toggle("Open Hear Church when this Mac starts", isOn: $atLogin)
                     .onChange(of: atLogin) { _, on in LoginItem.set(on) }
             }
+            Section("About and help") {
+                HelpLinks()
+            }
         }
         .formStyle(.grouped)
     }
@@ -223,6 +226,7 @@ private struct CongregationSettings: View {
                 if let url = model.listenerURL { LabeledContent("Listener link") { Link(url.absoluteString, destination: url) } }
                 LabeledContent("Server", value: AppPaths.hub.host ?? "")
             }
+            Section("Connect code") { ConnectCodeRow() }
             Section {
                 Button("Sign this Mac out…", role: .destructive) { confirmSignOut = true }
                     .disabled(model.running)
@@ -238,6 +242,8 @@ private struct CongregationSettings: View {
 
     private func signOut() {
         Keychain.delete(.deviceToken)
+        Keychain.delete(.connectCode)
+        OnboardingProgress.clear()
         var p = model.profile   // keep what was entered, so setting up again (e.g. on another server) is quick
         p.slug = ""
         p.claim = ""
@@ -246,5 +252,62 @@ private struct CongregationSettings: View {
         model.profile = p
         p.save()
         model.relaunchEngine()   // without the device token; onboarding needs the engine for downloads
+    }
+}
+
+/// The code another computer needs to connect to this congregation: hidden until "Show", replaceable.
+private struct ConnectCodeRow: View {
+    @State private var code = Keychain.get(.connectCode) ?? ""
+    @State private var shown = false
+    @State private var confirmNew = false
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        if !code.isEmpty {
+            LabeledContent("Code") {
+                HStack {
+                    Text(shown ? HubClient.spaced(code) : "••• •••")
+                        .font(.system(.title3, design: .monospaced)).textSelection(.enabled)
+                    Button(shown ? "Hide" : "Show") { shown.toggle() }.buttonStyle(.link)
+                }
+            }
+            Text("Use this code to connect another computer to your congregation. Keep it private.")
+                .font(.callout).foregroundStyle(.secondary)
+        } else {
+            Text("Another computer needs a connect code to join your congregation.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+        HStack {
+            Button(code.isEmpty ? "Make a connect code" : "Make a new code") {
+                if code.isEmpty { Task { await make() } } else { confirmNew = true }
+            }
+            .disabled(busy)
+            if busy { ProgressView().controlSize(.small) }
+        }
+        .confirmationDialog("Make a new connect code?", isPresented: $confirmNew) {
+            Button("Make a new code", role: .destructive) { Task { await make() } }
+        } message: {
+            Text("The old code stops working. Computers already connected are not affected.")
+        }
+        if let error { Text(error).foregroundStyle(.red) }
+    }
+
+    private func make() async {
+        error = nil
+        guard let token = Keychain.get(.deviceToken), !token.isEmpty else { error = "This Mac isn't signed in to a congregation."; return }
+        busy = true
+        defer { busy = false }
+        do {
+            let new = try await HubClient.newConnectCode(token: token)
+            guard Keychain.set(.connectCode, new) else {
+                error = "Could not save the code in this Mac's Keychain. The new code is \(HubClient.spaced(new)): write it down."
+                return
+            }
+            code = new
+            shown = true
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }

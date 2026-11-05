@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 
@@ -27,6 +28,11 @@ final class Engine: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var feedTask: Task<Void, Never>?
     private var environment: [String: String] = [:]
+    private var launchCount = 0
+    private var launchedAt = Date()
+    private static let startDeadline: TimeInterval = 90
+    static var logURL: URL { AppPaths.logs.appendingPathComponent("engine-output.log") }
+    private static var pidURL: URL { AppPaths.home.appendingPathComponent("engine.pid") }
 
     var baseURL: URL { URL(string: "http://127.0.0.1:\(port)")! }
 
@@ -47,12 +53,23 @@ final class Engine: ObservableObject {
             restarts = 0
             p.terminate()   // the termination handler launches it again
         } else {
+            restarts = 0
             launch()
+        }
+    }
+
+    /// Show engine-output.log in Finder.
+    static func revealLog() {
+        if FileManager.default.fileExists(atPath: logURL.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([logURL])
+        } else {
+            NSWorkspace.shared.open(AppPaths.logs)
         }
     }
 
     func stop() {
         wantRunning = false
+        try? FileManager.default.removeItem(at: Engine.pidURL)
         pollTask?.cancel()
         feedTask?.cancel()
         guard let p = process, p.isRunning else { return }
@@ -67,6 +84,7 @@ final class Engine: ObservableObject {
             state = .failed("The translation engine is missing from this copy of the app. Download it again.")
             return
         }
+        Engine.reapOrphan()   // an engine left behind by a crashed or force-quit app
         port = Engine.freePort()
         let p = Process()
         p.executableURL = exe
@@ -80,9 +98,14 @@ final class Engine: ObservableObject {
         env.merge(environment) { _, new in new }
         p.environment = env
         try? FileManager.default.createDirectory(at: AppPaths.logs, withIntermediateDirectories: true)
-        let logURL = AppPaths.logs.appendingPathComponent("engine-output.log")
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        launchCount += 1
+        let logURL = Engine.logURL
+        Engine.trimLog(logURL)
+        if !FileManager.default.fileExists(atPath: logURL.path) { FileManager.default.createFile(atPath: logURL.path, contents: nil) }
         if let log = try? FileHandle(forWritingTo: logURL) {
+            _ = try? log.seekToEnd()
+            let stamp = ISO8601DateFormatter().string(from: Date())
+            try? log.write(contentsOf: Data("\n===== \(stamp) launch #\(launchCount) (attempt \(restarts + 1)) =====\n".utf8))
             p.standardOutput = log
             p.standardError = log
         }
@@ -96,6 +119,8 @@ final class Engine: ObservableObject {
             return
         }
         process = p
+        try? "\(p.processIdentifier)".write(to: Engine.pidURL, atomically: true, encoding: .utf8)
+        launchedAt = Date()
         state = .starting
         poll()
     }
@@ -105,7 +130,11 @@ final class Engine: ObservableObject {
         process = nil
         status = nil
         feedTask?.cancel()
-        guard wantRunning else { state = .stopped; return }
+        try? FileManager.default.removeItem(at: Engine.pidURL)
+        guard wantRunning else {
+            if case .failed = state {} else { state = .stopped }   // keep the reason when it was stopped for failing
+            return
+        }
         restarts += 1
         if restarts > 5 {
             state = .failed("The translation engine keeps stopping. See logs in ~/Library/Application Support/Hear Church/logs.")
@@ -143,9 +172,24 @@ final class Engine: ObservableObject {
                     tick += 1
                 } else if self.state == .running {
                     self.status = nil   // briefly unreachable
+                } else if self.state == .starting, self.process != nil,
+                          Date().timeIntervalSince(self.launchedAt) > Engine.startDeadline {
+                    self.giveUpStarting()
+                    return
                 }
                 try? await Task.sleep(for: .seconds(self.state == .running ? 1 : 0.5))
             }
+        }
+    }
+
+    /// The engine is running but never answered /api/status: stop it and say so.
+    private func giveUpStarting() {
+        wantRunning = false
+        state = .failed("The translation engine did not start within \(Int(Engine.startDeadline)) seconds. Restart it, and if that does not help, show the log.")
+        if let p = process, p.isRunning {
+            p.terminate()
+            let pid = p.processIdentifier
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { if kill(pid, 0) == 0 { kill(pid, SIGKILL) } }
         }
     }
 
@@ -273,6 +317,39 @@ final class Engine: ObservableObject {
         return (python, ["-s", "-B"], code)  // -s: no user site-packages, -B: no .pyc next to the signed code
     }
 
+    /// Keep engine-output.log to about 2 MB (the end of it).
+    private static func trimLog(_ url: URL) {
+        let limit = 2_000_000
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size > limit + 500_000,
+              let h = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? h.close() }
+        try? h.seek(toOffset: UInt64(size - limit))
+        guard let tail = try? h.readToEnd() else { return }
+        try? tail.write(to: url, options: .atomic)
+    }
+
+    /// If the pid saved by the last launch is still alive and is our Python engine (`-m app`), stop it:
+    /// SIGTERM, then SIGKILL after 3 s.
+    private static func reapOrphan() {
+        defer { try? FileManager.default.removeItem(at: pidURL) }
+        guard let text = try? String(contentsOf: pidURL, encoding: .utf8), let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+              pid > 1, pid != getpid(), kill(pid, 0) == 0 else { return }
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-o", "command=", "-p", String(pid)]
+        let out = Pipe()
+        ps.standardOutput = out
+        ps.standardError = FileHandle.nullDevice
+        guard (try? ps.run()) != nil else { return }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        ps.waitUntilExit()
+        let cmd = String(decoding: data, as: UTF8.self)
+        guard cmd.lowercased().contains("python"), cmd.contains("-m app") else { return }
+        kill(pid, SIGTERM)
+        for _ in 0..<30 where kill(pid, 0) == 0 { usleep(100_000) }
+        if kill(pid, 0) == 0 { kill(pid, SIGKILL); usleep(200_000) }
+    }
+
     private static func freePort() -> Int {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         defer { close(fd) }
@@ -328,6 +405,8 @@ struct EngineStatus: Decodable, Equatable {
     let language_switches: [Switch]?
     let sharing: String?
     let speaker: String?
+    let mic_warning: String?   // the engine's sentence when the microphone has gone quiet or away
+    let mic_name: String?      // the input the meeting is using
 }
 
 struct PackageStatus: Decodable, Equatable, Identifiable {

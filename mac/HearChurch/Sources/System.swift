@@ -202,26 +202,47 @@ final class MicMonitor: ObservableObject {
 final class OneShotLocation: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var continuation: CheckedContinuation<CLLocationCoordinate2D?, Never>?
+    private var requested = false
 
+    /// Waits for the permission answer before asking for the location; gives up after 15 s.
     func locate() async -> CLLocationCoordinate2D? {
         await withCheckedContinuation { c in
             continuation = c
             manager.delegate = self
             manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-            if manager.authorizationStatus == .notDetermined {
-                manager.requestWhenInUseAuthorization()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.finish(nil) }
+            switch manager.authorizationStatus {
+            case .notDetermined: manager.requestWhenInUseAuthorization()   // continues in locationManagerDidChangeAuthorization
+            case .denied, .restricted: finish(nil)
+            default: request()
             }
-            manager.requestLocation()
+        }
+    }
+
+    private func request() {
+        guard !requested else { return }
+        requested = true
+        manager.requestLocation()
+    }
+
+    private func finish(_ c: CLLocationCoordinate2D?) {
+        continuation?.resume(returning: c)
+        continuation = nil
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .notDetermined: break
+        case .denied, .restricted: finish(nil)
+        default: request()
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        continuation?.resume(returning: locations.last?.coordinate)
-        continuation = nil
+        finish(locations.last?.coordinate)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        continuation?.resume(returning: nil)
-        continuation = nil
+        finish(nil)
     }
 }

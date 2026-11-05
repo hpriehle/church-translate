@@ -8,6 +8,14 @@ struct MainView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let warning = model.micWarning {
+                Label(warning, systemImage: "mic.slash.fill")
+                    .font(.headline).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(Color.red)
+            }
+            EngineFailedBanner()
             TopBar()
             Divider()
             DownloadBar()
@@ -219,6 +227,9 @@ private struct DuringMeeting: View {
             }
             if let err = st?.pipeline.last_error, !err.isEmpty { Text(err).font(.callout).foregroundStyle(.red) }
             if let notice = st?.engine.client?.notice, !notice.isEmpty { Text(notice).font(.callout).foregroundStyle(.orange) }
+            if let mic = model.micName {
+                Label(mic, systemImage: "mic").font(.caption).foregroundStyle(.secondary).help("The microphone this meeting is using")
+            }
             Text("Keep the lid open and the Mac plugged in until the meeting ends.").font(.callout).foregroundStyle(.secondary)
         }
     }
@@ -454,6 +465,25 @@ private struct ChunkRow: View {
 }
 
 // MARK: - shared pieces
+
+/// Shown (main window and setup) when the translation engine is stopped for good: restart it or read why.
+struct EngineFailedBanner: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        if case .failed(let why) = model.engine.state {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                Text(why).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Restart engine") { model.relaunchEngine() }
+                Button("Show log") { Engine.revealLog() }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(Color.red.opacity(0.12))
+        }
+    }
+}
 
 struct CheckRow: View {
     let check: Check
