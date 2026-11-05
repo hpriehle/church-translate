@@ -4,9 +4,12 @@
 //   /download/HearChurch.dmg   always the newest DMG (the link to share)
 //   /download/<file>           a versioned DMG or Sparkle delta from R2
 //   /appcast.xml               Sparkle's update feed
+//   /privacy, /terms           the legal pages
 //
 // R2 holds what mac/release.sh uploads: HearChurch-<version>.dmg, *.delta, appcast.xml, latest.json.
 import PAGE from "./page.html";
+import PRIVACY from "./privacy.html";
+import TERMS from "./terms.html";
 
 export default {
   async fetch(request, env) {
@@ -21,6 +24,8 @@ export default {
     const path = url.pathname.replace(/\/+$/, "");
 
     if (path === "/download") return page(env);
+    if (path === "/privacy") return html(PRIVACY);
+    if (path === "/terms") return html(TERMS);
     if (path === "/appcast.xml") return file(request, env, "appcast.xml", "application/xml", "max-age=300");
     if (path === "/download/HearChurch.dmg") {
       const latest = await latestRelease(env);
@@ -35,6 +40,10 @@ export default {
     return new Response("Not found", { status: 404 });
   },
 };
+
+function html(body) {
+  return new Response(body, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "max-age=300" } });
+}
 
 async function latestRelease(env) {
   const obj = await env.FILES.get("latest.json");

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Privacy Policy · Hear Church</title>
+<meta name="description" content="What Hear Church collects, what it does not keep, and who it is shared with.">
+<style>
+:root { --bg: #000; --fg: #e8e6e3; --dim: #8a8784; --accent: #f0c46c; --line: #222; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body {
+  font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; line-height: 1.55;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+header { padding: .6rem 1rem; font-size: .95rem; color: var(--dim); border-bottom: 1px solid #1a1a1a; }
+header a { color: inherit; text-decoration: none; font-weight: 600; }
+main { max-width: 42rem; margin: 0 auto; padding: 2.2rem 1.1rem 3rem; }
+h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 .4rem; font-weight: 650; letter-spacing: -.01em; }
+.date { color: var(--dim); margin: 0 0 1.8rem; }
+h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; font-weight: 650; }
+p, li { font-size: 1.02rem; }
+p { margin: 0 0 .8rem; }
+ul { margin: 0 0 .8rem; padding-left: 1.25rem; }
+li { margin: 0 0 .35rem; }
+a { color: var(--accent); }
+footer { border-top: 1px solid #1a1a1a; padding: 1.2rem 1rem 2.4rem; color: var(--dim); font-size: .92rem; text-align: center; }
+footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header><a href="/">Hear Church</a></header>
+<main>
+<h1>Privacy Policy</h1>
+<p class="date">Effective November 5, 2026</p>
+<p>Hear Church translates a meeting live so people can listen on their phones in their own language. It is run by Harrison Riehle. This policy explains what happens to your information when you listen on hearchurch.com or use the Hear Church Mac app. Questions go to <a href="mailto:support@hearchurch.com">support@hearchurch.com</a>.</p>
+
+<h2>The short version</h2>
+<ul>
+  <li>The sound of the meeting stays on the Mac running it. Only the text of what was said is sent out for translation.</li>
+  <li>Our server passes captions and translated voice to listeners while the meeting is live and doesn't save them.</li>
+  <li>Listeners don't need an account.</li>
+  <li>There are no ads or analytics trackers, and we don't sell your information.</li>
+</ul>
+
+<h2>If you listen</h2>
+<ul>
+  <li><b>Finding a congregation.</b> If you tap the button to find one nearby, your phone sends your location, rounded to about 100 meters, to our server. It is used to answer that one request. We don't store it or write it to our logs. If you search by name instead, the search text is used the same way.</li>
+  <li><b>Listening.</b> Captions and translated voice are held in memory only while the meeting is live. They are not saved on our server. Your phone remembers your language choice in its own storage.</li>
+  <li><b>You're not identified.</b> We don't ask for your name or email. Anyone with a congregation's link can listen, and meetings are not protected by a password.</li>
+</ul>
+
+<h2>If you run the Mac app</h2>
+<p><b>What our server keeps about a congregation:</b></p>
+<ul>
+  <li>Its name, church, unit type, stake or group, address, building location, city, meeting times and time zone. Most of this appears publicly so listeners can find it.</li>
+  <li>The contact email you sign up with. It isn't shown publicly.</li>
+  <li>The name of each connected Mac, when it was last seen, and scrambled (hashed) versions of its access token and your connect code.</li>
+  <li>A record of each meeting: which languages it used and when it started and ended. Not what was said.</li>
+</ul>
+<p>We keep this until you ask us to delete it.</p>
+<p><b>What happens on your Mac:</b></p>
+<ul>
+  <li>Speech is turned into text on the Mac itself. Audio from the microphone is not uploaded anywhere.</li>
+  <li>The app saves a log of each meeting on that Mac, including the transcript and its translations. It stays on the Mac and is not sent to us. You can delete it from the app's folder in Application Support/Hear Church.</li>
+  <li>If you turn on recording, the translated voice is saved on that Mac too.</li>
+  <li>Your Anthropic API key and access token are stored in the Mac's Keychain.</li>
+</ul>
+
+<h2>Who else handles information</h2>
+<ul>
+  <li><b>Anthropic</b> receives the text of what is said in the meeting so Claude can translate it, using the API key you provide. Your use of that key is governed by your agreement with Anthropic; see <a href="https://www.anthropic.com/legal/privacy">Anthropic's privacy policy</a>.</li>
+  <li><b>Cloudflare</b> runs the network in front of hearchurch.com and stores app downloads. All website traffic, including IP addresses and the rounded location above, passes through it, and it may keep short-term logs.</li>
+  <li><b>OpenStreetMap Nominatim or Mapbox</b> receive the address or building location you enter at sign-up, to place it on the map.</li>
+  <li><b>Hugging Face</b> hosts the speech and voice models. The app downloads them from there, so Hugging Face sees your Mac's IP address.</li>
+  <li><b>Email providers</b> handle messages you send to our support address.</li>
+</ul>
+<p>We don't share your information with anyone else unless the law requires it.</p>
+
+<h2>Children and sensitive meetings</h2>
+<p>Hear Church isn't aimed at children and doesn't knowingly collect information from them, but children may speak in or listen to a meeting. What is said in a meeting can be personal or religious in nature. Whoever runs the meeting decides whether to translate it, should get approval from their bishop, pastor or other leader first, and should turn translation off for anything that should stay private.</p>
+
+<h2>Your choices</h2>
+<p>Email <a href="mailto:support@hearchurch.com">support@hearchurch.com</a> to see, correct or delete what we hold about your congregation or to remove it from the finder. Depending on where you live, you may have other privacy rights, and we will honor them. If you're asking about a congregation, we may need to confirm you speak for it.</p>
+
+<h2>Security</h2>
+<p>Connections to hearchurch.com are encrypted. No system is perfectly secure, so please keep your connect code private and make a new one if it gets out.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes, we'll post the new version here with a new date. If a change is significant, we'll also try to tell congregations directly.</p>
+</main>
+<footer><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/download">Download</a> · <a href="mailto:support@hearchurch.com">support@hearchurch.com</a></footer>
+</body>
+</html>

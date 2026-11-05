@@ -1,4 +1,4 @@
-# hearchurch.com/download and /appcast.xml: the Mac app's download page and Sparkle update feed.
+# hearchurch.com/download, /appcast.xml, /privacy and /terms: the Mac app's download page, Sparkle update feed and legal pages.
 # The rest of hearchurch.com stays on the VPS. Files live in R2; mac/release.sh uploads them.
 #   cd download && wrangler deploy
 name = "hearchurch-download"
@@ -9,6 +9,10 @@ routes = [
   { pattern = "hearchurch.com/download*", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/appcast.xml", zone_name = "hearchurch.com" },
   { pattern = "www.hearchurch.com/download*", zone_name = "hearchurch.com" },
+  { pattern = "hearchurch.com/privacy", zone_name = "hearchurch.com" },
+  { pattern = "hearchurch.com/terms", zone_name = "hearchurch.com" },
+  { pattern = "www.hearchurch.com/privacy", zone_name = "hearchurch.com" },
+  { pattern = "www.hearchurch.com/terms", zone_name = "hearchurch.com" },
 ]
 rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = false }]
 
