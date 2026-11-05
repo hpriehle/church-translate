@@ -19,3 +19,11 @@ rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = false }]
 [[r2_buckets]]
 binding = "FILES"
 bucket_name = "hearchurch-downloads"
+
+# Anonymous download totals (day, version, count). No IP addresses or anything else about who downloaded.
+#   env -u CLOUDFLARE_API_TOKEN wrangler d1 execute hearchurch-stats --remote --command "SELECT version, SUM(count) FROM downloads GROUP BY version"
+[[d1_databases]]
+binding = "STATS"
+database_name = "hearchurch-stats"
+database_id = "7d370fdf-6d8b-47d3-90a7-3ebe2d0ac1c0"
+migrations_dir = "migrations"

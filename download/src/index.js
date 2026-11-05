@@ -1,7 +1,7 @@
 // Download page and Sparkle files for the Hear Church Mac app.
 //
 //   /download                  the page (version and size from latest.json)
-//   /download/HearChurch.dmg   always the newest DMG (the link to share)
+//   /download/HearChurch.dmg   always the newest DMG (the link to share); counted, anonymously, in D1
 //   /download/<file>           a versioned DMG or Sparkle delta from R2
 //   /appcast.xml               Sparkle's update feed
 //   /privacy, /terms           the legal pages
@@ -12,7 +12,7 @@ import PRIVACY from "./privacy.html";
 import TERMS from "./terms.html";
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname.startsWith("www.")) {
       url.hostname = url.hostname.slice(4);
@@ -30,7 +30,9 @@ export default {
     if (path === "/download/HearChurch.dmg") {
       const latest = await latestRelease(env);
       if (!latest) return new Response("Not released yet", { status: 404 });
-      return file(request, env, latest.file, "application/x-apple-diskimage", "no-store", latest.file);
+      const response = await file(request, env, latest.file, "application/x-apple-diskimage", "no-store", latest.file);
+      if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, latest.version));
+      return response;
     }
     const name = path.slice("/download/".length);
     if (path.startsWith("/download/") && /^[\w.-]+\.(dmg|delta)$/.test(name)) {
@@ -43,6 +45,26 @@ export default {
 
 function html(body) {
   return new Response(body, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "max-age=300" } });
+}
+
+// A download starting from the first byte. Resuming an interrupted one, or only asking about the file, is not new.
+function isNewDownload(request, response) {
+  if (request.method !== "GET" || (response.status !== 200 && response.status !== 206)) return false;
+  const range = request.headers.get("range");
+  return !range || /^bytes=0-/.test(range);
+}
+
+// Adds one to today's total for this version. It keeps nothing about who downloaded, and a failure here
+// must never affect the download.
+async function countDownload(env, version) {
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    await env.STATS.prepare(
+      "INSERT INTO downloads (day, version, count) VALUES (?1, ?2, 1) ON CONFLICT (day, version) DO UPDATE SET count = count + 1",
+    ).bind(day, version).run();
+  } catch (e) {
+    console.error("download count failed:", e.message);
+  }
 }
 
 async function latestRelease(env) {
