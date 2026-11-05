@@ -101,9 +101,11 @@ sign "$SPK/Updater.app"
 sign "$OUT/Contents/Frameworks/Sparkle.framework"
 sign --entitlements "$MAC/HearChurch/HearChurch.entitlements" "$OUT"
 codesign --verify --deep --strict "$OUT"
-while IFS= read -r f; do
+# --deep skips what sits in Resources, so check every binary there too. Apple rejects any left unsigned.
+while IFS= read -r -d '' f; do
   codesign --verify --strict "$f" 2>/dev/null || { echo "not signed: $f" >&2; exit 1; }
-done < "$MACHO_LIST"
+done < "$MAC/build/machos.txt"
+rm -f "$MAC/build/machos.txt"
 echo "signed"
 
 du -sh "$OUT" | sed 's/^/size: /'
