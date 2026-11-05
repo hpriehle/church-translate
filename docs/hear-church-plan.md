@@ -28,6 +28,12 @@ Working notes for whoever continues:
 - Testing the app: `defaults write com.hearchurch.HearChurch HubURL http://127.0.0.1:<port>` points it
   at a local hub; `defaults write com.hearchurch.HearChurch EngineDir ~/dev/hear-church` runs the engine
   from the checkout with `uv run` instead of the bundle. App data: ~/Library/Application Support/Hear Church.
+- Updates and downloads (Phase 6 part): Sparkle 2 (`mac/HearChurch/Sources/Updater.swift`, feed
+  `hearchurch.com/appcast.xml`, EdDSA key in the Mac's login Keychain as account `hearchurch`; back it up,
+  losing it strands every install). `hearchurch.com/download*` and `/appcast.xml` are the
+  `hearchurch-download` Worker (`download/`, `wrangler deploy`) serving R2 bucket `hearchurch-downloads`;
+  the rest of the site stays on the VPS. Release with `mac/release.sh <version>` (Keychain items
+  `hearchurch-r2` and notary profile `hearchurch-notary` are set up on this Mac). Not released yet.
 - Phase 3 left for later: auto-stop after ~10 min of silence, optional auto-start at meeting time,
   moving the building pin after setup (`/api/hc/location` exists), screenshots in the API-key guide,
   the "free first Sunday" button (disabled until Phase 5).

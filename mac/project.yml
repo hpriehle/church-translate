@@ -11,12 +11,18 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.10.1"
 targets:
   HearChurch:
     type: application
     platform: macOS
     sources:
       - HearChurch/Sources
+    dependencies:
+      - package: Sparkle
     info:
       path: HearChurch/Info.plist
       properties:
@@ -30,6 +36,13 @@ targets:
         NSLocationUsageDescription: Used once, if you ask, to place your building on the map. Only the building's location is saved.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Sparkle: check daily, download in the background, install when the app quits (never during
+        # a meeting, see Updater.swift). Updates are signed with the EdDSA key in Harrison's login
+        # Keychain (mac/release.sh); this is its public half.
+        SUFeedURL: https://hearchurch.com/appcast.xml
+        SUPublicEDKey: qpV3/1+hB202rpchiUWR1jTIR7UrOjhfgwvjTocMFXY=
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: true
     entitlements:
       path: HearChurch/HearChurch.entitlements
       properties:

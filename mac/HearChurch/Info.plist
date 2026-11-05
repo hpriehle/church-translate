@@ -33,5 +33,13 @@
 	<string>Used once, if you ask, to place your building on the map. Only the building's location is saved.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Hear Church listens to the meeting through this microphone and translates it for listeners' phones. The sound itself never leaves this Mac.</string>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://hearchurch.com/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>qpV3/1+hB202rpchiUWR1jTIR7UrOjhfgwvjTocMFXY=</string>
 </dict>
 </plist>

@@ -12,6 +12,9 @@ struct HearChurchApp: App {
                 .frame(minWidth: 760, minHeight: 560)
         }
         .defaultSize(width: 1100, height: 780)
+        .commands {
+            CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
+        }
 
         MenuBarExtra {
             MenuBarContent().environmentObject(model)
@@ -27,7 +30,10 @@ struct HearChurchApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Task { @MainActor in AppModel.shared.launch() }
+        Task { @MainActor in
+            AppModel.shared.launch()
+            _ = Updater.shared
+        }
     }
 
     /// The menu bar icon keeps the app (and the engine) running when the window is closed.
@@ -83,11 +89,20 @@ struct MenuBarContent: View {
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
+        CheckForUpdatesButton()
         Button("Quit Hear Church") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 
     private var listenerText: String {
         let n = model.engine.status?.engine.client?.listeners?.captions ?? 0
         return n == 1 ? "1 listener" : "\(n) listeners"
+    }
+}
+
+struct CheckForUpdatesButton: View {
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        Button("Check for Updates…") { updater.checkForUpdates() }.disabled(!updater.canCheck)
     }
 }

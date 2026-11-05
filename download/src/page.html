@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Download Hear Church for Mac</title>
+<meta name="description" content="Translate your meeting live on your own Mac. Listeners hear it on their phones in their language.">
+<style>
+:root { --bg: #000; --fg: #e8e6e3; --dim: #8a8784; --accent: #f0c46c; --card: #111; --line: #222; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body {
+  font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; line-height: 1.45;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+header { padding: .6rem 1rem; font-size: .95rem; color: var(--dim); border-bottom: 1px solid #1a1a1a; }
+header a { color: inherit; text-decoration: none; font-weight: 600; }
+main { max-width: 38rem; margin: 0 auto; padding: 2.4rem 1.1rem 4rem; }
+h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 .7rem; font-weight: 650; letter-spacing: -.01em; }
+.lede { font-size: 1.15rem; color: var(--fg); margin: 0 0 1.8rem; }
+.big {
+  display: block; width: 100%; padding: 1.1rem 1rem; font: inherit; font-size: 1.3rem; font-weight: 600; text-align: center;
+  background: var(--accent); color: #1a1405; border: 0; border-radius: 14px; text-decoration: none;
+}
+.big:hover { filter: brightness(1.06); }
+.big.off { opacity: .55; pointer-events: none; }
+.meta { color: var(--dim); font-size: .92rem; text-align: center; margin: .65rem 0 0; }
+.phone { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: .8rem 1rem; margin: 0 0 1rem; }
+h2 { font-size: 1.05rem; margin: 2.6rem 0 .8rem; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: .82rem; }
+ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; }
+ol.steps li { counter-increment: s; position: relative; padding: 0 0 1rem 2.6rem; }
+ol.steps li::before {
+  content: counter(s); position: absolute; left: 0; top: -.05rem; width: 1.8rem; height: 1.8rem; border-radius: 50%;
+  background: var(--card); border: 1px solid var(--line); color: var(--accent); font-weight: 700; font-size: .95rem;
+  display: grid; place-items: center;
+}
+ol.steps b { display: block; }
+ol.steps span { color: var(--dim); }
+ul.needs { margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+ul.needs li { display: flex; justify-content: space-between; gap: 1rem; padding: .7rem 1rem; background: var(--card); }
+ul.needs li + li { border-top: 1px solid var(--line); }
+ul.needs span { color: var(--dim); text-align: right; }
+p.note { color: var(--dim); font-size: .95rem; }
+a { color: var(--accent); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header><a href="/">Hear Church</a></header>
+<main>
+  <h1>Translate your meeting on your Mac.</h1>
+  <p class="lede">Hear Church listens to your meeting through the Mac's microphone and translates it as people speak.
+    Listeners follow along on their own phones, with captions and a voice in their language.</p>
+
+  <p class="phone" id="phone" hidden>Hear Church runs on a Mac. Open this page on the Mac you'll use at church to download it.
+    Listening to a meeting? <a href="/">Find your congregation</a>.</p>
+
+  <div {{RELEASED}}>
+    <a class="big" href="/download/HearChurch.dmg">Download for Mac</a>
+    <p class="meta">Version {{VERSION}} · {{SIZE}} · {{DATE}}</p>
+  </div>
+  <div {{UNRELEASED}}>
+    <span class="big off">Coming soon</span>
+    <p class="meta">The first version is almost ready.</p>
+  </div>
+
+  <h2>Getting started</h2>
+  <ol class="steps">
+    <li><b>Open the download and drag Hear Church to Applications.</b>
+      <span>Then open it from Applications.</span></li>
+    <li><b>Sign up with your email.</b>
+      <span>Enter your congregation's name and where you meet, so listeners nearby can find you.</span></li>
+    <li><b>Choose your languages.</b>
+      <span>The speech model and voices download in the background while you finish setting up (about 2 GB).</span></li>
+    <li><b>Press Start meeting.</b>
+      <span>Listeners scan the QR code in the chapel or go to hearchurch.com on their phone.</span></li>
+  </ol>
+
+  <h2>What you need</h2>
+  <ul class="needs">
+    <li>Mac <span>Apple silicon (M1 or newer)</span></li>
+    <li>macOS <span>14 Sonoma or newer</span></li>
+    <li>Memory <span>8 GB · 16 GB for Wolof</span></li>
+    <li>Free space <span>About 6 GB</span></li>
+    <li>Internet <span>Wi-Fi or Ethernet during the meeting</span></li>
+  </ul>
+  <p class="note">Keep the Mac plugged in with the lid open while a meeting is translated.
+    Hear Church keeps itself up to date. New versions install when you quit the app, never during a meeting.</p>
+</main>
+<script>
+  if (/iPhone|iPod|Android/i.test(navigator.userAgent)) document.getElementById("phone").hidden = false;
+</script>
+</body>
+</html>

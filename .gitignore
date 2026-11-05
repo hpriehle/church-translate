@@ -14,3 +14,5 @@ models/piper/
 .stversions/
 mac/build/
 mac/HearChurch.xcodeproj/
+mac/dist/
+download/.wrangler/

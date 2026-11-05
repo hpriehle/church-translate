@@ -2,7 +2,7 @@
 # Build "Hear Church.app" with the Python engine inside it.
 #
 #   mac/build.sh                 → mac/build/Hear Church.app (signed with your Apple Development identity)
-#   SIGN_ID="Developer ID Application" mac/build.sh     (sign for distribution; notarizing is Phase 6)
+#   SIGN_ID="Developer ID Application" mac/build.sh     (sign for distribution: mac/release.sh does this)
 #   mac/build.sh --app-only      → rebuild the Swift app and engine code, reuse the last bundled Python
 #
 # The app contains a standalone CPython (python-build-standalone, via uv) with the locked dependencies,
@@ -63,12 +63,21 @@ ditto "$STAGE/engine" "$OUT/Contents/Resources/engine"
 step "Signing with \"$SIGN_ID\""
 # Every Mach-O file inside Resources, innermost first, then the Python interpreter, then the app.
 # (Python loads modules signed by us only, but some packages need executable memory: hence its entitlements.)
-sign() { codesign --force --options runtime --timestamp=none --sign "$SIGN_ID" "$@" 2>&1 | grep -v "replacing existing signature" || true; }
+# Notarizing needs a secure timestamp, which needs the network: only Developer ID builds get one.
+if [[ "$SIGN_ID" == "Developer ID"* ]]; then TS="--timestamp"; else TS="--timestamp=none"; fi
+sign() { codesign --force --options runtime $TS --sign "$SIGN_ID" "$@" 2>&1 | grep -v "replacing existing signature" || true; }
 find "$OUT/Contents/Resources" -type f \( -name "*.so" -o -name "*.dylib" \) -print0 \
-  | xargs -0 -n 200 codesign --force --options runtime --timestamp=none --sign "$SIGN_ID" 2>&1 | grep -v "replacing existing signature" || true
+  | xargs -0 -n 200 codesign --force --options runtime $TS --sign "$SIGN_ID" 2>&1 | grep -v "replacing existing signature" || true
 find "$OUT/Contents/Resources/python/bin" -type f -perm -u+x -print0 | while IFS= read -r -d '' f; do
   if file -b "$f" | grep -q Mach-O; then sign --entitlements "$MAC/HearChurch/Python.entitlements" "$f"; fi
 done
+# Sparkle's helpers, as its docs list them (Xcode signed them with the development identity).
+SPK="$OUT/Contents/Frameworks/Sparkle.framework/Versions/B"
+sign "$SPK/XPCServices/Installer.xpc"
+sign --preserve-metadata=entitlements "$SPK/XPCServices/Downloader.xpc"
+sign "$SPK/Autoupdate"
+sign "$SPK/Updater.app"
+sign "$OUT/Contents/Frameworks/Sparkle.framework"
 sign --entitlements "$MAC/HearChurch/HearChurch.entitlements" "$OUT"
 codesign --verify --strict "$OUT"
 echo "signed"

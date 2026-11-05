@@ -1,0 +1,17 @@
+# hearchurch.com/download and /appcast.xml: the Mac app's download page and Sparkle update feed.
+# The rest of hearchurch.com stays on the VPS. Files live in R2; mac/release.sh uploads them.
+#   cd download && wrangler deploy
+name = "hearchurch-download"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+workers_dev = false
+routes = [
+  { pattern = "hearchurch.com/download*", zone_name = "hearchurch.com" },
+  { pattern = "hearchurch.com/appcast.xml", zone_name = "hearchurch.com" },
+  { pattern = "www.hearchurch.com/download*", zone_name = "hearchurch.com" },
+]
+rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = false }]
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "hearchurch-downloads"
