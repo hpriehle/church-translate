@@ -59,15 +59,36 @@ rm -rf "$OUT"
 ditto "build/dd/Build/Products/Release/Hear Church.app" "$OUT"
 ditto "$STAGE/python" "$OUT/Contents/Resources/python"
 ditto "$STAGE/engine" "$OUT/Contents/Resources/engine"
+# The engine shows this as its version; it never runs git on a congregation's Mac.
+sed -n 's/^ *MARKETING_VERSION: "\(.*\)"/\1/p' project.yml > "$OUT/Contents/Resources/engine/VERSION"
 
 step "Signing with \"$SIGN_ID\""
 # Every Mach-O file inside Resources, innermost first, then the Python interpreter, then the app.
 # (Python loads modules signed by us only, but some packages need executable memory: hence its entitlements.)
 # Notarizing needs a secure timestamp, which needs the network: only Developer ID builds get one.
 if [[ "$SIGN_ID" == "Developer ID"* ]]; then TS="--timestamp"; else TS="--timestamp=none"; fi
-sign() { codesign --force --options runtime $TS --sign "$SIGN_ID" "$@" 2>&1 | grep -v "replacing existing signature" || true; }
-find "$OUT/Contents/Resources" -type f \( -name "*.so" -o -name "*.dylib" \) -print0 \
-  | xargs -0 -n 200 codesign --force --options runtime $TS --sign "$SIGN_ID" 2>&1 | grep -v "replacing existing signature" || true
+LOG="$MAC/build/sign.log"
+: > "$LOG"
+sign_failed() { grep -v "replacing existing signature" "$LOG" >&2; echo "signing failed" >&2; exit 1; }
+sign() { codesign --force --options runtime $TS --sign "$SIGN_ID" "$@" 2>> "$LOG" || sign_failed; }
+# Found by their first bytes, not their names: torch ships programs with no extension in torch/bin.
+machos() {
+  "$STAGE/python/bin/python3" -I -c '
+import os, sys
+MAGIC = {bytes.fromhex(m) for m in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca")}
+for folder, _, files in os.walk(sys.argv[1]):
+    for name in files:
+        path = os.path.join(folder, name)
+        if not os.path.islink(path) and open(path, "rb").read(4) in MAGIC:
+            print(path, end="\0")
+' "$1"
+}
+machos "$OUT/Contents/Resources" > "$MAC/build/machos.txt"
+python3 -I -c '
+import sys
+paths = open(sys.argv[1], "rb").read().split(b"\0")
+sys.stdout.buffer.write(b"".join(p + b"\0" for p in paths if p and b"/Resources/python/bin/" not in p))
+' "$MAC/build/machos.txt" | xargs -0 -n 200 codesign --force --options runtime $TS --sign "$SIGN_ID" 2>> "$LOG" || sign_failed
 find "$OUT/Contents/Resources/python/bin" -type f -perm -u+x -print0 | while IFS= read -r -d '' f; do
   if file -b "$f" | grep -q Mach-O; then sign --entitlements "$MAC/HearChurch/Python.entitlements" "$f"; fi
 done
@@ -79,7 +100,10 @@ sign "$SPK/Autoupdate"
 sign "$SPK/Updater.app"
 sign "$OUT/Contents/Frameworks/Sparkle.framework"
 sign --entitlements "$MAC/HearChurch/HearChurch.entitlements" "$OUT"
-codesign --verify --strict "$OUT"
+codesign --verify --deep --strict "$OUT"
+while IFS= read -r f; do
+  codesign --verify --strict "$f" 2>/dev/null || { echo "not signed: $f" >&2; exit 1; }
+done < "$MACHO_LIST"
 echo "signed"
 
 du -sh "$OUT" | sed 's/^/size: /'
