@@ -7,7 +7,8 @@
 #
 # The app contains a standalone CPython (python-build-standalone, via uv) with the locked dependencies,
 # and the engine code (app/, web/, models shipped in the repo). Voices and speech models are downloaded
-# on first use, not bundled.
+# on first use, not bundled, and so are the libraries only the Wolof voice needs (torch, transformers):
+# Developer ID builds make that download with wolof_libs.sh.
 set -euo pipefail
 cd "$(dirname "$0")"
 MAC="$PWD"
@@ -31,7 +32,10 @@ if [[ "${1:-}" != "--app-only" || ! -d "$STAGE/python" ]]; then
 
   step "Python packages (from uv.lock)"
   (cd "$REPO" && uv export --quiet --frozen --no-dev --no-hashes --no-emit-project -o "$STAGE/requirements.txt")
-  uv pip install --quiet --python "$PY" --link-mode copy --compile-bytecode -r "$STAGE/requirements.txt"
+  "$PY" -I "$MAC/split_requirements.py" "$REPO/uv.lock" "$STAGE/requirements.txt" "$STAGE/app.txt" "$STAGE/wolof.txt"
+  uv pip install --quiet --python "$PY" --no-deps --link-mode copy --compile-bytecode -r "$STAGE/app.txt"
+  # A package wrongly left out would only show up on a church's Mac, so try the imports here.
+  "$PY" -I -c 'import importlib.util as u, anthropic, fastapi, huggingface_hub, mlx_whisper, onnxruntime, piper; assert u.find_spec("torch") is None'
   # Not needed at run time; saves space.
   rm -rf "$STAGE/python/lib/python$PY_VERSION/test" "$STAGE/python/lib/python$PY_VERSION/idlelib" \
          "$STAGE/python/lib/python$PY_VERSION/tkinter" "$STAGE/python/lib/python$PY_VERSION/turtledemo"
@@ -50,6 +54,15 @@ rsync -a --delete --exclude "__pycache__" "$REPO/app" "$REPO/web" "$STAGE/engine
 rsync -a "$REPO/models/silero_vad.onnx" "$REPO/models/wolof" "$STAGE/engine/models/"
 cp "$REPO/config.toml" "$REPO/glossary.json" "$REPO/glossary.wo.json" "$REPO/LICENSE" "$REPO/THIRD_PARTY_NOTICES.md" "$STAGE/engine/"
 "$STAGE/python/bin/python3" -m compileall -q "$STAGE/engine/app"
+rm -f "$STAGE/engine/wolof_libs.json"
+if [[ "$SIGN_ID" == "Developer ID"* ]]; then
+  step "Wolof libraries"
+  LIBS_ID="$("$MAC/wolof_libs.sh" "$STAGE/python/bin/python3" "$STAGE/wolof.txt" "$PY_VERSION" "$SIGN_ID")"
+  cp "$MAC/wolof-libs/$LIBS_ID.json" "$STAGE/engine/wolof_libs.json"
+  du -h "$MAC/wolof-libs/$LIBS_ID.tar.gz"
+else
+  echo "(development build: no Wolof voice unless run from a checkout with EngineDir)"
+fi
 
 step "Swift app"
 xcodegen generate --quiet
@@ -71,19 +84,7 @@ LOG="$MAC/build/sign.log"
 : > "$LOG"
 sign_failed() { grep -v "replacing existing signature" "$LOG" >&2; echo "signing failed" >&2; exit 1; }
 sign() { codesign --force --options runtime $TS --sign "$SIGN_ID" "$@" 2>> "$LOG" || sign_failed; }
-# Found by their first bytes, not their names: torch ships programs with no extension in torch/bin.
-machos() {
-  "$STAGE/python/bin/python3" -I -c '
-import os, sys
-MAGIC = {bytes.fromhex(m) for m in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca")}
-for folder, _, files in os.walk(sys.argv[1]):
-    for name in files:
-        path = os.path.join(folder, name)
-        if not os.path.islink(path) and open(path, "rb").read(4) in MAGIC:
-            print(path, end="\0")
-' "$1"
-}
-machos "$OUT/Contents/Resources" > "$MAC/build/machos.txt"
+"$STAGE/python/bin/python3" -I "$MAC/machos.py" "$OUT/Contents/Resources" > "$MAC/build/machos.txt"
 python3 -I -c '
 import sys
 paths = open(sys.argv[1], "rb").read().split(b"\0")

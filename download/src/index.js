@@ -2,11 +2,11 @@
 //
 //   /download                  the page (version and size from latest.json)
 //   /download/HearChurch.dmg   always the newest DMG (the link to share); counted, anonymously, in D1
-//   /download/<file>           a versioned DMG or Sparkle delta from R2
+//   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
 //   /privacy, /terms           the legal pages
 //
-// R2 holds what mac/release.sh uploads: HearChurch-<version>.dmg, *.delta, appcast.xml, latest.json.
+// R2 holds what mac/release.sh uploads: HearChurch-<version>.dmg, *.delta, wolof-libs-*.tar.gz, appcast.xml, latest.json.
 import PAGE from "./page.html";
 import PRIVACY from "./privacy.html";
 import TERMS from "./terms.html";
@@ -35,7 +35,7 @@ export default {
       return response;
     }
     const name = path.slice("/download/".length);
-    if (path.startsWith("/download/") && /^[\w.-]+\.(dmg|delta)$/.test(name)) {
+    if (path.startsWith("/download/") && /^[\w.-]+\.(dmg|delta|tar\.gz)$/.test(name)) {
       const type = name.endsWith(".dmg") ? "application/x-apple-diskimage" : "application/octet-stream";
       return file(request, env, name, type, "public, max-age=31536000, immutable", name);
     }

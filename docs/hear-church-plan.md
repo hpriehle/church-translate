@@ -33,7 +33,13 @@ Working notes for whoever continues:
   losing it strands every install). `hearchurch.com/download*` and `/appcast.xml` are the
   `hearchurch-download` Worker (`download/`, `wrangler deploy`) serving R2 bucket `hearchurch-downloads`;
   the rest of the site stays on the VPS. Release with `mac/release.sh <version>` (Keychain items
-  `hearchurch-r2` and notary profile `hearchurch-notary` are set up on this Mac). Not released yet.
+  `hearchurch-r2` and notary profile `hearchurch-notary` are set up on this Mac). `release.sh <version>`
+  stops at a notarized DMG in `mac/dist/`; `--publish` ships that same file. Not released yet.
+- torch and transformers are not in the app (797 MB, DMG 358 MB). `mac/split_requirements.py` separates what
+  only they need; `mac/wolof_libs.sh` builds it, signed, as `mac/wolof-libs/wolof-libs-<id>.tar.gz` (id from
+  the pinned versions, so rebuilt only when they change) and release.sh uploads it to R2. The app carries
+  `wolof_libs.json` (URL + hash); `app/packages.py` fetches it with the Wolof voice into
+  `<app data>/packages/`. Keep `torch/bin/torch_shm_manager`: torch needs it to import.
 - Phase 3 left for later: auto-stop after ~10 min of silence, optional auto-start at meeting time,
   moving the building pin after setup (`/api/hc/location` exists), screenshots in the API-key guide,
   the "free first Sunday" button (disabled until Phase 5).
@@ -205,7 +211,7 @@ Open the lid → the app is already open (launch at login) → one big **Start**
   | Speech model (Whisper large-v3-turbo), always needed | ~1.6 GB |
   | French voices (Piper) | ~60–130 MB |
   | Spanish / Russian voices (Piper) | ~60–120 MB each |
-  | Wolof (SpeechT5 + vocoder) | measure (torch) |
+  | Wolof (SpeechT5 + vocoder + torch libraries) | ~835 MB (~1.4 GB on disk) |
 
   Hosted on the VPS or a CDN, and checked by hash.
 - **Keeping awake:** `IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep)`

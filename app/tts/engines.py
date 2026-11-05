@@ -212,6 +212,9 @@ _MMS_LOADED: dict = {}
 
 
 def _torch_available() -> bool:
+    from ..packages import activate_libs
+
+    activate_libs()   # the Mac app downloads these with the Wolof voice
     try:
         import torch  # noqa: F401
         import transformers  # noqa: F401

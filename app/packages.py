@@ -3,19 +3,29 @@
 Speech recognition and the Wolof voice come from the Hugging Face cache (~/.cache/huggingface); the French
 Piper voices go to PIPER_DIR. Each package reports its size and, while downloading, the bytes on disk so far.
 Phase 4 adds hashes, more languages and our own download host.
+
+The Wolof voice also needs torch and transformers (about 800 MB), which the Mac app leaves out and fetches
+from hearchurch.com with that voice: wolof_libs.json in the app names the signed archive and its hash
+(mac/wolof_libs.sh builds it). From a checkout there is no such file: the libraries are in the virtualenv.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import importlib
+import json
 import logging
 import os
+import shutil
+import sys
+import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 import httpx
 
-from .config import PIPER_DIR
+from .config import HOME, PIPER_DIR, ROOT
 
 log = logging.getLogger("packages")
 
@@ -24,6 +34,26 @@ FRENCH_VOICES = ("tom", "siwis")
 WOLOF_REPOS = ("bilalfaye/speecht5_tts-wolof", "microsoft/speecht5_hifigan")
 # Download sizes in MB (measured), shown before a download starts and used for its progress.
 SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634}
+LIBS_MANIFEST = ROOT / "wolof_libs.json"
+LIBS_DIR = HOME / "packages"
+
+
+def _libs() -> dict[str, Any] | None:
+    """The Wolof libraries this version of the app downloads, or None if it has them already."""
+    try:
+        return json.loads(LIBS_MANIFEST.read_text())
+    except FileNotFoundError:
+        return None
+
+
+def activate_libs() -> None:
+    """Make downloaded libraries importable. They go last: what the app ships always wins."""
+    libs = _libs()
+    if libs:
+        path = str(LIBS_DIR / libs["id"])
+        if os.path.isdir(path) and path not in sys.path:
+            sys.path.append(path)
+            importlib.invalidate_caches()
 
 
 @dataclass
@@ -33,6 +63,7 @@ class Package:
     size_mb: int
     hf_repos: tuple[str, ...] = ()
     piper_voices: tuple[str, ...] = ()
+    libs: dict[str, Any] | None = None
     state: str = "unknown"       # "ready" | "missing" | "downloading" | "failed"
     error: str = ""
     done_bytes: int = 0
@@ -85,7 +116,9 @@ def package_for(code: str, stt_model: str) -> Package | None:
     if code == "fr":
         return Package("fr", "French voices", SIZES_MB["fr"], piper_voices=FRENCH_VOICES)
     if code == "wo":
-        return Package("wo", "Wolof voice", SIZES_MB["wo"], hf_repos=WOLOF_REPOS)
+        libs = _libs()
+        size = SIZES_MB["wo"] + (round(libs["size"] / 1e6) if libs else 0)
+        return Package("wo", "Wolof voice", size, hf_repos=WOLOF_REPOS, libs=libs)
     return None
 
 
@@ -119,11 +152,20 @@ class Packages:
     def _present(p: Package) -> bool:
         if not all(_hf_cached(r) for r in p.hf_repos):
             return False
+        if p.libs and not (LIBS_DIR / p.libs["id"]).is_dir():
+            return False
         return all(dest.exists() for v in p.piper_voices for _, dest in _piper_files(v))
 
     @staticmethod
     def _done_bytes(p: Package) -> int:
         n = sum(_bytes_in(_hf_dir(r)) for r in p.hf_repos)
+        if p.libs:
+            archive = LIBS_DIR / f'{p.libs["id"]}.tar.gz'
+            part = archive.with_name(archive.name + ".part")
+            if part.exists():
+                n += part.stat().st_size
+            elif archive.exists() or (LIBS_DIR / p.libs["id"]).is_dir():
+                n += p.libs["size"]
         for v in p.piper_voices:
             for _, dest in _piper_files(v):
                 for f in (dest, dest.with_name(dest.name + ".part")):
@@ -141,6 +183,10 @@ class Packages:
         from huggingface_hub import snapshot_download
 
         try:
+            if p.libs and not (LIBS_DIR / p.libs["id"]).is_dir():
+                archive = LIBS_DIR / f'{p.libs["id"]}.tar.gz'
+                await _fetch(p.libs["url"], archive)
+                await asyncio.to_thread(_unpack_libs, archive, p.libs)
             for repo in p.hf_repos:
                 await asyncio.to_thread(snapshot_download, repo)
             for v in p.piper_voices:
@@ -166,6 +212,29 @@ async def _fetch(url: str, dest: Path) -> None:
                 async for chunk in r.aiter_bytes(1 << 16):
                     f.write(chunk)
     part.replace(dest)
+
+
+def _unpack_libs(archive: Path, libs: dict[str, Any]) -> None:
+    """Check the archive against the hash the signed app carries, unpack it, and drop any older version."""
+    digest = hashlib.sha256()
+    with open(archive, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    if digest.hexdigest() != libs["sha256"]:
+        archive.unlink()
+        raise RuntimeError("the Wolof libraries download was damaged")
+    work = LIBS_DIR / f'{libs["id"]}.unpacking'
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    with tarfile.open(archive) as tar:
+        tar.extractall(work, filter="data")
+    (work / libs["id"]).rename(LIBS_DIR / libs["id"])   # all at once: a partial folder never counts as installed
+    shutil.rmtree(work)
+    archive.unlink()
+    for old in LIBS_DIR.glob("wolof-libs-*"):
+        if old.is_dir() and old.name != libs["id"]:
+            shutil.rmtree(old, ignore_errors=True)
+    activate_libs()
 
 
 PACKAGES = Packages()

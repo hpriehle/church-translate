@@ -16,3 +16,4 @@ mac/build/
 mac/HearChurch.xcodeproj/
 mac/dist/
 download/.wrangler/
+mac/wolof-libs/
