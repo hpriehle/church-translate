@@ -84,3 +84,6 @@ select.inline { display:inline-block; width:auto; margin-left:.5rem; padding:.15
 /* Inside the Hear Church Mac app: the app manages Claude access, restarts and the listener link. */
 .app .app-hide { display: none !important; }
 body:not(.app) .app-only { display: none; }
+
+.mic-warning { background:var(--bad); color:#fff; font-size:18px; font-weight:600; padding:14px 20px; text-align:center; }
+.mic-warning[hidden] { display:none; }

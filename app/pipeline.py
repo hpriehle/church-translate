@@ -39,6 +39,7 @@ class Pipeline:
         self.records: dict[int, ChunkRecord] = {}
         self.stt_exec = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
         self.stt_ready = asyncio.Event()
+        self.stt_loading = False
         self.loop: asyncio.AbstractEventLoop | None = None
 
         self.worker: CaptureWorker | None = None
@@ -91,12 +92,27 @@ class Pipeline:
             ch.start_tasks()
 
     async def load_stt(self) -> None:
+        """Load speech recognition (once; safe to call again after a failure or a finished download)."""
+        if self.stt.ready or self.stt_loading:
+            return
+        self.stt_loading = True
         try:
             await asyncio.get_running_loop().run_in_executor(self.stt_exec, self.stt.load)
             self.stt_ready.set()
+            if self.last_error.startswith("Speech recognition failed"):
+                self.last_error = ""
         except Exception as e:
             self.last_error = f"Speech recognition failed to load: {e}"
             log.exception("STT load failed")
+        finally:
+            self.stt_loading = False
+
+    def mic_info(self) -> dict[str, Any]:
+        """`mic_name` / `mic_warning` for /api/status: the microphone in use and why it isn't delivering sound."""
+        src = self.worker.source if self.worker else None
+        if src is None or not hasattr(src, "warning"):
+            return {"mic_name": None, "mic_warning": None}
+        return {"mic_name": getattr(src, "name", None), "mic_warning": src.warning}
 
     def start(self, kind: str, device: str | None = None, file: str | Path | None = None,
               speed: float = 1.0, start_s: float = 0.0, max_s: float | None = None,

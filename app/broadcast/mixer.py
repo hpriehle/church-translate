@@ -64,6 +64,8 @@ class Mixer:
         self._pos = 0
         self._task: asyncio.Task | None = None
         self.underruns = 0
+        self._frame_errors = 0
+        self._last_err_log = -1e9
 
     # ------------------------------------------------------------ queue
     def enqueue(self, clip: Clip, drop_above_s: float | None = None, drop_to_s: float | None = None) -> list[Clip]:
@@ -136,9 +138,16 @@ class Mixer:
                 self.underruns += 1
                 next_t = now
             while next_t <= time.monotonic():
-                frame = self._next_frame()
-                if self.on_frame:
-                    self.on_frame(frame)
+                # The clock must never die from one bad frame or a failing consumer.
+                try:
+                    frame = self._next_frame()
+                    if self.on_frame:
+                        self.on_frame(frame)
+                except Exception:
+                    self._frame_errors += 1
+                    if time.monotonic() - self._last_err_log >= 30:
+                        self._last_err_log = time.monotonic()
+                        log.exception("mixer frame failed (%d so far); continuing", self._frame_errors)
                 next_t += TICK_S
             await asyncio.sleep(max(0.0, next_t - time.monotonic()))
 

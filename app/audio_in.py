@@ -94,6 +94,17 @@ class Source:
 
 
 class MicSource(Source):
+    """A PortAudio input device, chosen ONCE here by name (or the system default at that moment).
+
+    The device is pinned for the whole meeting: we never ask for "the default input" again, so when macOS
+    switches its default (AirPods connecting, a monitor's mic appearing) we keep listening to the chosen mic.
+    If that mic stops delivering sound, `warning` is set, the meeting keeps running and we keep trying to
+    reopen the SAME device by name; we never fall back to another one.
+    """
+
+    STALL_S = 4.0     # no audio block for this long = the microphone has stopped
+    RETRY_S = 2.0     # how often to try to reopen it
+
     def __init__(self, device_name: str = "", channel: int = 0):
         if sd is None:
             raise RuntimeError("sounddevice/PortAudio is not available on this machine")
@@ -102,12 +113,15 @@ class MicSource(Source):
         if dev is None:
             raise RuntimeError("no audio input device found")
         self.device = dev
+        self.name = dev["name"]          # pinned: reopening looks this exact name up again
         self.channel = channel
         self.native_sr = dev["samplerate"]
         self.label = f"input: {dev['name']}"
+        self.warning: str | None = None  # short sentence for the operator while the mic is not delivering sound
         self._q: queue.Queue = queue.Queue(maxsize=500)
         self._stop = threading.Event()
         self._stream = None
+        self._stream_dead = False
 
     def _callback(self, indata, frames, time_info, status):  # PortAudio thread
         if status:
@@ -121,17 +135,59 @@ class MicSource(Source):
         except queue.Full:
             pass
 
+    def _finished(self) -> None:  # PortAudio thread: the stream ended on its own (device unplugged, error)
+        self._stream_dead = True
+
+    def _open(self) -> None:
+        """Open the pinned device. Raises if it cannot be opened."""
+        global _active_streams
+        # To read input channel N we must open N channels; otherwise mix down up to 2.
+        channels = min(self.device["channels"], self.channel) if self.channel else min(self.device["channels"], 2)
+        self._stream_dead = False
+        stream = sd.InputStream(device=self.device["index"], channels=channels,
+                                samplerate=self.native_sr, dtype="float32",
+                                blocksize=int(self.native_sr * 0.05), callback=self._callback,
+                                finished_callback=self._finished)
+        stream.start()
+        self._stream = stream
+        _active_streams += 1
+
+    def _close(self) -> None:
+        global _active_streams
+        stream, self._stream = self._stream, None
+        if stream is None:
+            return
+        _active_streams = max(0, _active_streams - 1)
+        for fn in (stream.stop, stream.close):
+            try:
+                fn()
+            except Exception:
+                pass
+
+    def _reopen_same(self) -> bool:
+        """Find our device again BY NAME in a fresh device list and open it. No fallback to another device."""
+        self._close()                         # PortAudio may only re-scan devices while no stream is open
+        refresh_devices()
+        dev = next((d for d in list_input_devices() if d["name"] == self.name), None)
+        if dev is None:
+            self.warning = (f"The microphone “{self.name}” isn't connected. Plug it back in — "
+                            "translation resumes when it's back.")
+            return False
+        self.device, self.native_sr = dev, dev["samplerate"]
+        try:
+            self._open()
+        except Exception as e:
+            log.info("mic %s: reopen failed: %s", self.name, e)
+            self.warning = (f"The microphone “{self.name}” stopped sending sound. Check its cable — "
+                            "translation resumes when it's back.")
+            return False
+        return True
+
     def blocks(self):
         import soxr
 
-        # To read input channel N we must open N channels; otherwise mix down up to 2.
-        global _active_streams
-        channels = min(self.device["channels"], self.channel) if self.channel else min(self.device["channels"], 2)
         try:
-            self._stream = sd.InputStream(device=self.device["index"], channels=channels,
-                                          samplerate=self.native_sr, dtype="float32",
-                                          blocksize=int(self.native_sr * 0.05), callback=self._callback)
-            self._stream.start()
+            self._open()
         except Exception as e:
             hint = ""
             if sys.platform == "darwin":
@@ -139,22 +195,37 @@ class MicSource(Source):
                         "Settings → Privacy & Security → Microphone (turn on python3 / uv), or record from the "
                         "speak page (http://localhost:8000/speak) instead.")
             raise RuntimeError(f"cannot open {self.device['name']}: {e}{hint}") from e
-        _active_streams += 1
         rs = soxr.ResampleStream(self.native_sr, SR, 1, dtype="float32", quality="HQ")
         log.info("capturing from %s @ %d Hz", self.device["name"], self.native_sr)
+        last_audio = time.monotonic()
+        next_retry = 0.0
         try:
             while not self._stop.is_set():
                 try:
                     block, t = self._q.get(timeout=0.2)
                 except queue.Empty:
+                    now = time.monotonic()
+                    if self._stream is not None and (self._stream_dead or now - last_audio > self.STALL_S):
+                        log.warning("mic %s stopped sending audio", self.name)
+                        self.warning = (f"The microphone “{self.name}” stopped sending sound. Check its cable — "
+                                        "translation resumes when it's back.")
+                        self._close()
+                        next_retry = now + self.RETRY_S
+                    elif self._stream is None and now >= next_retry:
+                        next_retry = now + self.RETRY_S
+                        if self._reopen_same():
+                            log.info("mic %s is back", self.name)
+                            rs = soxr.ResampleStream(self.native_sr, SR, 1, dtype="float32", quality="HQ")
+                            last_audio = now   # warning clears when the first block arrives
                     continue
+                last_audio = time.monotonic()
+                if self.warning:
+                    self.warning = None
                 out = rs.resample_chunk(block)
                 if len(out):
                     yield out, t
         finally:
-            self._stream.stop()
-            self._stream.close()
-            _active_streams = max(0, _active_streams - 1)
+            self._close()
 
     def stop(self):
         self._stop.set()

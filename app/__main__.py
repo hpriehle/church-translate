@@ -30,7 +30,7 @@ def main() -> None:
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
 
-    LOG_DIR.mkdir(exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)-9s %(message)s",
@@ -57,7 +57,15 @@ def main() -> None:
 
     # The app shows the operator page itself, and only this Mac may open it (app/main.py _role). Other devices
     # on the Wi-Fi may only listen, with local sharing and the meeting's key (_may_listen).
-    host = "0.0.0.0" if args.app else settings.server.host
+    # The app binds 127.0.0.1 (no macOS "accept incoming connections?" prompt) unless local sharing is on at
+    # launch ([server].sharing == "local" in the saved settings): then 0.0.0.0, so phones on the Wi-Fi reach
+    # the listening page. Changing the setting while running needs an engine restart; /api/status reports
+    # `restart_required` and `listening_on` for the Swift app.
+    if args.app:
+        host = "0.0.0.0" if settings.server.sharing == "local" else "127.0.0.1"
+    else:
+        host = settings.server.host
+    appmod.S.bind_host = host
     if settings.server.open_browser and not args.no_browser and not args.exit_when_done and not args.app:
         def _open():
             time.sleep(2.5)
@@ -65,7 +73,7 @@ def main() -> None:
         threading.Thread(target=_open, daemon=True).start()
 
     uvicorn.run(appmod.app, host=host, port=port, log_level="warning",
-                ws_ping_interval=20, ws_ping_timeout=30, timeout_keep_alive=30)
+                ws_ping_interval=20, ws_ping_timeout=30, timeout_keep_alive=30, timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":

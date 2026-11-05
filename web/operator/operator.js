@@ -402,6 +402,8 @@
   function updateStatus(st) {
     syncLangSwitches(st);
     showEngine(st.engine);
+    const mw = $("micWarning");   // the microphone stopped sending sound: shown loudly until it is back
+    mw.hidden = !st.mic_warning; mw.textContent = st.mic_warning || "";
     const p = st.pipeline, t = st.translate;
     const badge = $("live");
     if (p.running) { badge.className = "badge on"; badge.textContent = p.capturing ? "LIVE" : "FINISHING"; }

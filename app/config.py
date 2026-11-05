@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # default; the Hear Church Mac app sets HEARCHURCH_HOME to ~/Library/Application Support/Hear Church because
 # the code itself sits read-only inside the signed app.
 HOME = Path(os.environ["HEARCHURCH_HOME"]).expanduser() if os.environ.get("HEARCHURCH_HOME") else ROOT
+if os.environ.get("HEARCHURCH_HOME"):
+    # The Mac app: downloaded models (Whisper, Wolof) go to its data folder, never ~/.cache. Set before
+    # huggingface_hub is imported anywhere (it reads this once at import).
+    os.environ.setdefault("HF_HOME", str(HOME / "models" / "huggingface"))
 CONFIG_PATH = ROOT / "config.toml"
 # Per platform, because the project folder may be synced between a Mac and a Linux box
 # (e.g. Syncthing) and each needs its own engines/voices: overrides.darwin.json, overrides.linux.json.

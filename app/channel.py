@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
@@ -47,6 +48,7 @@ class Channel:
         self.avg_clip_s = 4.0
         self.avg_tts_s = 0.5
         self.recording = None
+        self._last_stage_log: dict[str, float] = {}
         self.on = True           # translating into this language (switched live on the operator page)
         self._started = False
         self._tasks: list[asyncio.Task] = []
@@ -87,96 +89,129 @@ class Channel:
         }
 
     # ------------------------------------------------------------ stages
+    def _log_stage_error(self, stage: str, rec: ChunkRecord, merged: list[ChunkRecord] | None = None) -> None:
+        """One bad record must not kill the language: log it (traceback at most every 30 s), mark it failed."""
+        now = time.monotonic()
+        if now - self._last_stage_log.get(stage, -1e9) >= 30:
+            self._last_stage_log[stage] = now
+            log.exception("[%s] %s stage failed on #%s (continuing)", self.code, stage, rec.seq)
+        else:
+            log.warning("[%s] %s stage failed on #%s (continuing): %r", self.code, stage, rec.seq, sys.exc_info()[1])
+        for r in [rec, *(merged or [])]:
+            res = r.out.get(self.code)
+            if res is not None and res.status not in ("aired", "dropped", "skipped", "merged", "failed"):
+                res.status, res.note = "failed", f"{stage}: internal error"
+            try:
+                self.p.lang_done(r)
+            except Exception:
+                log.exception("[%s] could not finish #%s", self.code, r.seq)
+
     async def _mt_stage(self) -> None:
         while True:
             rec = await self.mt_q.get()
-            res = rec.out[self.code]
-            english = rec.en
-            # Falling behind? Translate the waiting chunks together in one request.
-            merged: list[ChunkRecord] = []
-            while not self.mt_q.empty() and len(merged) < 3:
-                merged.append(self.mt_q.get_nowait())
-            if merged:
-                english = " ".join([rec.en] + [m.en for m in merged])
-                res.merged = [m.seq for m in merged]
-                res.t_ref_end = merged[-1].t_speech_end
-                for m in merged:
-                    mr = m.out[self.code]
-                    mr.status, mr.note = "merged", f"merged into #{rec.seq}"
-                    self.p.lang_done(m)
-            res.condensed = self.backlog.update_condense(self.total_backlog())
             try:
-                tr = await self.translator.translate(english, res.condensed)
-            except Exception as e:  # pragma: no cover
-                log.exception("[%s] translate crashed", self.code)
-                res.status, res.note = "failed", f"translate: {e}"
-                self.p.lang_done(rec)
-                continue
-            res.mt_ms = round(tr.ms, 1)
-            res.engine = tr.engine
-            res.note = tr.note
-            if not tr.text:
-                res.status = "failed" if tr.engine == "none" else "skipped"
-                self.p.lang_done(rec)
-                continue
-            res.text = tr.text
-            res.t_caption = time.monotonic()
-            res.status = "captioned"
-            self.caption_no += 1
-            res.caption_no = self.caption_no
-            self.hub.publish({"type": "caption", "seq": res.caption_no, "session": self.p.session_id,
-                              "lang": self.code, "text": tr.text, "ts": time.time()}, remember=True)
-            self.p.publish_rec(rec)
-            await self.tts_q.put(rec)
+                await self._mt_one(rec)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._log_stage_error("translate", rec)
+
+    async def _mt_one(self, rec: ChunkRecord) -> None:
+        res = rec.out[self.code]
+        english = rec.en
+        # Falling behind? Translate the waiting chunks together in one request.
+        merged: list[ChunkRecord] = []
+        while not self.mt_q.empty() and len(merged) < 3:
+            merged.append(self.mt_q.get_nowait())
+        if merged:
+            english = " ".join([rec.en] + [m.en for m in merged])
+            res.merged = [m.seq for m in merged]
+            res.t_ref_end = merged[-1].t_speech_end
+            for m in merged:
+                mr = m.out[self.code]
+                mr.status, mr.note = "merged", f"merged into #{rec.seq}"
+                self.p.lang_done(m)
+        res.condensed = self.backlog.update_condense(self.total_backlog())
+        try:
+            tr = await self.translator.translate(english, res.condensed)
+        except Exception as e:  # pragma: no cover
+            log.exception("[%s] translate crashed", self.code)
+            res.status, res.note = "failed", f"translate: {e}"
+            self.p.lang_done(rec)
+            return
+        res.mt_ms = round(tr.ms, 1)
+        res.engine = tr.engine
+        res.note = tr.note
+        if not tr.text:
+            res.status = "failed" if tr.engine == "none" else "skipped"
+            self.p.lang_done(rec)
+            return
+        res.text = tr.text
+        res.t_caption = time.monotonic()
+        res.status = "captioned"
+        self.caption_no += 1
+        res.caption_no = self.caption_no
+        self.hub.publish({"type": "caption", "seq": res.caption_no, "session": self.p.session_id,
+                          "lang": self.code, "text": tr.text, "ts": time.time()}, remember=True)
+        self.p.publish_rec(rec)
+        await self.tts_q.put(rec)
 
     async def _tts_stage(self) -> None:
-        sr = self.mixer.sr
         while True:
             rec = await self.tts_q.get()
-            res = rec.out[self.code]
-            # Hard cap on delay even when the voice itself is the bottleneck: don't voice what is
-            # already too far behind the speaker (its caption has been shown).
-            age = time.monotonic() - (res.t_ref_end or rec.t_speech_end)
-            projected = age + self.avg_tts_s + self.mixer.backlog_s   # when this would start playing
-            if projected > self.backlog.drop_above_s:
-                res.status, res.note = "dropped", f"audio skipped (would start {projected:.0f}s behind)"
-                self.p.lang_done(rec)
-                continue
-            spoken = unspoken(res.text)   # masked swear words are skipped, not read out
-            if not spoken:
-                res.status, res.note = "dropped", "only masked words: nothing to say"
-                self.p.lang_done(rec)
-                continue
-            speed = self.backlog.speed_for(self.total_backlog())
             try:
-                pcm, ms = await self.tts.synth(speechify(self.code, spoken), speed)
-            except Exception as e:
-                log.warning("[%s] tts failed: %s", self.code, e)
-                res.status, res.note = "failed", (res.note + f" tts: {e}").strip()
-                self.p.lang_done(rec)
-                continue
-            res.tts_ms = round(ms, 1)
-            self.avg_tts_s = 0.7 * self.avg_tts_s + 0.3 * ms / 1000
-            res.speed = speed
-            res.t_audio_ready = time.monotonic()
-            clip = Clip(rec.seq, pcm, {"t_ref": res.t_ref_end or rec.t_speech_end})
-            dropped = self.mixer.enqueue(clip, self.backlog.drop_above_s, self.backlog.drop_to_s)
-            res.clip_s = round(clip.duration(sr), 2)
-            self.avg_clip_s = 0.8 * self.avg_clip_s + 0.2 * res.clip_s
-            res.backlog_at_enqueue = round(self.mixer.backlog_s, 2)
-            self.p.publish_rec(rec)
-            for d in dropped:
-                drec = self.p.records.get(d.seq)
-                if drec and self.code in drec.out:
-                    dr = drec.out[self.code]
-                    dr.status, dr.note = "dropped", "audio dropped (more than %.0fs behind)" % self.backlog.drop_above_s
-                    self.p.lang_done(drec)
-            # Clip-by-clip fallback mode for phones that use it.
-            mp3 = await asyncio.to_thread(encode_clip, clip.pcm, sr, self.p.settings.stream.bitrate_kbps)
-            self.clips[rec.seq] = mp3
-            while len(self.clips) > 80:
-                self.clips.popitem(last=False)
-            self.hub.publish({"type": "clip", "seq": res.caption_no, "url": f"/clips/{self.code}/{rec.seq}.mp3"})
+                await self._tts_one(rec)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._log_stage_error("voice", rec)
+
+    async def _tts_one(self, rec: ChunkRecord) -> None:
+        sr = self.mixer.sr
+        res = rec.out[self.code]
+        # Hard cap on delay even when the voice itself is the bottleneck: don't voice what is
+        # already too far behind the speaker (its caption has been shown).
+        age = time.monotonic() - (res.t_ref_end or rec.t_speech_end)
+        projected = age + self.avg_tts_s + self.mixer.backlog_s   # when this would start playing
+        if projected > self.backlog.drop_above_s:
+            res.status, res.note = "dropped", f"audio skipped (would start {projected:.0f}s behind)"
+            self.p.lang_done(rec)
+            return
+        spoken = unspoken(res.text)   # masked swear words are skipped, not read out
+        if not spoken:
+            res.status, res.note = "dropped", "only masked words: nothing to say"
+            self.p.lang_done(rec)
+            return
+        speed = self.backlog.speed_for(self.total_backlog())
+        try:
+            pcm, ms = await self.tts.synth(speechify(self.code, spoken), speed)
+        except Exception as e:
+            log.warning("[%s] tts failed: %s", self.code, e)
+            res.status, res.note = "failed", (res.note + f" tts: {e}").strip()
+            self.p.lang_done(rec)
+            return
+        res.tts_ms = round(ms, 1)
+        self.avg_tts_s = 0.7 * self.avg_tts_s + 0.3 * ms / 1000
+        res.speed = speed
+        res.t_audio_ready = time.monotonic()
+        clip = Clip(rec.seq, pcm, {"t_ref": res.t_ref_end or rec.t_speech_end})
+        dropped = self.mixer.enqueue(clip, self.backlog.drop_above_s, self.backlog.drop_to_s)
+        res.clip_s = round(clip.duration(sr), 2)
+        self.avg_clip_s = 0.8 * self.avg_clip_s + 0.2 * res.clip_s
+        res.backlog_at_enqueue = round(self.mixer.backlog_s, 2)
+        self.p.publish_rec(rec)
+        for d in dropped:
+            drec = self.p.records.get(d.seq)
+            if drec and self.code in drec.out:
+                dr = drec.out[self.code]
+                dr.status, dr.note = "dropped", "audio dropped (more than %.0fs behind)" % self.backlog.drop_above_s
+                self.p.lang_done(drec)
+        # Clip-by-clip fallback mode for phones that use it.
+        mp3 = await asyncio.to_thread(encode_clip, clip.pcm, sr, self.p.settings.stream.bitrate_kbps)
+        self.clips[rec.seq] = mp3
+        while len(self.clips) > 80:
+            self.clips.popitem(last=False)
+        self.hub.publish({"type": "clip", "seq": res.caption_no, "url": f"/clips/{self.code}/{rec.seq}.mp3"})
 
     def _on_air(self, clip: Clip, t: float) -> None:
         rec = self.p.records.get(clip.seq)

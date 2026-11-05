@@ -64,6 +64,7 @@ class State:
     engine_client: EngineClient | None = None    # this computer running another server's meetings
     argv: list[str] = []
     version: str = ""
+    bind_host: str = ""                          # the address the server listens on (set by `python -m app`)
 
 
 S = State()
@@ -148,8 +149,18 @@ def listener_url() -> str:
 
 
 def _code_version() -> str:
+    if S.app_mode:
+        # Never run git inside the app: on a Mac without the Command Line Tools /usr/bin/git pops up Apple's
+        # "install developer tools" dialog. The build writes the version into the bundle.
+        try:
+            return (ROOT / "VERSION").read_text().strip().splitlines()[0] or "app"
+        except Exception:
+            return "app"
+    git = shutil.which("git")
+    if not git:
+        return ""
     try:
-        return subprocess.run(["git", "-C", str(ROOT), "log", "-1", "--format=%h · %cd", "--date=format:%b %d %H:%M"],
+        return subprocess.run([git, "-C", str(ROOT), "log", "-1", "--format=%h · %cd", "--date=format:%b %d %H:%M"],
                               capture_output=True, text=True, timeout=5).stdout.strip()
     except Exception:
         return ""
@@ -200,6 +211,12 @@ def full_status() -> dict[str, Any]:
         "claude_access": claude_access(),
         "app_mode": S.app_mode,
         "sharing": S.settings.server.sharing,
+        # The microphone of the running meeting: null when no microphone is in use / all is well.
+        **S.pipeline.mic_info(),
+        # Where the engine listens. Turning local sharing on or off only takes effect after an engine restart.
+        "listening_on": S.bind_host or None,
+        "restart_required": bool(S.app_mode and S.bind_host and
+                                 (S.settings.server.sharing == "local") != (S.bind_host != "127.0.0.1")),
     }
 
 
@@ -240,8 +257,8 @@ async def lifespan(app: FastAPI):
     hear_api.setup(S.settings)
     from .packages import PACKAGES
 
-    PACKAGES.stt_model, PACKAGES.on_ready = S.settings.stt.model, _load_missing_voices
-    S.version = _code_version()
+    PACKAGES.stt_model, PACKAGES.on_ready = S.settings.stt.model, _package_ready
+    S.version = await asyncio.to_thread(_code_version)
     S.local_addrs = netinfo.local_addresses()
     new_listen_key()
     st = S.settings
@@ -262,8 +279,10 @@ async def lifespan(app: FastAPI):
         S.pipeline.add_channel(ch)
         ch.on = auto_on(lang.code) if lang.code in AUTO else lang.code in st.languages
     S.pipeline.start_tasks()
-    bg = [asyncio.create_task(status_loop()), asyncio.create_task(S.pipeline.load_stt()),
+    bg = [asyncio.create_task(status_loop()), asyncio.create_task(_ensure_stt()),
           asyncio.create_task(tunnel_loop())]
+    if S.app_mode:
+        bg.append(asyncio.create_task(_parent_watchdog()))
     for ch in S.pipeline.channels.values():
         ch.mixer.start()
         if ch.on:  # a language switched off stays unloaded until it is switched on
@@ -304,12 +323,55 @@ async def lifespan(app: FastAPI):
     log.info("Listener page: %s", url)
     log.info("Operator page: http://localhost:%d/operator", st.server.port)
     yield
+    S.pipeline.stop()   # stops the microphone
+    S.pipeline.release_awake()
+    try:   # tell the hub the meeting ended, so listeners don't wait on a dead session
+        if S.engine_client is not None and getattr(S.engine_client, "announced", False):
+            S.engine_client._send({"type": "session_stop"})
+            await asyncio.sleep(0.4)
+    except Exception:
+        log.exception("could not tell the hub the session ended")
     for t in bg:
         t.cancel()
-    S.pipeline.stop()
-    S.pipeline.release_awake()
     for ch in S.pipeline.channels.values():
         await ch.translator.close()
+
+
+async def _parent_watchdog() -> None:
+    """App mode: if the Mac app that started us dies, the engine is reparented (to launchd, pid 1). Quit within
+    ~2 s instead of lingering as an orphan that holds the port and the microphone."""
+    import os
+
+    parent = os.getppid()
+    while True:
+        await asyncio.sleep(0.5)
+        if os.getppid() != parent:
+            log.warning("parent process %s is gone: shutting down", parent)
+            _shutdown()
+            return
+
+
+async def _stt_downloaded() -> bool:
+    from .packages import PACKAGES
+
+    return await asyncio.to_thread(PACKAGES._present, PACKAGES.wanted([])[0])   # the "speech" package
+
+
+async def _ensure_stt() -> None:
+    """Load speech recognition if it isn't loaded. In the app the model is downloaded by the Packages system,
+    never silently by the first load: with no model yet this does nothing, and runs again when the speech
+    package becomes ready or the operator presses Start."""
+    pl = S.pipeline
+    if pl.stt.ready or pl.stt_loading:
+        return
+    if S.app_mode and not await _stt_downloaded():
+        return
+    await pl.load_stt()
+
+
+def _package_ready() -> None:
+    _load_missing_voices()
+    asyncio.create_task(_ensure_stt())
 
 
 def _shutdown() -> None:
@@ -765,7 +827,7 @@ async def ws_operator(ws: WebSocket):
 
 
 def _samples() -> list[dict]:
-    SAMPLES_DIR.mkdir(exist_ok=True)
+    SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     return [{"name": p.name, "mb": round(p.stat().st_size / 1e6, 1)}
             for p in sorted(SAMPLES_DIR.iterdir()) if p.suffix.lower() in AUDIO_EXT]
 
@@ -840,6 +902,10 @@ async def api_start(request: Request):
         raise HTTPException(400, f"A meeting is running on {S.engine_hub.name}: stop it first.")
     body = await request.json()
     kind = body.get("source", "mic")
+    if not S.pipeline.stt.ready:
+        if S.app_mode and not await _stt_downloaded():
+            raise HTTPException(400, "The speech model isn't downloaded yet. Download it first, then press Start.")
+        asyncio.create_task(_ensure_stt())   # downloaded but not loaded (or the last load failed): load it now
     try:
         if kind == "file":
             name = Path(body.get("file", "")).name
@@ -985,7 +1051,7 @@ async def api_upload(request: Request, file: UploadFile = File(...)):
     name = Path(file.filename or "upload").name
     if Path(name).suffix.lower() not in AUDIO_EXT:
         raise HTTPException(400, "unsupported file type")
-    SAMPLES_DIR.mkdir(exist_ok=True)
+    SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     dest = SAMPLES_DIR / name
     with open(dest, "wb") as f:
         while chunk := await file.read(1 << 20):
@@ -1024,7 +1090,7 @@ async def _restart_in_place() -> None:
         await asyncio.wait_for(asyncio.gather(*(ch.translator.close() for ch in S.pipeline.channels.values())), 8)
     except Exception:
         log.exception("cleanup before restart failed (continuing)")
-    git = shutil.which("git")
+    git = None if S.app_mode else shutil.which("git")   # never run git inside the app
     if S.settings.server.update_from_git and git and (ROOT / ".git").exists():
         proc = await asyncio.create_subprocess_exec(git, "pull", "--ff-only", "--quiet", cwd=str(ROOT))
         try:
