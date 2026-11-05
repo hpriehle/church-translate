@@ -48,3 +48,6 @@ h1.intro { font-weight: 600; }
 .opt-name { font-weight: 600; }
 .opt-city { color: var(--dim); }
 .dropdown .badge { margin-left: .5rem; vertical-align: 1px; }
+a { color: var(--accent); }
+footer.site { max-width: 34rem; margin: 0 auto; padding: 0 1.1rem 2rem; color: var(--dim); font-size: .85rem; text-align: center; }
+footer.site a, .privacy a { color: var(--dim); }

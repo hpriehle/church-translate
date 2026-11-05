@@ -9,28 +9,28 @@
   "use strict";
   const TEXT = {
     en: { intro: "Listen to your meeting in your language.", finding: "Finding meetings near you…",
-          privacy: "Your location stays on your phone.", locate: "Use my location", searchLink: "Search by name instead",
+          privacy: "Your approximate location is used only to find nearby congregations and is never stored.", privacyLink: "Privacy", locate: "Use my location", searchLink: "Search by name instead",
           searchLabel: "Your congregation's name", placeholder: "Ward, branch or parish name",
           denied: "Type your congregation's name.", unavailable: "We couldn't get your location. Type your congregation's name.",
           none: "No congregation within a mile of you. Type its name.", noMatch: "No congregation found with that name.",
           error: "Something went wrong. Try again.", live: "LIVE", startsAt: "starts {t}", since: "since {t}", mi: "mi",
           next: "Next: {d}", pick: "Tap your congregation." },
     fr: { intro: "Écoutez votre réunion dans votre langue.", finding: "Recherche des réunions près de vous…",
-          privacy: "Votre position reste sur votre téléphone.", locate: "Utiliser ma position", searchLink: "Chercher par nom",
+          privacy: "Votre position approximative sert uniquement à trouver les paroisses proches et n'est jamais conservée.", privacyLink: "Confidentialité", locate: "Utiliser ma position", searchLink: "Chercher par nom",
           searchLabel: "Le nom de votre paroisse", placeholder: "Nom de la paroisse ou de la branche",
           denied: "Tapez le nom de votre paroisse.", unavailable: "Impossible d'obtenir votre position. Tapez le nom de votre paroisse.",
           none: "Aucune paroisse à moins d'un mile. Tapez son nom.", noMatch: "Aucune paroisse trouvée avec ce nom.",
           error: "Un problème est survenu. Réessayez.", live: "EN DIRECT", startsAt: "début {t}", since: "depuis {t}", mi: "mi",
           next: "Prochaine : {d}", pick: "Touchez votre paroisse." },
     es: { intro: "Escuche su reunión en su idioma.", finding: "Buscando reuniones cerca de usted…",
-          privacy: "Su ubicación se queda en su teléfono.", locate: "Usar mi ubicación", searchLink: "Buscar por nombre",
+          privacy: "Su ubicación aproximada solo se usa para encontrar congregaciones cercanas y nunca se guarda.", privacyLink: "Privacidad", locate: "Usar mi ubicación", searchLink: "Buscar por nombre",
           searchLabel: "El nombre de su congregación", placeholder: "Nombre del barrio, rama o parroquia",
           denied: "Escriba el nombre de su congregación.", unavailable: "No pudimos obtener su ubicación. Escriba el nombre de su congregación.",
           none: "No hay congregaciones a menos de una milla. Escriba su nombre.", noMatch: "No se encontró ninguna congregación con ese nombre.",
           error: "Algo salió mal. Inténtelo de nuevo.", live: "EN VIVO", startsAt: "empieza {t}", since: "desde {t}", mi: "mi",
           next: "Próxima: {d}", pick: "Toque su congregación." },
     ru: { intro: "Слушайте собрание на вашем языке.", finding: "Ищем собрания рядом с вами…",
-          privacy: "Ваше местоположение остаётся на вашем телефоне.", locate: "Использовать моё местоположение", searchLink: "Искать по названию",
+          privacy: "Ваше примерное местоположение используется только для поиска ближайших общин и нигде не хранится.", privacyLink: "Конфиденциальность", locate: "Использовать моё местоположение", searchLink: "Искать по названию",
           searchLabel: "Название вашей общины", placeholder: "Название прихода или ветви",
           denied: "Введите название вашей общины.", unavailable: "Не удалось определить местоположение. Введите название вашей общины.",
           none: "В радиусе мили общин нет. Введите название.", noMatch: "Община с таким названием не найдена.",
@@ -43,7 +43,10 @@
   const fmt = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k]);
   document.documentElement.lang = TEXT[lang] ? lang : "en";
   $("intro").textContent = T.intro;
-  $("privacy").textContent = T.privacy;
+  $("privacy").textContent = T.privacy + " ";
+  const pl = document.createElement("a");
+  pl.href = "/privacy"; pl.textContent = T.privacyLink;
+  $("privacy").appendChild(pl);
   $("locate").textContent = T.locate;
   $("showSearch").textContent = T.searchLink;
   $("searchLabel").textContent = T.searchLabel;

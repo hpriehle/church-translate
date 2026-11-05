@@ -806,3 +806,104 @@ async def test_older_congregations_get_their_town_from_the_pin(hear):
     hear.db.set_town(c["id"], "")
     await hear_api.backfill_towns()
     assert hear.db.by_slug("old-ward")["city"] == "New York, NY"
+
+
+# ------------------------------------------------------------------ connect codes
+
+def _signup_with_code(client, hear):
+    hear.verify_email = False
+    r = client.post("/api/hc/signup", json=SIGNUP)
+    assert r.status_code == 200
+    return r.json()
+
+
+def test_signup_returns_a_connect_code(client, hear):
+    j = _signup_with_code(client, hear)
+    assert len(j["connect_code"]) == 6 and j["connect_code"].isdigit()
+    row = hear.db._q("SELECT connect_code_hash, connect_code_at FROM congregations")[0]
+    assert row["connect_code_hash"] == hash_token(j["connect_code"]) and row["connect_code_at"]
+    assert j["connect_code"] not in str(dict(row))
+
+
+def test_connect_with_the_code_gives_a_working_device(client, hear):
+    j = _signup_with_code(client, hear)
+    c = j["connect_code"]
+    spaced = f"{c[:3]} {c[3:]}"
+    r = client.post("/api/hc/connect", json={"slug": j["slug"], "code": spaced, "device_name": "Second Mac"})
+    assert r.status_code == 200
+    k = r.json()
+    assert k["ok"] and k["slug"] == j["slug"] and k["congregation"]["name"] == "Dakar Ward"
+    assert k["device_token"] != j["device_token"]
+    assert hear.db.device_by_token(k["device_token"])["name"] == "Second Mac"
+    dash = client.post("/api/hc/connect", json={"slug": j["slug"], "code": f"{c[:3]}-{c[3:]}"})
+    assert dash.status_code == 200
+    # the new token works as a bearer token
+    assert client.post("/api/hc/connect-code", headers={"Authorization": f"Bearer {k['device_token']}"}).status_code == 200
+
+
+def test_connect_errors(client, hear):
+    j = _signup_with_code(client, hear)
+    bad = "000000" if j["connect_code"] != "000000" else "111111"
+    r = client.post("/api/hc/connect", json={"slug": j["slug"], "code": bad})
+    assert r.status_code == 403 and r.json() == {"error": "bad_code"}
+    r = client.post("/api/hc/connect", json={"slug": "nope", "code": bad})
+    assert r.status_code == 404 and r.json() == {"error": "not_found"}
+
+
+def test_connect_without_a_code_set_is_bad_code(client, hear):
+    j = _signup_with_code(client, hear)
+    hear.db._x("UPDATE congregations SET connect_code_hash = NULL, connect_code_at = NULL")
+    r = client.post("/api/hc/connect", json={"slug": j["slug"], "code": "123456"})
+    assert r.status_code == 403 and r.json() == {"error": "bad_code"}
+
+
+def test_connect_locks_the_congregation_after_ten_failures(client, hear):
+    j = _signup_with_code(client, hear)
+    good = j["connect_code"]
+    bad = "000000" if good != "000000" else "111111"
+    for n in range(10):   # a different IP every 4 tries, so only the congregation limit trips
+        r = client.post("/api/hc/connect", json={"slug": j["slug"], "code": bad}, headers={"cf-connecting-ip": f"10.0.0.{n // 4}"})
+        assert r.status_code == 403
+    r = client.post("/api/hc/connect", json={"slug": j["slug"], "code": good}, headers={"cf-connecting-ip": "10.9.9.9"})
+    assert r.status_code == 429 and r.json()["error"] == "locked" and 0 < r.json()["retry_after"] <= 3600
+
+
+def test_connect_locks_an_ip_after_five_failures(client, hear):
+    j = _signup_with_code(client, hear)
+    bad = "000000" if j["connect_code"] != "000000" else "111111"
+    for _ in range(5):
+        assert client.post("/api/hc/connect", json={"slug": j["slug"], "code": bad}).status_code == 403
+    r = client.post("/api/hc/connect", json={"slug": j["slug"], "code": j["connect_code"]})
+    assert r.status_code == 429 and r.json()["error"] == "locked"
+
+
+def test_rotating_the_code_invalidates_the_old_one(client, hear):
+    j = _signup_with_code(client, hear)
+    old = j["connect_code"]
+    r = client.post("/api/hc/connect-code", headers={"Authorization": f"Bearer {j['device_token']}"})
+    assert r.status_code == 200
+    new = r.json()["connect_code"]
+    assert len(new) == 6 and new.isdigit()
+    if new != old:
+        assert client.post("/api/hc/connect", json={"slug": j["slug"], "code": old}).status_code == 403
+    assert client.post("/api/hc/connect", json={"slug": j["slug"], "code": new}).status_code == 200
+    assert client.post("/api/hc/connect-code").status_code == 403
+
+
+def test_old_database_without_connect_columns_migrates(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE congregations (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE,"
+                " church TEXT NOT NULL, name TEXT NOT NULL, unit_type TEXT NOT NULL, stake TEXT, address TEXT NOT NULL DEFAULT '',"
+                " lat REAL, lng REAL, meeting_times TEXT NOT NULL DEFAULT '[]', timezone TEXT NOT NULL DEFAULT '',"
+                " email TEXT NOT NULL, email_verified INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL,"
+                " hidden INTEGER NOT NULL DEFAULT 0, city TEXT NOT NULL DEFAULT '')")
+    con.execute("INSERT INTO congregations (slug, church, name, unit_type, email, created_at) VALUES ('old','c','Old Ward','ward','a@b.c',1)")
+    con.commit(); con.close()
+    db = Database(path)
+    cong = db.by_slug("old")
+    assert cong and not db.connect_code_ok(cong["id"], "123456")   # existing rows: no code yet
+    code = db.new_connect_code(cong["id"])
+    assert db.connect_code_ok(cong["id"], f"{code[:3]} {code[3:]}")

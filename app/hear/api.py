@@ -10,6 +10,9 @@ Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
   POST /api/hc/location     (device token) {lat, lng, [address]} or {address} (geocoded) → moves the building's pin
   POST /api/hc/device-link  {email, [slug, device_name]} → e-mails a magic link to add another Mac; the new Mac
                             then polls /api/hc/claim with the returned {claim} exactly like above
+  POST /api/hc/connect-code (device token) → {connect_code}: a new 6-digit code for the congregation (old one dies)
+  POST /api/hc/connect      {slug, code, device_name} → like claim's answer; 404 not_found, 403 bad_code,
+                            429 {error: locked, retry_after}. Signup (verify_email off) also returns connect_code.
 The claim secret stays with the app that asked, so a link opened by a mail scanner yields no token.
 Sign-up geocodes an address that came without lat/lng (Nominatim, or Mapbox with HEARCHURCH_MAPBOX_TOKEN). The
 answer says whether it worked ("located"); if not, lat/lng stay empty and the app should ask for a map pin and
@@ -60,10 +63,32 @@ class Hear:
         self.db, self.mailer, self.live = db, mailer, live
         self.verify_email = verify_email
         self.geocoder = geocoder or Geocoder()
+        self.connect_ip = FailureLimiter(5, 15 * 60)     # wrong codes per IP
+        self.connect_cong = FailureLimiter(10, 3600)     # wrong codes per congregation, then it is locked
         self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
                        "signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
                        "email_addr": RateLimiter(3, 3600), "claim": RateLimiter(1200, 3600),
                        "verify": RateLimiter(60, 3600)}
+
+
+class FailureLimiter:
+    """Counts failures only: locked(key) says for how many seconds a key is locked (0 = not)."""
+
+    def __init__(self, limit: int, window_s: float):
+        self.limit, self.window_s = limit, window_s
+        self.fails: dict[str, list[float]] = {}
+
+    def locked(self, key: str) -> int:
+        now = time.time()
+        recent = [t for t in self.fails.get(key, []) if now - t < self.window_s]
+        if recent:
+            self.fails[key] = recent
+        else:
+            self.fails.pop(key, None)
+        return 0 if len(recent) < self.limit else max(1, int(recent[0] + self.window_s - now) + 1)
+
+    def fail(self, key: str) -> None:
+        self.fails.setdefault(key, []).append(time.time())
 
 
 H: Hear | None = None
@@ -186,6 +211,7 @@ async def signup(request: Request, body: SignUp):
     if not h.verify_email:  # no e-mail confirmation for now: the congregation is live-capable at once
         h.db.set_verified(cong["id"])
         return {"ok": True, "slug": cong["slug"], "device_token": h.db.add_device(cong["id"], body.device_name),
+                "connect_code": h.db.new_connect_code(cong["id"]),
                 "congregation": _public(cong), **located, "message": "Signed up." + pin_note}
     claim = _send_link(request, cong, "verify", body.device_name)
     return {"ok": True, "slug": cong["slug"], "claim": claim, **located,
@@ -308,6 +334,45 @@ async def device_link(request: Request, body: DeviceLink):
         raise HTTPException(400, "More than one congregation uses that e-mail: say which one with slug.")
     claim_secret = _send_link(request, matches[0], "device", body.device_name) if matches else secrets.token_urlsafe(24)
     return {"ok": True, "claim": claim_secret, "message": "If that e-mail belongs to a congregation, a link was sent."}
+
+
+@router.post("/api/hc/connect-code")
+async def connect_code(request: Request):
+    """(device token) A NEW connect code for this device's congregation; the old one stops working."""
+    cong = _device_congregation(request)
+    return {"connect_code": _hear().db.new_connect_code(cong["id"])}
+
+
+class Connect(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    slug: str = Field(max_length=80)
+    code: str = Field(max_length=20)
+    device_name: str = Field(default="Mac", max_length=60)
+
+
+def _locked(seconds: int) -> JSONResponse:
+    return JSONResponse({"error": "locked", "retry_after": seconds}, status_code=429, headers={"Retry-After": str(seconds)})
+
+
+@router.post("/api/hc/connect")
+async def connect(request: Request, body: Connect):
+    """Add a Mac with the congregation's connect code. 404 not_found, 403 bad_code, 429 locked."""
+    h = _hear()
+    ip = _ip(request)
+    if wait := h.connect_ip.locked(ip):
+        return _locked(wait)
+    cong = h.db.by_slug(body.slug.lower())
+    if cong is None or cong["hidden"]:
+        h.connect_ip.fail(ip)   # guessing slugs counts too
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    if wait := h.connect_cong.locked(cong["slug"]):
+        return _locked(wait)    # even a correct code is refused while locked
+    if not h.db.connect_code_ok(cong["id"], body.code):
+        h.connect_ip.fail(ip)
+        h.connect_cong.fail(cong["slug"])
+        return JSONResponse({"error": "bad_code"}, status_code=403)
+    return {"ok": True, "device_token": h.db.add_device(cong["id"], body.device_name or "Mac"), "slug": cong["slug"],
+            "congregation": _public(cong)}
 
 
 # ------------------------------------------------------------------ listener side

@@ -6,6 +6,7 @@ e-mail link tokens are stored only as SHA-256 hashes.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import secrets
 import sqlite3
@@ -33,7 +34,9 @@ CREATE TABLE IF NOT EXISTS congregations (
     email_verified INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     hidden INTEGER NOT NULL DEFAULT 0,
-    city TEXT NOT NULL DEFAULT ''
+    city TEXT NOT NULL DEFAULT '',
+    connect_code_hash TEXT,
+    connect_code_at REAL
 );
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,6 +135,10 @@ class Database:
                 self._db.execute("ALTER TABLE congregations ADD COLUMN city TEXT NOT NULL DEFAULT ''")
                 for cid, address in self._db.execute("SELECT id, address FROM congregations").fetchall():
                     self._db.execute("UPDATE congregations SET city = ? WHERE id = ?", (city_of(address or ""), cid))
+            if "connect_code_hash" not in cols:   # databases made before connect codes: no code yet
+                self._db.execute("ALTER TABLE congregations ADD COLUMN connect_code_hash TEXT")
+            if "connect_code_at" not in cols:
+                self._db.execute("ALTER TABLE congregations ADD COLUMN connect_code_at REAL")
         self.close_stale_sessions()
 
     def _q(self, sql: str, args: tuple = ()) -> list[sqlite3.Row]:
@@ -217,6 +224,23 @@ class Database:
 
     def set_hidden(self, cid: int, hidden: bool) -> bool:
         return self._x("UPDATE congregations SET hidden = ? WHERE id = ?", (int(hidden), cid)).rowcount > 0
+
+    # ------------------------------------------------------------ connect codes
+    def new_connect_code(self, cid: int) -> str:
+        """Make a fresh 6-digit code (the old one stops working); only its hash is stored."""
+        code = "".join(secrets.choice("0123456789") for _ in range(6))
+        self._x("UPDATE congregations SET connect_code_hash = ?, connect_code_at = ? WHERE id = ?",
+                (hash_token(code), time.time(), cid))
+        return code
+
+    def connect_code_ok(self, cid: int, code: str) -> bool:
+        """code: as typed ("123 456", "123-456"). False when wrong or when no code was ever made."""
+        rows = self._q("SELECT connect_code_hash FROM congregations WHERE id = ?", (cid,))
+        stored = rows[0]["connect_code_hash"] if rows else None
+        digits = re.sub(r"[\s-]", "", code or "")
+        if not stored or not re.fullmatch(r"\d{6}", digits):
+            return False
+        return hmac.compare_digest(stored, hash_token(digits))
 
     # ------------------------------------------------------------ devices
     def add_device(self, cid: int, name: str) -> str:
