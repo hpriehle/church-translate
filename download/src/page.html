@@ -3,96 +3,215 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Download Hear Church for Mac</title>
-<meta name="description" content="Translate your meeting live on your own Mac. Listeners hear it on their phones in their language.">
+<title>Hear Church: a free Mac app that translates your church meeting live</title>
+<meta name="description" content="Hear Church translates your church meeting as people speak. Listeners follow along on their own phones, with captions and a spoken voice. The app is free.">
+<meta name="theme-color" content="#12332b">
+<meta property="og:title" content="Hear Church: a free Mac app that translates your church meeting live">
+<meta property="og:description" content="Listeners follow along on their own phones, with captions and a spoken voice.">
+<meta property="og:image" content="https://hearchurch.com/download/icon.png">
+<link rel="icon" type="image/png" href="/download/icon.png">
+<link rel="preload" href="/download/alegreya.woff2" as="font" type="font/woff2" crossorigin>
 <style>
-:root { --bg: #000; --fg: #e8e6e3; --dim: #8a8784; --accent: #f0c46c; --card: #111; --line: #222; }
+@font-face { font-family: "Alegreya"; src: url("/download/alegreya.woff2") format("woff2"); font-weight: 400 800; font-display: swap; }
+@font-face { font-family: "Alegreya Sans"; src: url("/download/alegreya-sans-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Alegreya Sans"; src: url("/download/alegreya-sans-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+
+:root {
+  --cloth: #12332b;
+  --line: #2c5548;
+  --gold: #f4d083;
+  --gold-deep: #e0aa4e;
+  --paper: #f7f0df;
+  --quiet: #bccabb;
+  --ink: #0d0d0d;
+  --icon: clamp(14rem, min(30vw, 32vh), 24rem);
+}
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--fg); }
+html { background: var(--cloth); -webkit-text-size-adjust: 100%; }
 body {
-  font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; line-height: 1.45;
+  margin: 0; color: var(--paper); line-height: 1.5; overflow-x: hidden;
+  font: 400 1.1875rem/1.5 "Alegreya Sans", -apple-system, system-ui, sans-serif;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
-header { padding: .6rem 1rem; font-size: .95rem; color: var(--dim); border-bottom: 1px solid #1a1a1a; }
-header a { color: inherit; text-decoration: none; font-weight: 600; }
-main { max-width: 38rem; margin: 0 auto; padding: 2.4rem 1.1rem 4rem; }
-h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 .7rem; font-weight: 650; letter-spacing: -.01em; }
-.lede { font-size: 1.15rem; color: var(--fg); margin: 0 0 1.8rem; }
-.big {
-  display: block; width: 100%; padding: 1.1rem 1rem; font: inherit; font-size: 1.3rem; font-weight: 600; text-align: center;
-  background: var(--accent); color: #1a1405; border: 0; border-radius: 14px; text-decoration: none;
-}
-.big:hover { filter: brightness(1.06); }
-.big.off { opacity: .55; pointer-events: none; }
-.meta { color: var(--dim); font-size: .92rem; text-align: center; margin: .65rem 0 0; }
-.phone { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: .8rem 1rem; margin: 0 0 1rem; }
-h2 { font-size: 1.05rem; margin: 2.6rem 0 .8rem; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: .82rem; }
-ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; }
-ol.steps li { counter-increment: s; position: relative; padding: 0 0 1rem 2.6rem; }
-ol.steps li::before {
-  content: counter(s); position: absolute; left: 0; top: -.05rem; width: 1.8rem; height: 1.8rem; border-radius: 50%;
-  background: var(--card); border: 1px solid var(--line); color: var(--accent); font-weight: 700; font-size: .95rem;
-  display: grid; place-items: center;
-}
-ol.steps b { display: block; }
-ol.steps span { color: var(--dim); }
-ul.needs { margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-ul.needs li { display: flex; justify-content: space-between; gap: 1rem; padding: .7rem 1rem; background: var(--card); }
-ul.needs li + li { border-top: 1px solid var(--line); }
-ul.needs span { color: var(--dim); text-align: right; }
-p.note { color: var(--dim); font-size: .95rem; }
-a { color: var(--accent); }
+a { color: var(--gold); text-underline-offset: .15em; }
+a:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; border-radius: 4px; }
 [hidden] { display: none !important; }
+
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 1rem clamp(1.1rem, 3vw, 2rem); }
+.top a { color: var(--quiet); text-decoration: none; }
+.top a:hover { color: var(--paper); }
+.top .name { font: 600 1.25rem "Alegreya", Georgia, serif; color: var(--paper); }
+
+/* The icon's sound wave carries on past the pulpit, out to both edges of the page. */
+.art { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; margin-top: clamp(.5rem, 3vh, 2rem); }
+.art img { display: block; width: var(--icon); height: var(--icon); margin: 0 calc(var(--icon) * -.05); position: relative; filter: drop-shadow(0 1.1rem 1.6rem rgb(0 0 0 / .32)); }
+.wave { display: flex; align-items: center; gap: clamp(.4rem, .8vw, .75rem); height: calc(var(--icon) * .7); overflow: hidden; }
+.wave.out-left { flex-direction: row-reverse; }
+.wave i {
+  flex: none; display: block; width: clamp(.4rem, .8vw, .75rem); height: calc(var(--h) * var(--icon) * .68); border-radius: 99px;
+  background: linear-gradient(var(--gold), var(--gold-deep)); opacity: var(--o);
+  animation: speak .7s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: calc(var(--n) * 28ms + 150ms);
+}
+@keyframes speak { from { transform: scaleY(.06); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .wave i { animation: none; } }
+
+.hero { max-width: 64rem; margin: 0 auto; padding: clamp(.75rem, 2vh, 1.5rem) 1.25rem clamp(3.5rem, 9vh, 6rem); text-align: center; }
+h1 { font: 600 clamp(2.5rem, 6vw, 4.5rem)/1.04 "Alegreya", Georgia, serif; letter-spacing: -.012em; margin: 0 0 1.25rem; text-wrap: balance; }
+.lede { font-size: clamp(1.25rem, 2vw, 1.4375rem); line-height: 1.42; max-width: 40rem; margin: 0 auto 2rem; text-wrap: pretty; }
+.phone { max-width: 32rem; margin: 0 auto 1.5rem; padding: .8rem 1.1rem; border: 1px solid var(--line); border-radius: .9rem; }
+
+.get {
+  display: inline-block; padding: 1rem 2.25rem; border-radius: 1.2rem; color: var(--ink); text-decoration: none;
+  font: 700 1.375rem/1.2 "Alegreya Sans", -apple-system, system-ui, sans-serif;
+  background: linear-gradient(var(--gold), var(--gold-deep)); box-shadow: 0 .6rem 1.4rem rgb(0 0 0 / .25);
+}
+a.get:hover { filter: brightness(1.06); }
+a.get:focus-visible { outline: 3px solid var(--paper); outline-offset: 3px; border-radius: 1.2rem; }
+.get.soon { background: none; box-shadow: none; color: var(--gold); border: 2px solid var(--gold-deep); }
+.meta { color: var(--quiet); font-size: 1rem; margin: .7rem 0 0; }
+.cost { max-width: 30rem; margin: .9rem auto 0; color: var(--quiet); font-size: 1.0625rem; text-wrap: pretty; }
+
+.more { max-width: 66rem; margin: 0 auto; padding: 0 clamp(1.25rem, 4vw, 2.5rem); }
+.more section { border-top: 1px solid var(--line); padding: clamp(2.5rem, 6vh, 4rem) 0; }
+h2 { font: 600 clamp(1.75rem, 3vw, 2.25rem)/1.15 "Alegreya", Georgia, serif; margin: 0 0 1.75rem; }
+
+ol.steps { list-style: none; counter-reset: step; display: grid; gap: 2rem clamp(2rem, 4vw, 3.5rem); margin: 0; padding: 0; }
+ol.steps li { counter-increment: step; }
+ol.steps li::before { content: counter(step); display: block; font: 500 3rem/1 "Alegreya", Georgia, serif; color: var(--gold); margin-bottom: .6rem; }
+ol.steps b { display: block; font-size: 1.3125rem; line-height: 1.25; margin-bottom: .4rem; }
+ol.steps span { color: var(--quiet); }
+
+.langs h2 { margin-bottom: .4rem; }
+.langs > p { color: var(--quiet); margin: 0 0 1.75rem; }
+.langs ul { list-style: none; display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem 1.5rem; margin: 0; padding: 0; }
+.langs svg { display: block; width: 5.25rem; height: 3.5rem; border-radius: .4rem; margin-bottom: .75rem; box-shadow: 0 0 0 1px rgb(255 255 255 / .14); }
+.langs b { display: block; font-size: 1.3125rem; line-height: 1.25; }
+.langs span { color: var(--quiet); }
+
+.needs { display: grid; gap: 1.5rem clamp(2rem, 4vw, 3.5rem); }
+.needs h2 { margin-bottom: .9rem; }
+.needs p { color: var(--quiet); margin: 0 0 .8rem; max-width: 26rem; text-wrap: pretty; }
+dl { margin: 0; }
+dl div { display: flex; justify-content: space-between; gap: 1.5rem; padding: .7rem 0; border-top: 1px solid var(--line); }
+dl div:first-child { border-top: 0; padding-top: 0; }
+dt { font-weight: 700; flex: none; }
+dd { margin: 0; color: var(--quiet); text-align: right; }
+
+footer { max-width: 66rem; margin: 0 auto; padding: 1.75rem 1.25rem 3rem; color: var(--quiet); font-size: 1rem; text-align: center; }
+footer p { margin: 0 0 .5rem; }
+footer a { color: inherit; margin: 0 .6rem; }
+
+@media (min-width: 48rem) {
+  ol.steps { grid-template-columns: repeat(3, 1fr); }
+  .langs ul { grid-template-columns: repeat(4, 1fr); }
+  .needs { grid-template-columns: 2fr 3fr; }
+}
 </style>
 </head>
 <body>
-<header><a href="/">Hear Church</a></header>
+<header class="top">
+  <a class="name" href="/">Hear Church</a>
+  <a href="/">Find your congregation</a>
+</header>
+
 <main>
-  <h1>Translate your meeting on your Mac.</h1>
-  <p class="lede">Hear Church listens to your meeting through the Mac's microphone and translates it as people speak.
-    Listeners follow along on their own phones, with captions and a voice in their language.</p>
-
-  <p class="phone" id="phone" hidden>Hear Church runs on a Mac. Open this page on the Mac you'll use at church to download it.
-    Listening to a meeting? <a href="/">Find your congregation</a>.</p>
-
-  <div {{RELEASED}}>
-    <a class="big" href="/download/HearChurch.dmg">Download for Mac</a>
-    <p class="meta">Version {{VERSION}} · {{SIZE}} · {{DATE}}</p>
-  </div>
-  <div {{UNRELEASED}}>
-    <span class="big off">Coming soon</span>
-    <p class="meta">The first version is almost ready.</p>
+  <div class="art">
+    <div class="wave out-left" aria-hidden="true"></div>
+    <img src="/download/icon.png" width="1024" height="1024" alt="The Hear Church app icon: a pulpit with a microphone and a sound wave on it">
+    <div class="wave out-right" aria-hidden="true"></div>
   </div>
 
-  <h2>Getting started</h2>
-  <ol class="steps">
-    <li><b>Open the download and drag Hear Church to Applications.</b>
-      <span>Then open it from Applications.</span></li>
-    <li><b>Set up your congregation, or connect to one with its code.</b>
-      <span>Enter your congregation's name and where you meet, so listeners nearby can find you.</span></li>
-    <li><b>Choose your languages.</b>
-      <span>The speech model and voices download in the background while you finish setting up (about 2 GB).</span></li>
-    <li><b>Press Start meeting.</b>
-      <span>Listeners scan the QR code in the chapel or go to hearchurch.com on their phone.</span></li>
-  </ol>
+  <div class="hero">
+    <h1>A free Mac app that translates your church meeting live.</h1>
+    <p class="lede">Hear Church listens through your Mac's microphone and translates the meeting as people speak.
+      Listeners follow along on their own phones, with captions and a spoken voice.</p>
 
-  <h2>What you need</h2>
-  <ul class="needs">
-    <li>Mac <span>Apple silicon (M1 or newer)</span></li>
-    <li>macOS <span>14 Sonoma or newer</span></li>
-    <li>Memory <span>8 GB · 16 GB for Wolof</span></li>
-    <li>Free space <span>About 6 GB</span></li>
-    <li>Internet <span>Wi-Fi or Ethernet during the meeting</span></li>
-  </ul>
-  <p class="note">Keep the Mac plugged in with the lid open while a meeting is translated.
-    Hear Church keeps itself up to date. New versions install when you quit the app, never during a meeting.</p>
+    <p class="phone" id="phone" hidden>Hear Church runs on a Mac. Open this page on the Mac you'll use at church to download it.
+      Listening to a meeting? <a href="/">Find your congregation</a>.</p>
+
+    <div {{RELEASED}}>
+      <a class="get" href="/download/HearChurch.dmg">Download free for Mac</a>
+      <p class="meta">Version {{VERSION}}, {{SIZE}}, released {{DATE}}</p>
+    </div>
+    <div {{UNRELEASED}}>
+      <span class="get soon">Coming soon</span>
+      <p class="meta">The first version is almost ready.</p>
+    </div>
+
+    <p class="cost">The app is free. The translating is done by Claude, so you add your own Anthropic API key and Anthropic bills you for what you use.</p>
+  </div>
+
+  <div class="more">
+    <section class="langs">
+      <h2>Languages</h2>
+      <p>Meetings are translated from English.</p>
+      <ul>
+        <li>
+          <svg viewBox="0 0 90 60" aria-hidden="true"><path fill="#000091" d="M0 0h30v60H0z"/><path fill="#fff" d="M30 0h30v60H30z"/><path fill="#e1000f" d="M60 0h30v60H60z"/></svg>
+          <b>French</b><span>Available now</span>
+        </li>
+        <li>
+          <svg viewBox="0 0 90 60" aria-hidden="true"><path fill="#00853f" d="M0 0h30v60H0z"/><path fill="#fdef42" d="M30 0h30v60H30z"/><path fill="#e31b23" d="M60 0h30v60H60z"/><path fill="#00853f" d="M45 21l2.02 6.22h6.54l-5.29 3.84 2.02 6.22L45 33.44l-5.29 3.84 2.02-6.22-5.29-3.84h6.54z"/></svg>
+          <b>Wolof</b><span>Available now</span>
+        </li>
+        <li>
+          <svg viewBox="0 0 90 60" aria-hidden="true"><path fill="#aa151b" d="M0 0h90v60H0z"/><path fill="#f1bf00" d="M0 15h90v30H0z"/></svg>
+          <b>Spanish</b><span>Coming soon</span>
+        </li>
+        <li>
+          <svg viewBox="0 0 90 60" aria-hidden="true"><path fill="#fff" d="M0 0h90v20H0z"/><path fill="#0039a6" d="M0 20h90v20H0z"/><path fill="#d52b1e" d="M0 40h90v20H0z"/></svg>
+          <b>Russian</b><span>Coming soon</span>
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><b>Install it on the Mac at church</b>
+          <span>Open the download and drag Hear Church to Applications.</span></li>
+        <li><b>Set up your congregation</b>
+          <span>Enter its name and where you meet, choose your languages and add your API key. Setup takes about 5 minutes. Already set up on another Mac? Connect with your congregation's code.</span></li>
+        <li><b>Press Start meeting</b>
+          <span>Listeners scan the QR code in the chapel or go to hearchurch.com on their phone. They have nothing to install or pay for.</span></li>
+      </ol>
+    </section>
+
+    <section class="needs">
+      <div>
+        <h2>What you need</h2>
+        <p>Keep the Mac plugged in with the lid open while a meeting is translated.</p>
+        <p>Hear Church keeps itself up to date. New versions install when you quit the app, never during a meeting.</p>
+      </div>
+      <dl>
+        <div><dt>Mac</dt><dd>Apple silicon (M1 or newer)</dd></div>
+        <div><dt>macOS</dt><dd>14 Sonoma or newer</dd></div>
+        <div><dt>Memory</dt><dd>8 GB, or 16 GB for Wolof</dd></div>
+        <div><dt>Free space</dt><dd>About 6 GB, including a 2 GB download during setup</dd></div>
+        <div><dt>Internet</dt><dd>Wi-Fi or Ethernet during the meeting</dd></div>
+        <div><dt>API key</dt><dd>Your own, from Anthropic</dd></div>
+      </dl>
+    </section>
+  </div>
 </main>
-<footer style="border-top:1px solid #1a1a1a;padding:1.2rem 1rem 2.4rem;color:var(--dim);font-size:.92rem;text-align:center">
-  <p style="margin:0 0 .5rem"><a style="color:inherit" href="/privacy">Privacy</a> · <a style="color:inherit" href="/terms">Terms</a> · <a style="color:inherit" href="mailto:support@hearchurch.com">support@hearchurch.com</a></p>
-  <p style="margin:0">Hear Church is an independent project, not affiliated with or endorsed by any church.</p>
+
+<footer>
+  <p><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="mailto:support@hearchurch.com">support@hearchurch.com</a></p>
+  <p>Hear Church is an independent project, not affiliated with or endorsed by any church.</p>
 </footer>
+
 <script>
   if (/iPhone|iPod|Android/i.test(navigator.userAgent)) document.getElementById("phone").hidden = false;
+
+  // The sound wave: mirrored either side of the icon, like the bars on it, fading with distance.
+  const rhythm = [.62, .95, .42, .74, 1, .5, .3, .82, .58, .92, .36, .68, .86, .46, .28, .76, .54, .9, .4, .64];
+  document.querySelectorAll(".wave").forEach((wave) => {
+    for (let n = 0; n < 60; n++) {
+      const fade = 1 - n / 60, bar = document.createElement("i");
+      bar.style.cssText = `--h:${(rhythm[n % rhythm.length] * (.3 + .7 * fade)).toFixed(3)};--o:${(fade * fade * .95 + .05).toFixed(3)};--n:${n}`;
+      wave.append(bar);
+    }
+  });
 </script>
 </body>
 </html>

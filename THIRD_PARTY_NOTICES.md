@@ -4,6 +4,7 @@ Included in this repository:
 - `models/silero_vad.onnx` — Silero VAD, MIT License (https://github.com/snakers4/silero-vad).
 - `models/wolof/speaker-*.npy` — speaker x-vectors computed from the CMU ARCTIC corpus
   (https://huggingface.co/datasets/Matthijs/cmu-arctic-xvectors), free to use with attribution.
+- `download/src/fonts/` — Alegreya and Alegreya Sans, SIL Open Font License 1.1 (licenses alongside).
 
 Downloaded at setup (not included):
 - Whisper large-v3-turbo / faster-whisper models — MIT License (OpenAI).

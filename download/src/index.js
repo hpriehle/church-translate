@@ -5,11 +5,24 @@
 //   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
 //   /privacy, /terms           the legal pages
+//   /download/icon.png, *.woff2  the page's icon and fonts
 //
 // R2 holds what mac/release.sh uploads: HearChurch-<version>.dmg, *.delta, wolof-libs-*.tar.gz, appcast.xml, latest.json.
 import PAGE from "./page.html";
 import PRIVACY from "./privacy.html";
 import TERMS from "./terms.html";
+import ICON from "../../mac/HearChurch/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png";
+import ALEGREYA from "./fonts/alegreya.woff2";
+import ALEGREYA_SANS_400 from "./fonts/alegreya-sans-400.woff2";
+import ALEGREYA_SANS_700 from "./fonts/alegreya-sans-700.woff2";
+
+// The page's own files, served from here so a visit sends nothing to a font or image host.
+const ASSETS = {
+  "/download/icon.png": [ICON, "image/png"],
+  "/download/alegreya.woff2": [ALEGREYA, "font/woff2"],
+  "/download/alegreya-sans-400.woff2": [ALEGREYA_SANS_400, "font/woff2"],
+  "/download/alegreya-sans-700.woff2": [ALEGREYA_SANS_700, "font/woff2"],
+};
 
 export default {
   async fetch(request, env, ctx) {
@@ -24,6 +37,10 @@ export default {
     const path = url.pathname.replace(/\/+$/, "");
 
     if (path === "/download") return page(env);
+    if (ASSETS[path]) {
+      const [body, type] = ASSETS[path];
+      return new Response(body, { headers: { "content-type": type, "cache-control": "public, max-age=86400" } });
+    }
     if (path === "/privacy") return html(PRIVACY);
     if (path === "/terms") return html(TERMS);
     if (path === "/appcast.xml") return file(request, env, "appcast.xml", "application/xml", "max-age=300");

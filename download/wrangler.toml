@@ -14,7 +14,10 @@ routes = [
   { pattern = "www.hearchurch.com/privacy", zone_name = "hearchurch.com" },
   { pattern = "www.hearchurch.com/terms", zone_name = "hearchurch.com" },
 ]
-rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = false }]
+rules = [
+  { type = "Text", globs = ["**/*.html"], fallthrough = false },
+  { type = "Data", globs = ["**/*.png", "**/*.woff2"], fallthrough = false },
+]
 
 [[r2_buckets]]
 binding = "FILES"
