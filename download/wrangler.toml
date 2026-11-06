@@ -14,6 +14,8 @@ routes = [
   { pattern = "www.hearchurch.com/privacy", zone_name = "hearchurch.com" },
   { pattern = "www.hearchurch.com/terms", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/sitemap.xml", zone_name = "hearchurch.com" },
+  # IndexNow's key file. The key is public by design: anyone can fetch it.
+  { pattern = "hearchurch.com/b8a8b0718483acd04cef33be1f6d395c.txt", zone_name = "hearchurch.com" },
   # Siteboard analytics, loaded only by the /download page. Nothing on the listener pages uses these.
   { pattern = "hearchurch.com/api/collect", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/rr.js", zone_name = "hearchurch.com" },

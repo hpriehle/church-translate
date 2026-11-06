@@ -7,6 +7,7 @@
 //   /privacy, /terms           the legal pages
 //   /download/icon.png, *.woff2  the page's icon and fonts
 //   /sitemap.xml               the pages we want in search
+//   /<key>.txt                 IndexNow's key file, so search engines accept our URL submissions
 //   /rr.js, /rrweb.min.js      Siteboard's tracker; only the /download page loads it
 //   /api/collect               forwards the tracker's batches to the hub
 //
@@ -29,6 +30,8 @@ const ASSETS = {
   "/download/alegreya-sans-400.woff2": [ALEGREYA_SANS_400, "font/woff2"],
   "/download/alegreya-sans-700.woff2": [ALEGREYA_SANS_700, "font/woff2"],
 };
+
+const INDEXNOW_KEY = "b8a8b0718483acd04cef33be1f6d395c";
 
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -61,6 +64,9 @@ export default {
     }
     if (path === "/rr.js") return script(TRACKER);
     if (path === "/rrweb.min.js") return script(RECORDER);
+    if (path === `/${INDEXNOW_KEY}.txt`) {
+      return new Response(INDEXNOW_KEY, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "max-age=3600" } });
+    }
     if (path === "/sitemap.xml") {
       return new Response(SITEMAP, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "max-age=3600" } });
     }
