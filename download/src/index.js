@@ -6,9 +6,15 @@
 //   /appcast.xml               Sparkle's update feed
 //   /privacy, /terms           the legal pages
 //   /download/icon.png, *.woff2  the page's icon and fonts
+//   /sitemap.xml               the pages we want in search
+//   /rr.js, /rrweb.min.js      Siteboard's tracker; only the /download page loads it
+//   /api/collect               forwards the tracker's batches to the hub
 //
 // R2 holds what mac/release.sh uploads: HearChurch-<version>.dmg, *.delta, wolof-libs-*.tar.gz, appcast.xml, latest.json.
 import PAGE from "./page.html";
+import { onRequestPost as collectPost, onRequest as collectOther } from "./collect.js";
+import TRACKER from "./tracker/rr.min.js.txt";
+import RECORDER from "./tracker/rrweb.min.js.txt";
 import PRIVACY from "./privacy.html";
 import TERMS from "./terms.html";
 import ICON from "../../mac/HearChurch/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png";
@@ -24,12 +30,24 @@ const ASSETS = {
   "/download/alegreya-sans-700.woff2": [ALEGREYA_SANS_700, "font/woff2"],
 };
 
+const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://hearchurch.com/download</loc></url>
+<url><loc>https://hearchurch.com/</loc></url>
+</urlset>
+`;
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname.startsWith("www.")) {
       url.hostname = url.hostname.slice(4);
       return Response.redirect(url.toString(), 301);
+    }
+    if (url.pathname === "/api/collect") {
+      return request.method === "POST"
+        ? collectPost({ request, env, waitUntil: (p) => ctx.waitUntil(p) })
+        : collectOther();
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
@@ -41,6 +59,11 @@ export default {
       const [body, type] = ASSETS[path];
       return new Response(body, { headers: { "content-type": type, "cache-control": "public, max-age=86400" } });
     }
+    if (path === "/rr.js") return script(TRACKER);
+    if (path === "/rrweb.min.js") return script(RECORDER);
+    if (path === "/sitemap.xml") {
+      return new Response(SITEMAP, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "max-age=3600" } });
+    }
     if (path === "/privacy") return html(PRIVACY);
     if (path === "/terms") return html(TERMS);
     if (path === "/appcast.xml") return file(request, env, "appcast.xml", "application/xml", "max-age=300");
@@ -51,14 +74,19 @@ export default {
       if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, latest.version));
       return response;
     }
-    const name = path.slice("/download/".length);
-    if (path.startsWith("/download/") && /^[\w.-]+\.(dmg|delta|tar\.gz)$/.test(name)) {
+    // generate_appcast names deltas after the app, so they have a space: "Hear Church4-3.delta".
+    const name = path.slice("/download/".length).replaceAll("%20", " ");
+    if (path.startsWith("/download/") && /^[\w. -]+\.(dmg|delta|tar\.gz)$/.test(name)) {
       const type = name.endsWith(".dmg") ? "application/x-apple-diskimage" : "application/octet-stream";
       return file(request, env, name, type, "public, max-age=31536000, immutable", name);
     }
     return new Response("Not found", { status: 404 });
   },
 };
+
+function script(body) {
+  return new Response(body, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=3600" } });
+}
 
 function html(body) {
   return new Response(body, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "max-age=300" } });
