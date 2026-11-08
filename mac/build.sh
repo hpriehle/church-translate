@@ -83,13 +83,13 @@ if [[ "$SIGN_ID" == "Developer ID"* ]]; then TS="--timestamp"; else TS="--timest
 LOG="$MAC/build/sign.log"
 : > "$LOG"
 sign_failed() { grep -v "replacing existing signature" "$LOG" >&2; echo "signing failed" >&2; exit 1; }
-sign() { codesign --force --options runtime $TS --sign "$SIGN_ID" "$@" 2>> "$LOG" || sign_failed; }
+sign() { codesign --force --options runtime $TS --sign "$SIGN_ID" ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} "$@" 2>> "$LOG" || sign_failed; }
 "$STAGE/python/bin/python3" -I "$MAC/machos.py" "$OUT/Contents/Resources" > "$MAC/build/machos.txt"
 python3 -I -c '
 import sys
 paths = open(sys.argv[1], "rb").read().split(b"\0")
 sys.stdout.buffer.write(b"".join(p + b"\0" for p in paths if p and b"/Resources/python/bin/" not in p))
-' "$MAC/build/machos.txt" | xargs -0 -n 200 codesign --force --options runtime $TS --sign "$SIGN_ID" 2>> "$LOG" || sign_failed
+' "$MAC/build/machos.txt" | xargs -0 -n 200 codesign --force --options runtime $TS --sign "$SIGN_ID" ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} 2>> "$LOG" || sign_failed
 find "$OUT/Contents/Resources/python/bin" -type f -perm -u+x -print0 | while IFS= read -r -d '' f; do
   if file -b "$f" | grep -q Mach-O; then sign --entitlements "$MAC/HearChurch/Python.entitlements" "$f"; fi
 done

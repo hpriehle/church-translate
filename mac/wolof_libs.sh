@@ -23,7 +23,7 @@ find "$WORK/$ID" -name "*.a" -delete
 
 LOG="$WORK/sign.log"
 if ! "$PY" -I "$MAC/machos.py" "$WORK/$ID" \
-    | xargs -0 -n 200 codesign --force --options runtime --timestamp --sign "$SIGN_ID" 2> "$LOG"; then
+    | xargs -0 -n 200 codesign --force --options runtime --timestamp --sign "$SIGN_ID" ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} 2> "$LOG"; then
   grep -v "replacing existing signature" "$LOG" >&2
   echo "wolof_libs: signing failed" >&2
   exit 1
