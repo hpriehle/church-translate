@@ -51,8 +51,9 @@ export default {
       if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, latest.version));
       return response;
     }
-    const name = path.slice("/download/".length);
-    if (path.startsWith("/download/") && /^[\w.-]+\.(dmg|delta|tar\.gz)$/.test(name)) {
+    // generate_appcast names deltas after the app, so they have a space: "Hear Church4-3.delta".
+    const name = path.slice("/download/".length).replaceAll("%20", " ");
+    if (path.startsWith("/download/") && /^[\w. -]+\.(dmg|delta|tar\.gz)$/.test(name)) {
       const type = name.endsWith(".dmg") ? "application/x-apple-diskimage" : "application/octet-stream";
       return file(request, env, name, type, "public, max-age=31536000, immutable", name);
     }
