@@ -66,8 +66,13 @@ fi
 
 step "Swift app"
 xcodegen generate --quiet
+# Over SSH only the release keychain is unlocked: make Xcode's own signing step use it too.
+XC_SIGN=()
+# It holds only the Developer ID identity (everything is re-signed with it below anyway).
+[[ -n "${SIGN_KEYCHAIN:-}" ]] && XC_SIGN=("OTHER_CODE_SIGN_FLAGS=--keychain $SIGN_KEYCHAIN"
+  CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=$SIGN_ID" PROVISIONING_PROFILE_SPECIFIER=)
 xcodebuild -project HearChurch.xcodeproj -scheme HearChurch -configuration Release -derivedDataPath build/dd \
-  -quiet build
+  -quiet build ${XC_SIGN[@]+"${XC_SIGN[@]}"}
 rm -rf "$OUT"
 ditto "build/dd/Build/Products/Release/Hear Church.app" "$OUT"
 ditto "$STAGE/python" "$OUT/Contents/Resources/python"
