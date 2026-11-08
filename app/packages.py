@@ -1,7 +1,7 @@
 """Models a meeting needs on this computer, and downloading the missing ones (the Mac app).
 
-Speech recognition and the Wolof voice come from the Hugging Face cache (~/.cache/huggingface); the French
-Piper voices go to PIPER_DIR. Each package reports its size and, while downloading, the bytes on disk so far.
+Speech recognition and the Wolof voice come from the Hugging Face cache (~/.cache/huggingface); the Piper
+voices (French, Spanish, Russian) go to PIPER_DIR. Each package reports its size and, while downloading, the bytes on disk so far.
 Phase 4 adds hashes, more languages and our own download host.
 
 The Wolof voice also needs torch and transformers (about 800 MB), which the Mac app leaves out and fetches
@@ -29,11 +29,16 @@ from .config import HOME, PIPER_DIR, ROOT
 
 log = logging.getLogger("packages")
 
-PIPER_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/{v}/medium/fr_FR-{v}-medium.{ext}"
-FRENCH_VOICES = ("tom", "siwis")
+PIPER_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/{family}/{region}/{name}/{quality}/{voice}.{ext}"
+# Only voices whose licence allows a paid service: not ru_RU-irina (unknown) or ru_RU-ruslan (non-commercial).
+PIPER_VOICES = {
+    "fr": ("French voices", ("fr_FR-tom-medium", "fr_FR-siwis-medium")),
+    "es": ("Spanish voices", ("es_MX-ald-medium", "es_MX-claude-high")),
+    "ru": ("Russian voices", ("ru_RU-denis-medium", "ru_RU-dmitri-medium")),
+}
 WOLOF_REPOS = ("bilalfaye/speecht5_tts-wolof", "microsoft/speecht5_hifigan")
 # Download sizes in MB (measured), shown before a download starts and used for its progress.
-SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634}
+SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127}
 LIBS_MANIFEST = ROOT / "wolof_libs.json"
 LIBS_DIR = HOME / "packages"
 
@@ -107,14 +112,17 @@ def _bytes_in(path: Path) -> int:
 
 
 def _piper_files(voice: str) -> list[tuple[str, Path]]:
-    return [(PIPER_URL.format(v=voice, ext=ext), PIPER_DIR / f"fr_FR-{voice}-medium.{ext}") for ext in ("onnx", "onnx.json")]
+    region, name, quality = voice.split("-")   # fr_FR-tom-medium
+    return [(PIPER_URL.format(family=region[:2], region=region, name=name, quality=quality, voice=voice, ext=ext),
+             PIPER_DIR / f"{voice}.{ext}") for ext in ("onnx", "onnx.json")]
 
 
 def package_for(code: str, stt_model: str) -> Package | None:
     if code == "speech":
         return Package("speech", "Speech recognition", SIZES_MB["speech"], hf_repos=(stt_model,))
-    if code == "fr":
-        return Package("fr", "French voices", SIZES_MB["fr"], piper_voices=FRENCH_VOICES)
+    if code in PIPER_VOICES:
+        name, voices = PIPER_VOICES[code]
+        return Package(code, name, SIZES_MB[code], piper_voices=voices)
     if code == "wo":
         libs = _libs()
         size = SIZES_MB["wo"] + (round(libs["size"] / 1e6) if libs else 0)

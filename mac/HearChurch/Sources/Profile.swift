@@ -76,7 +76,7 @@ enum Churches {
     static let all = [latterDaySaints, "Catholic", "Baptist", "Methodist", "Non-denominational"]
 }
 
-/// Output languages offered at launch. Spanish and Russian arrive with Phase 4 (voices and prompts).
+/// Output languages listeners can choose.
 struct OutputLanguage: Identifiable {
     let id: String
     let name: String
@@ -85,8 +85,8 @@ struct OutputLanguage: Identifiable {
     static let all = [
         OutputLanguage(id: "fr", name: "French", available: true, sizeMB: 127),
         OutputLanguage(id: "wo", name: "Wolof", available: true, sizeMB: 634),
-        OutputLanguage(id: "es", name: "Spanish", available: false, sizeMB: 0),
-        OutputLanguage(id: "ru", name: "Russian", available: false, sizeMB: 0),
+        OutputLanguage(id: "es", name: "Spanish", available: true, sizeMB: 127),
+        OutputLanguage(id: "ru", name: "Russian", available: true, sizeMB: 127),
     ]
     static func name(_ code: String) -> String { all.first { $0.id == code }?.name ?? code.uppercased() }
 }

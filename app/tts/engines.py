@@ -127,30 +127,30 @@ class SayTts:
 
 # ------------------------------------------------------------------ Piper
 
-DEFAULT_PIPER_VOICE = "fr_FR-tom-medium"
+DEFAULT_PIPER_VOICES = {"fr_FR-tom-medium", "es_MX-ald-medium", "ru_RU-denis-medium"}
 _PIPER_NAMES = {"tom": "Tom (male)", "siwis": "Siwis (female)", "upmc": "UPMC (female)",
-                "gilles": "Gilles (male)", "mls": "MLS"}
+                "gilles": "Gilles (male)", "mls": "MLS", "denis": "Denis (male)", "dmitri": "Dmitri (male)"}
 _PIPER_LOADED: dict[str, object] = {}
 
 
-def list_piper_voices() -> list[dict]:
+def list_piper_voices(lang: str = "fr") -> list[dict]:
     out = []
     for p in sorted(PIPER_DIR.glob("*.onnx")):
         if not Path(str(p) + ".json").exists():
             continue
         parts = p.stem.split("-")  # fr_FR-tom-medium
-        if not parts[0].startswith("fr"):
+        if not parts[0].startswith(lang):
             continue
         nice = _PIPER_NAMES.get(parts[1], parts[1].capitalize()) if len(parts) > 1 else p.stem
         out.append({"id": f"piper:{p.stem}", "engine": "piper", "voice": p.stem, "label": f"Piper — {nice}", "lang": parts[0]})
     # Default first.
-    return sorted(out, key=lambda v: v["voice"] != DEFAULT_PIPER_VOICE)
+    return sorted(out, key=lambda v: v["voice"] not in DEFAULT_PIPER_VOICES)
 
 
-def list_voices() -> list[dict]:
-    """Every French voice the operator can pick, across engines."""
-    voices = list_piper_voices()
-    for v in french_voices():
+def list_voices(lang: str = "fr") -> list[dict]:
+    """Every voice for one language the operator can pick, across engines."""
+    voices = list_piper_voices(lang)
+    for v in say_voices(lang):
         voices.append({"id": f"say:{v['name']}", "engine": "say", "voice": v["name"],
                        "label": f"{v['name']} (macOS) · {v['lang']}", "lang": v["lang"]})
     return voices
@@ -168,7 +168,7 @@ class PiperTts:
         self.out_sr = out_sr
         voice = cfg.voice if (PIPER_DIR / f"{cfg.voice}.onnx").exists() else ""
         if not voice:
-            available = [v["voice"] for v in list_piper_voices()]
+            available = [v["voice"] for v in list_piper_voices(cfg.lang)]
             if not available:
                 raise RuntimeError("no Piper voice in models/piper — run ./start.sh --setup")
             voice = available[0]
@@ -341,10 +341,7 @@ class MmsTts:
 def list_voices_for(code: str) -> list[dict]:
     if code == "wo":
         return list_wolof_voices()
-    if code == "fr":
-        return list_voices()
-    return [{"id": f"say:{v['name']}", "engine": "say", "voice": v["name"],
-             "label": f"{v['name']} (macOS) · {v['lang']}", "lang": v["lang"]} for v in say_voices(code)]
+    return list_voices(code)
 
 
 def make_tts(cfg: TtsCfg, out_sr: int):

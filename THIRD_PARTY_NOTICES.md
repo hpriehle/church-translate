@@ -10,6 +10,8 @@ Downloaded at setup (not included):
 - Whisper large-v3-turbo / faster-whisper models — MIT License (OpenAI).
 - Piper voices `fr_FR-tom-medium` and `fr_FR-siwis-medium` — see each voice's MODEL_CARD on
   https://huggingface.co/rhasspy/piper-voices (siwis: CC BY 4.0; check tom's card before redistributing).
+- Piper voices `es_MX-ald-medium` (Unlicense), `es_MX-claude-high` (Apache-2.0), `ru_RU-denis-medium` (CC0) and
+  `ru_RU-dmitri-medium` (CC0), from the same repository.
 - Wolof voice `bilalfaye/speecht5_tts-wolof` — MIT License; vocoder `microsoft/speecht5_hifigan` — MIT.
 - Wolof voice "MMS" `rnjema-unima/mms-tts-wol-baseline` (Meta's Massively Multilingual Speech) —
   CC BY-NC 4.0: non-commercial use only.

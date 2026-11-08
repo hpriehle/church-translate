@@ -52,7 +52,7 @@ step "Engine code"
 mkdir -p "$STAGE/engine/models"
 rsync -a --delete --exclude "__pycache__" "$REPO/app" "$REPO/web" "$STAGE/engine/"
 rsync -a "$REPO/models/silero_vad.onnx" "$REPO/models/wolof" "$STAGE/engine/models/"
-cp "$REPO/config.toml" "$REPO/glossary.json" "$REPO/glossary.wo.json" "$REPO/LICENSE" "$REPO/THIRD_PARTY_NOTICES.md" "$STAGE/engine/"
+cp "$REPO/config.toml" "$REPO/glossary.json" "$REPO/glossary.wo.json" "$REPO/glossary.es.json" "$REPO/glossary.ru.json" "$REPO/LICENSE" "$REPO/THIRD_PARTY_NOTICES.md" "$STAGE/engine/"
 "$STAGE/python/bin/python3" -m compileall -q "$STAGE/engine/app"
 rm -f "$STAGE/engine/wolof_libs.json"
 if [[ "$SIGN_ID" == "Developer ID"* ]]; then

@@ -25,6 +25,10 @@ LANGUAGES: dict[str, Language] = {
     # The local fallback model's Wolof is poor, so Wolof relies on Claude only.
     "wo": Language("wo", "Wolof", "none", user_file("glossary.wo.json"),
                    "Salaam aleekum. Lii ab natt la ngir xool ndax tekki bi dafay dox. Su ngeen ma déggee, lépp baax na."),
+    "es": Language("es", "Español", "none", user_file("glossary.es.json"),
+                   "Hola. Esta es una prueba de la traducción en directo. Si me escuchan, todo funciona bien."),
+    "ru": Language("ru", "Русский", "none", user_file("glossary.ru.json"),
+                   "Здравствуйте. Это проверка синхронного перевода. Если вы меня слышите, всё работает."),
     # Shares the French glossary, read the other way round (official Church French → English).
     "en": Language("en", "English", "ollama", user_file("glossary.json"),
                    "Hello. This is a test of the live translation. If you can hear me, everything is working."),

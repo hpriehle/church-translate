@@ -1,0 +1,870 @@
+{
+  "_note": "Official Church Russian terminology. 'fr' holds the Russian form. Edit it in the app (Settings → Glossary) or here; please have a Russian-speaking member review it. 'local_names' are people/places in your ward, kept unchanged.",
+  "local_names": [],
+  "terms": [
+    {
+      "en": "The Church of Jesus Christ of Latter-day Saints",
+      "fr": "Церковь Иисуса Христа Святых последних дней"
+    },
+    {
+      "en": "Latter-day Saints",
+      "fr": "Святые последних дней"
+    },
+    {
+      "en": "sacrament meeting",
+      "fr": "причастное собрание"
+    },
+    {
+      "en": "sacrament",
+      "fr": "причастие"
+    },
+    {
+      "en": "fast and testimony meeting",
+      "fr": "собрание поста и свидетельств"
+    },
+    {
+      "en": "bishop",
+      "fr": "епископ"
+    },
+    {
+      "en": "bishopric",
+      "fr": "епископство"
+    },
+    {
+      "en": "stake",
+      "fr": "кол"
+    },
+    {
+      "en": "stake president",
+      "fr": "президент кола"
+    },
+    {
+      "en": "stake center",
+      "fr": "центр кола"
+    },
+    {
+      "en": "ward",
+      "fr": "приход"
+    },
+    {
+      "en": "branch",
+      "fr": "небольшой приход"
+    },
+    {
+      "en": "branch president",
+      "fr": "президент небольшого прихода"
+    },
+    {
+      "en": "Relief Society",
+      "fr": "Общество милосердия"
+    },
+    {
+      "en": "Primary",
+      "fr": "Первоначальное общество"
+    },
+    {
+      "en": "Young Women",
+      "fr": "Молодые женщины"
+    },
+    {
+      "en": "Young Men",
+      "fr": "Молодые мужчины"
+    },
+    {
+      "en": "Sunday School",
+      "fr": "Воскресная школа"
+    },
+    {
+      "en": "elders quorum",
+      "fr": "кворум старейшин"
+    },
+    {
+      "en": "elder",
+      "fr": "старейшина"
+    },
+    {
+      "en": "high priest",
+      "fr": "первосвященник"
+    },
+    {
+      "en": "priesthood",
+      "fr": "священство"
+    },
+    {
+      "en": "Aaronic Priesthood",
+      "fr": "Священство Аарона"
+    },
+    {
+      "en": "Melchizedek Priesthood",
+      "fr": "Священство Мелхиседека"
+    },
+    {
+      "en": "General Conference",
+      "fr": "Генеральная конференция"
+    },
+    {
+      "en": "First Presidency",
+      "fr": "Первое Президентство"
+    },
+    {
+      "en": "Quorum of the Twelve Apostles",
+      "fr": "Кворум Двенадцати Апостолов"
+    },
+    {
+      "en": "Seventy",
+      "fr": "Семьдесят"
+    },
+    {
+      "en": "patriarchal blessing",
+      "fr": "патриархальное благословение"
+    },
+    {
+      "en": "temple",
+      "fr": "храм"
+    },
+    {
+      "en": "endowment",
+      "fr": "облечение"
+    },
+    {
+      "en": "sealing",
+      "fr": "запечатывание"
+    },
+    {
+      "en": "ordinance",
+      "fr": "таинство"
+    },
+    {
+      "en": "covenant",
+      "fr": "завет"
+    },
+    {
+      "en": "tithing",
+      "fr": "десятина"
+    },
+    {
+      "en": "fast offering",
+      "fr": "пожертвование от поста"
+    },
+    {
+      "en": "ministering",
+      "fr": "служение"
+    },
+    {
+      "en": "ministering brothers",
+      "fr": "братья-служители"
+    },
+    {
+      "en": "ministering sisters",
+      "fr": "сестры-служительницы"
+    },
+    {
+      "en": "calling",
+      "fr": "призвание"
+    },
+    {
+      "en": "missionary",
+      "fr": "миссионер"
+    },
+    {
+      "en": "mission",
+      "fr": "миссия"
+    },
+    {
+      "en": "testimony",
+      "fr": "свидетельство"
+    },
+    {
+      "en": "Atonement of Jesus Christ",
+      "fr": "Искупление Иисуса Христа"
+    },
+    {
+      "en": "Heavenly Father",
+      "fr": "Небесный Отец"
+    },
+    {
+      "en": "Holy Ghost",
+      "fr": "Святой Дух"
+    },
+    {
+      "en": "agency",
+      "fr": "свобода выбора"
+    },
+    {
+      "en": "exaltation",
+      "fr": "возвышение"
+    },
+    {
+      "en": "celestial kingdom",
+      "fr": "целестиальное царство"
+    },
+    {
+      "en": "plan of salvation",
+      "fr": "план спасения"
+    },
+    {
+      "en": "plan of happiness",
+      "fr": "план счастья"
+    },
+    {
+      "en": "Restoration",
+      "fr": "Восстановление"
+    },
+    {
+      "en": "Come, Follow Me",
+      "fr": "Приходите и следуйте за Мной"
+    },
+    {
+      "en": "family home evening",
+      "fr": "домашний семейный вечер"
+    },
+    {
+      "en": "brothers and sisters",
+      "fr": "братья и сестры"
+    }
+  ],
+  "names": [
+    {
+      "en": "Jesus Christ",
+      "fr": "Иисус Христос"
+    },
+    {
+      "en": "Jehovah",
+      "fr": "Иегова"
+    },
+    {
+      "en": "Elohim",
+      "fr": "Элохим"
+    },
+    {
+      "en": "Joseph Smith",
+      "fr": "Джозеф Смит"
+    },
+    {
+      "en": "Nephi",
+      "fr": "Нефий"
+    },
+    {
+      "en": "Nephites",
+      "fr": "нефийцы"
+    },
+    {
+      "en": "Lehi",
+      "fr": "Легий"
+    },
+    {
+      "en": "Sariah",
+      "fr": "Сария"
+    },
+    {
+      "en": "Laman",
+      "fr": "Ламан"
+    },
+    {
+      "en": "Lemuel",
+      "fr": "Лемуил"
+    },
+    {
+      "en": "Lamanites",
+      "fr": "ламанийцы"
+    },
+    {
+      "en": "Samuel the Lamanite",
+      "fr": "Самуил-ламаниец"
+    },
+    {
+      "en": "Jaredites",
+      "fr": "иаредийцы"
+    },
+    {
+      "en": "brother of Jared",
+      "fr": "брат Иареда"
+    },
+    {
+      "en": "Enos",
+      "fr": "Енос"
+    },
+    {
+      "en": "Ether",
+      "fr": "Ефер"
+    },
+    {
+      "en": "Helaman",
+      "fr": "Геламан"
+    },
+    {
+      "en": "Mosiah",
+      "fr": "Мосия"
+    },
+    {
+      "en": "King Benjamin",
+      "fr": "царь Вениамин"
+    },
+    {
+      "en": "Abinadi",
+      "fr": "Авинадей"
+    },
+    {
+      "en": "Alma",
+      "fr": "Алма"
+    },
+    {
+      "en": "Ammon",
+      "fr": "Аммон"
+    },
+    {
+      "en": "Captain Moroni",
+      "fr": "военачальник Мороний"
+    },
+    {
+      "en": "Moroni",
+      "fr": "Мороний"
+    },
+    {
+      "en": "Mormon",
+      "fr": "Мормон"
+    },
+    {
+      "en": "Korihor",
+      "fr": "Корихор"
+    },
+    {
+      "en": "Zarahemla",
+      "fr": "Зарагемля"
+    },
+    {
+      "en": "Bountiful",
+      "fr": "Изобилие"
+    },
+    {
+      "en": "Liahona",
+      "fr": "Лиахона"
+    },
+    {
+      "en": "Urim and Thummim",
+      "fr": "Урим и Туммим"
+    },
+    {
+      "en": "Hill Cumorah",
+      "fr": "холм Кумора"
+    },
+    {
+      "en": "Melchizedek",
+      "fr": "Мелхиседек"
+    },
+    {
+      "en": "Moses",
+      "fr": "Моисей"
+    },
+    {
+      "en": "Isaiah",
+      "fr": "Исаия"
+    },
+    {
+      "en": "Jeremiah",
+      "fr": "Иеремия"
+    },
+    {
+      "en": "Ezekiel",
+      "fr": "Иезекииль"
+    },
+    {
+      "en": "Elijah",
+      "fr": "Илия"
+    },
+    {
+      "en": "Elisha",
+      "fr": "Елисей"
+    },
+    {
+      "en": "Noah",
+      "fr": "Ной"
+    },
+    {
+      "en": "Eve",
+      "fr": "Ева"
+    },
+    {
+      "en": "Peter",
+      "fr": "Пётр"
+    },
+    {
+      "en": "John",
+      "fr": "Иоанн"
+    },
+    {
+      "en": "James",
+      "fr": "Иаков"
+    },
+    {
+      "en": "Matthew",
+      "fr": "Матфей"
+    },
+    {
+      "en": "Mark",
+      "fr": "Марк"
+    },
+    {
+      "en": "Luke",
+      "fr": "Лука"
+    },
+    {
+      "en": "Mary",
+      "fr": "Мария"
+    },
+    {
+      "en": "Martha",
+      "fr": "Марфа"
+    },
+    {
+      "en": "Lazarus",
+      "fr": "Лазарь"
+    },
+    {
+      "en": "Zion",
+      "fr": "Сион"
+    },
+    {
+      "en": "Jerusalem",
+      "fr": "Иерусалим"
+    },
+    {
+      "en": "Israel",
+      "fr": "Израиль"
+    },
+    {
+      "en": "Babylon",
+      "fr": "Вавилон"
+    },
+    {
+      "en": "Gethsemane",
+      "fr": "Гефсимания"
+    },
+    {
+      "en": "Golgotha",
+      "fr": "Голгофа"
+    },
+    {
+      "en": "Kirtland",
+      "fr": "Киртланд"
+    },
+    {
+      "en": "Nauvoo",
+      "fr": "Нову"
+    },
+    {
+      "en": "Liberty Jail",
+      "fr": "тюрьма Либерти"
+    },
+    {
+      "en": "Oaks",
+      "fr": "Оукс"
+    },
+    {
+      "en": "Eyring",
+      "fr": "Айринг"
+    },
+    {
+      "en": "Christofferson",
+      "fr": "Кристофферсон"
+    },
+    {
+      "en": "Holland",
+      "fr": "Холланд"
+    },
+    {
+      "en": "Uchtdorf",
+      "fr": "Ухтдорф"
+    },
+    {
+      "en": "Bednar",
+      "fr": "Беднар"
+    },
+    {
+      "en": "Andersen",
+      "fr": "Андерсен"
+    },
+    {
+      "en": "Rasband",
+      "fr": "Расбанд"
+    },
+    {
+      "en": "Renlund",
+      "fr": "Ренлунд"
+    },
+    {
+      "en": "Gong",
+      "fr": "Гонг"
+    },
+    {
+      "en": "Soares",
+      "fr": "Соарес"
+    },
+    {
+      "en": "Kearon",
+      "fr": "Кэрон"
+    },
+    {
+      "en": "Causse",
+      "fr": "Коссе"
+    }
+  ],
+  "books": [
+    {
+      "en": "Genesis",
+      "fr": "Бытие"
+    },
+    {
+      "en": "Exodus",
+      "fr": "Исход"
+    },
+    {
+      "en": "Leviticus",
+      "fr": "Левит"
+    },
+    {
+      "en": "Numbers",
+      "fr": "Числа"
+    },
+    {
+      "en": "Deuteronomy",
+      "fr": "Второзаконие"
+    },
+    {
+      "en": "Joshua",
+      "fr": "Иисус Навин"
+    },
+    {
+      "en": "Judges",
+      "fr": "Судьи"
+    },
+    {
+      "en": "Ruth",
+      "fr": "Руфь"
+    },
+    {
+      "en": "1 Samuel",
+      "fr": "1 Царств"
+    },
+    {
+      "en": "2 Samuel",
+      "fr": "2 Царств"
+    },
+    {
+      "en": "1 Kings",
+      "fr": "3 Царств"
+    },
+    {
+      "en": "2 Kings",
+      "fr": "4 Царств"
+    },
+    {
+      "en": "1 Chronicles",
+      "fr": "1 Паралипоменон"
+    },
+    {
+      "en": "2 Chronicles",
+      "fr": "2 Паралипоменон"
+    },
+    {
+      "en": "Ezra",
+      "fr": "Ездра"
+    },
+    {
+      "en": "Nehemiah",
+      "fr": "Неемия"
+    },
+    {
+      "en": "Esther",
+      "fr": "Есфирь"
+    },
+    {
+      "en": "Job",
+      "fr": "Иов"
+    },
+    {
+      "en": "Psalms",
+      "fr": "Псалтирь"
+    },
+    {
+      "en": "Proverbs",
+      "fr": "Притчи"
+    },
+    {
+      "en": "Ecclesiastes",
+      "fr": "Екклесиаст"
+    },
+    {
+      "en": "Song of Solomon",
+      "fr": "Песнь песней"
+    },
+    {
+      "en": "Isaiah",
+      "fr": "Исаия"
+    },
+    {
+      "en": "Jeremiah",
+      "fr": "Иеремия"
+    },
+    {
+      "en": "Lamentations",
+      "fr": "Плач Иеремии"
+    },
+    {
+      "en": "Ezekiel",
+      "fr": "Иезекииль"
+    },
+    {
+      "en": "Daniel",
+      "fr": "Даниил"
+    },
+    {
+      "en": "Hosea",
+      "fr": "Осия"
+    },
+    {
+      "en": "Joel",
+      "fr": "Иоиль"
+    },
+    {
+      "en": "Amos",
+      "fr": "Амос"
+    },
+    {
+      "en": "Obadiah",
+      "fr": "Авдий"
+    },
+    {
+      "en": "Jonah",
+      "fr": "Иона"
+    },
+    {
+      "en": "Micah",
+      "fr": "Михей"
+    },
+    {
+      "en": "Nahum",
+      "fr": "Наум"
+    },
+    {
+      "en": "Habakkuk",
+      "fr": "Аввакум"
+    },
+    {
+      "en": "Zephaniah",
+      "fr": "Софония"
+    },
+    {
+      "en": "Haggai",
+      "fr": "Аггей"
+    },
+    {
+      "en": "Zechariah",
+      "fr": "Захария"
+    },
+    {
+      "en": "Malachi",
+      "fr": "Малахия"
+    },
+    {
+      "en": "Matthew",
+      "fr": "От Матфея"
+    },
+    {
+      "en": "Mark",
+      "fr": "От Марка"
+    },
+    {
+      "en": "Luke",
+      "fr": "От Луки"
+    },
+    {
+      "en": "John",
+      "fr": "От Иоанна"
+    },
+    {
+      "en": "Acts",
+      "fr": "Деяния"
+    },
+    {
+      "en": "Romans",
+      "fr": "Римлянам"
+    },
+    {
+      "en": "1 Corinthians",
+      "fr": "1 Коринфянам"
+    },
+    {
+      "en": "2 Corinthians",
+      "fr": "2 Коринфянам"
+    },
+    {
+      "en": "Galatians",
+      "fr": "Галатам"
+    },
+    {
+      "en": "Ephesians",
+      "fr": "Ефесянам"
+    },
+    {
+      "en": "Philippians",
+      "fr": "Филиппийцам"
+    },
+    {
+      "en": "Colossians",
+      "fr": "Колоссянам"
+    },
+    {
+      "en": "1 Thessalonians",
+      "fr": "1 Фессалоникийцам"
+    },
+    {
+      "en": "2 Thessalonians",
+      "fr": "2 Фессалоникийцам"
+    },
+    {
+      "en": "1 Timothy",
+      "fr": "1 Тимофею"
+    },
+    {
+      "en": "2 Timothy",
+      "fr": "2 Тимофею"
+    },
+    {
+      "en": "Titus",
+      "fr": "Титу"
+    },
+    {
+      "en": "Philemon",
+      "fr": "Филимону"
+    },
+    {
+      "en": "Hebrews",
+      "fr": "Евреям"
+    },
+    {
+      "en": "James",
+      "fr": "Иакова"
+    },
+    {
+      "en": "1 Peter",
+      "fr": "1 Петра"
+    },
+    {
+      "en": "2 Peter",
+      "fr": "2 Петра"
+    },
+    {
+      "en": "1 John",
+      "fr": "1 Иоанна"
+    },
+    {
+      "en": "2 John",
+      "fr": "2 Иоанна"
+    },
+    {
+      "en": "3 John",
+      "fr": "3 Иоанна"
+    },
+    {
+      "en": "Jude",
+      "fr": "Иуды"
+    },
+    {
+      "en": "Revelation",
+      "fr": "Откровение"
+    },
+    {
+      "en": "Book of Mormon",
+      "fr": "Книга Мормона"
+    },
+    {
+      "en": "1 Nephi",
+      "fr": "1 Нефий"
+    },
+    {
+      "en": "2 Nephi",
+      "fr": "2 Нефий"
+    },
+    {
+      "en": "Jacob",
+      "fr": "Иаков"
+    },
+    {
+      "en": "Enos",
+      "fr": "Енос"
+    },
+    {
+      "en": "Jarom",
+      "fr": "Иаром"
+    },
+    {
+      "en": "Omni",
+      "fr": "Омний"
+    },
+    {
+      "en": "Words of Mormon",
+      "fr": "Слова Мормона"
+    },
+    {
+      "en": "Mosiah",
+      "fr": "Мосия"
+    },
+    {
+      "en": "Alma",
+      "fr": "Алма"
+    },
+    {
+      "en": "Helaman",
+      "fr": "Геламан"
+    },
+    {
+      "en": "3 Nephi",
+      "fr": "3 Нефий"
+    },
+    {
+      "en": "4 Nephi",
+      "fr": "4 Нефий"
+    },
+    {
+      "en": "Mormon",
+      "fr": "Мормон"
+    },
+    {
+      "en": "Ether",
+      "fr": "Ефер"
+    },
+    {
+      "en": "Moroni",
+      "fr": "Мороний"
+    },
+    {
+      "en": "Doctrine and Covenants",
+      "fr": "Учение и Заветы"
+    },
+    {
+      "en": "Pearl of Great Price",
+      "fr": "Драгоценная Жемчужина"
+    },
+    {
+      "en": "Moses (Pearl of Great Price)",
+      "fr": "Моисей"
+    },
+    {
+      "en": "Abraham",
+      "fr": "Авраам"
+    },
+    {
+      "en": "Joseph Smith—Matthew",
+      "fr": "Джозеф Смит – От Матфея"
+    },
+    {
+      "en": "Joseph Smith—History",
+      "fr": "Джозеф Смит – История"
+    },
+    {
+      "en": "Articles of Faith",
+      "fr": "Символы веры"
+    }
+  ]
+}

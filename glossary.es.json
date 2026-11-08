@@ -1,0 +1,818 @@
+{
+  "_note": "Official Church Spanish terminology. 'fr' holds the Spanish form. Edit it in the app (Settings → Glossary) or here; please have a Spanish-speaking member review it. 'local_names' are people/places in your ward, kept unchanged.",
+  "local_names": [],
+  "terms": [
+    {
+      "en": "The Church of Jesus Christ of Latter-day Saints",
+      "fr": "La Iglesia de Jesucristo de los Santos de los Últimos Días"
+    },
+    {
+      "en": "Latter-day Saints",
+      "fr": "Santos de los Últimos Días"
+    },
+    {
+      "en": "sacrament meeting",
+      "fr": "reunión sacramental"
+    },
+    {
+      "en": "sacrament",
+      "fr": "Santa Cena"
+    },
+    {
+      "en": "fast and testimony meeting",
+      "fr": "reunión de ayuno y testimonios"
+    },
+    {
+      "en": "bishop",
+      "fr": "obispo"
+    },
+    {
+      "en": "bishopric",
+      "fr": "obispado"
+    },
+    {
+      "en": "stake",
+      "fr": "estaca"
+    },
+    {
+      "en": "stake president",
+      "fr": "presidente de estaca"
+    },
+    {
+      "en": "stake center",
+      "fr": "centro de estaca"
+    },
+    {
+      "en": "ward",
+      "fr": "barrio"
+    },
+    {
+      "en": "branch",
+      "fr": "rama"
+    },
+    {
+      "en": "branch president",
+      "fr": "presidente de rama"
+    },
+    {
+      "en": "Relief Society",
+      "fr": "Sociedad de Socorro"
+    },
+    {
+      "en": "Primary",
+      "fr": "Primaria"
+    },
+    {
+      "en": "Young Women",
+      "fr": "Mujeres Jóvenes"
+    },
+    {
+      "en": "Young Men",
+      "fr": "Hombres Jóvenes"
+    },
+    {
+      "en": "Sunday School",
+      "fr": "Escuela Dominical"
+    },
+    {
+      "en": "elders quorum",
+      "fr": "cuórum de élderes"
+    },
+    {
+      "en": "elder",
+      "fr": "élder"
+    },
+    {
+      "en": "high priest",
+      "fr": "sumo sacerdote"
+    },
+    {
+      "en": "priesthood",
+      "fr": "sacerdocio"
+    },
+    {
+      "en": "Aaronic Priesthood",
+      "fr": "Sacerdocio Aarónico"
+    },
+    {
+      "en": "Melchizedek Priesthood",
+      "fr": "Sacerdocio de Melquisedec"
+    },
+    {
+      "en": "General Conference",
+      "fr": "Conferencia General"
+    },
+    {
+      "en": "First Presidency",
+      "fr": "Primera Presidencia"
+    },
+    {
+      "en": "Quorum of the Twelve Apostles",
+      "fr": "Cuórum de los Doce Apóstoles"
+    },
+    {
+      "en": "Seventy",
+      "fr": "Setenta"
+    },
+    {
+      "en": "patriarchal blessing",
+      "fr": "bendición patriarcal"
+    },
+    {
+      "en": "temple",
+      "fr": "templo"
+    },
+    {
+      "en": "endowment",
+      "fr": "investidura"
+    },
+    {
+      "en": "sealing",
+      "fr": "sellamiento"
+    },
+    {
+      "en": "ordinance",
+      "fr": "ordenanza"
+    },
+    {
+      "en": "covenant",
+      "fr": "convenio"
+    },
+    {
+      "en": "tithing",
+      "fr": "diezmo"
+    },
+    {
+      "en": "fast offering",
+      "fr": "ofrenda de ayuno"
+    },
+    {
+      "en": "ministering",
+      "fr": "ministración"
+    },
+    {
+      "en": "ministering brothers",
+      "fr": "hermanos ministrantes"
+    },
+    {
+      "en": "ministering sisters",
+      "fr": "hermanas ministrantes"
+    },
+    {
+      "en": "calling",
+      "fr": "llamamiento"
+    },
+    {
+      "en": "missionary",
+      "fr": "misionero"
+    },
+    {
+      "en": "mission",
+      "fr": "misión"
+    },
+    {
+      "en": "testimony",
+      "fr": "testimonio"
+    },
+    {
+      "en": "Atonement of Jesus Christ",
+      "fr": "Expiación de Jesucristo"
+    },
+    {
+      "en": "Heavenly Father",
+      "fr": "Padre Celestial"
+    },
+    {
+      "en": "Holy Ghost",
+      "fr": "Espíritu Santo"
+    },
+    {
+      "en": "agency",
+      "fr": "albedrío"
+    },
+    {
+      "en": "exaltation",
+      "fr": "exaltación"
+    },
+    {
+      "en": "celestial kingdom",
+      "fr": "reino celestial"
+    },
+    {
+      "en": "plan of salvation",
+      "fr": "plan de salvación"
+    },
+    {
+      "en": "plan of happiness",
+      "fr": "plan de felicidad"
+    },
+    {
+      "en": "Restoration",
+      "fr": "Restauración"
+    },
+    {
+      "en": "Come, Follow Me",
+      "fr": "Ven, sígueme"
+    },
+    {
+      "en": "family home evening",
+      "fr": "noche de hogar"
+    },
+    {
+      "en": "brothers and sisters",
+      "fr": "hermanos y hermanas"
+    }
+  ],
+  "names": [
+    {
+      "en": "Jesus Christ",
+      "fr": "Jesucristo"
+    },
+    {
+      "en": "Jehovah",
+      "fr": "Jehová"
+    },
+    {
+      "en": "Elohim",
+      "fr": "Elohim"
+    },
+    {
+      "en": "Joseph Smith",
+      "fr": "José Smith"
+    },
+    {
+      "en": "Nephi",
+      "fr": "Nefi"
+    },
+    {
+      "en": "Nephites",
+      "fr": "nefitas"
+    },
+    {
+      "en": "Lehi",
+      "fr": "Lehi"
+    },
+    {
+      "en": "Sariah",
+      "fr": "Saríah"
+    },
+    {
+      "en": "Laman",
+      "fr": "Lamán"
+    },
+    {
+      "en": "Lemuel",
+      "fr": "Lemuel"
+    },
+    {
+      "en": "Lamanites",
+      "fr": "lamanitas"
+    },
+    {
+      "en": "Samuel the Lamanite",
+      "fr": "Samuel el Lamanita"
+    },
+    {
+      "en": "Jaredites",
+      "fr": "jareditas"
+    },
+    {
+      "en": "brother of Jared",
+      "fr": "hermano de Jared"
+    },
+    {
+      "en": "Enos",
+      "fr": "Enós"
+    },
+    {
+      "en": "Ether",
+      "fr": "Éter"
+    },
+    {
+      "en": "Helaman",
+      "fr": "Helamán"
+    },
+    {
+      "en": "Mosiah",
+      "fr": "Mosíah"
+    },
+    {
+      "en": "King Benjamin",
+      "fr": "rey Benjamín"
+    },
+    {
+      "en": "Abinadi",
+      "fr": "Abinadí"
+    },
+    {
+      "en": "Alma",
+      "fr": "Alma"
+    },
+    {
+      "en": "Ammon",
+      "fr": "Ammón"
+    },
+    {
+      "en": "Captain Moroni",
+      "fr": "capitán Moroni"
+    },
+    {
+      "en": "Moroni",
+      "fr": "Moroni"
+    },
+    {
+      "en": "Mormon",
+      "fr": "Mormón"
+    },
+    {
+      "en": "Korihor",
+      "fr": "Korihor"
+    },
+    {
+      "en": "Zarahemla",
+      "fr": "Zarahemla"
+    },
+    {
+      "en": "Bountiful",
+      "fr": "Abundancia"
+    },
+    {
+      "en": "Liahona",
+      "fr": "Liahona"
+    },
+    {
+      "en": "Urim and Thummim",
+      "fr": "Urim y Tumim"
+    },
+    {
+      "en": "Hill Cumorah",
+      "fr": "cerro Cumorah"
+    },
+    {
+      "en": "Melchizedek",
+      "fr": "Melquisedec"
+    },
+    {
+      "en": "Moses",
+      "fr": "Moisés"
+    },
+    {
+      "en": "Isaiah",
+      "fr": "Isaías"
+    },
+    {
+      "en": "Jeremiah",
+      "fr": "Jeremías"
+    },
+    {
+      "en": "Ezekiel",
+      "fr": "Ezequiel"
+    },
+    {
+      "en": "Elijah",
+      "fr": "Elías"
+    },
+    {
+      "en": "Elisha",
+      "fr": "Eliseo"
+    },
+    {
+      "en": "Noah",
+      "fr": "Noé"
+    },
+    {
+      "en": "Eve",
+      "fr": "Eva"
+    },
+    {
+      "en": "Peter",
+      "fr": "Pedro"
+    },
+    {
+      "en": "John",
+      "fr": "Juan"
+    },
+    {
+      "en": "James",
+      "fr": "Santiago"
+    },
+    {
+      "en": "Matthew",
+      "fr": "Mateo"
+    },
+    {
+      "en": "Mark",
+      "fr": "Marcos"
+    },
+    {
+      "en": "Luke",
+      "fr": "Lucas"
+    },
+    {
+      "en": "Mary",
+      "fr": "María"
+    },
+    {
+      "en": "Martha",
+      "fr": "Marta"
+    },
+    {
+      "en": "Lazarus",
+      "fr": "Lázaro"
+    },
+    {
+      "en": "Zion",
+      "fr": "Sion"
+    },
+    {
+      "en": "Jerusalem",
+      "fr": "Jerusalén"
+    },
+    {
+      "en": "Israel",
+      "fr": "Israel"
+    },
+    {
+      "en": "Babylon",
+      "fr": "Babilonia"
+    },
+    {
+      "en": "Gethsemane",
+      "fr": "Getsemaní"
+    },
+    {
+      "en": "Golgotha",
+      "fr": "Gólgota"
+    },
+    {
+      "en": "Kirtland",
+      "fr": "Kirtland"
+    },
+    {
+      "en": "Nauvoo",
+      "fr": "Nauvoo"
+    },
+    {
+      "en": "Liberty Jail",
+      "fr": "cárcel de Liberty"
+    }
+  ],
+  "books": [
+    {
+      "en": "Genesis",
+      "fr": "Génesis"
+    },
+    {
+      "en": "Exodus",
+      "fr": "Éxodo"
+    },
+    {
+      "en": "Leviticus",
+      "fr": "Levítico"
+    },
+    {
+      "en": "Numbers",
+      "fr": "Números"
+    },
+    {
+      "en": "Deuteronomy",
+      "fr": "Deuteronomio"
+    },
+    {
+      "en": "Joshua",
+      "fr": "Josué"
+    },
+    {
+      "en": "Judges",
+      "fr": "Jueces"
+    },
+    {
+      "en": "Ruth",
+      "fr": "Rut"
+    },
+    {
+      "en": "1 Samuel",
+      "fr": "1 Samuel"
+    },
+    {
+      "en": "2 Samuel",
+      "fr": "2 Samuel"
+    },
+    {
+      "en": "1 Kings",
+      "fr": "1 Reyes"
+    },
+    {
+      "en": "2 Kings",
+      "fr": "2 Reyes"
+    },
+    {
+      "en": "1 Chronicles",
+      "fr": "1 Crónicas"
+    },
+    {
+      "en": "2 Chronicles",
+      "fr": "2 Crónicas"
+    },
+    {
+      "en": "Ezra",
+      "fr": "Esdras"
+    },
+    {
+      "en": "Nehemiah",
+      "fr": "Nehemías"
+    },
+    {
+      "en": "Esther",
+      "fr": "Ester"
+    },
+    {
+      "en": "Job",
+      "fr": "Job"
+    },
+    {
+      "en": "Psalms",
+      "fr": "Salmos"
+    },
+    {
+      "en": "Proverbs",
+      "fr": "Proverbios"
+    },
+    {
+      "en": "Ecclesiastes",
+      "fr": "Eclesiastés"
+    },
+    {
+      "en": "Song of Solomon",
+      "fr": "Cantares"
+    },
+    {
+      "en": "Isaiah",
+      "fr": "Isaías"
+    },
+    {
+      "en": "Jeremiah",
+      "fr": "Jeremías"
+    },
+    {
+      "en": "Lamentations",
+      "fr": "Lamentaciones"
+    },
+    {
+      "en": "Ezekiel",
+      "fr": "Ezequiel"
+    },
+    {
+      "en": "Daniel",
+      "fr": "Daniel"
+    },
+    {
+      "en": "Hosea",
+      "fr": "Oseas"
+    },
+    {
+      "en": "Joel",
+      "fr": "Joel"
+    },
+    {
+      "en": "Amos",
+      "fr": "Amós"
+    },
+    {
+      "en": "Obadiah",
+      "fr": "Abdías"
+    },
+    {
+      "en": "Jonah",
+      "fr": "Jonás"
+    },
+    {
+      "en": "Micah",
+      "fr": "Miqueas"
+    },
+    {
+      "en": "Nahum",
+      "fr": "Nahúm"
+    },
+    {
+      "en": "Habakkuk",
+      "fr": "Habacuc"
+    },
+    {
+      "en": "Zephaniah",
+      "fr": "Sofonías"
+    },
+    {
+      "en": "Haggai",
+      "fr": "Hageo"
+    },
+    {
+      "en": "Zechariah",
+      "fr": "Zacarías"
+    },
+    {
+      "en": "Malachi",
+      "fr": "Malaquías"
+    },
+    {
+      "en": "Matthew",
+      "fr": "Mateo"
+    },
+    {
+      "en": "Mark",
+      "fr": "Marcos"
+    },
+    {
+      "en": "Luke",
+      "fr": "Lucas"
+    },
+    {
+      "en": "John",
+      "fr": "Juan"
+    },
+    {
+      "en": "Acts",
+      "fr": "Hechos"
+    },
+    {
+      "en": "Romans",
+      "fr": "Romanos"
+    },
+    {
+      "en": "1 Corinthians",
+      "fr": "1 Corintios"
+    },
+    {
+      "en": "2 Corinthians",
+      "fr": "2 Corintios"
+    },
+    {
+      "en": "Galatians",
+      "fr": "Gálatas"
+    },
+    {
+      "en": "Ephesians",
+      "fr": "Efesios"
+    },
+    {
+      "en": "Philippians",
+      "fr": "Filipenses"
+    },
+    {
+      "en": "Colossians",
+      "fr": "Colosenses"
+    },
+    {
+      "en": "1 Thessalonians",
+      "fr": "1 Tesalonicenses"
+    },
+    {
+      "en": "2 Thessalonians",
+      "fr": "2 Tesalonicenses"
+    },
+    {
+      "en": "1 Timothy",
+      "fr": "1 Timoteo"
+    },
+    {
+      "en": "2 Timothy",
+      "fr": "2 Timoteo"
+    },
+    {
+      "en": "Titus",
+      "fr": "Tito"
+    },
+    {
+      "en": "Philemon",
+      "fr": "Filemón"
+    },
+    {
+      "en": "Hebrews",
+      "fr": "Hebreos"
+    },
+    {
+      "en": "James",
+      "fr": "Santiago"
+    },
+    {
+      "en": "1 Peter",
+      "fr": "1 Pedro"
+    },
+    {
+      "en": "2 Peter",
+      "fr": "2 Pedro"
+    },
+    {
+      "en": "1 John",
+      "fr": "1 Juan"
+    },
+    {
+      "en": "2 John",
+      "fr": "2 Juan"
+    },
+    {
+      "en": "3 John",
+      "fr": "3 Juan"
+    },
+    {
+      "en": "Jude",
+      "fr": "Judas"
+    },
+    {
+      "en": "Revelation",
+      "fr": "Apocalipsis"
+    },
+    {
+      "en": "Book of Mormon",
+      "fr": "Libro de Mormón"
+    },
+    {
+      "en": "1 Nephi",
+      "fr": "1 Nefi"
+    },
+    {
+      "en": "2 Nephi",
+      "fr": "2 Nefi"
+    },
+    {
+      "en": "Jacob",
+      "fr": "Jacob"
+    },
+    {
+      "en": "Enos",
+      "fr": "Enós"
+    },
+    {
+      "en": "Jarom",
+      "fr": "Jarom"
+    },
+    {
+      "en": "Omni",
+      "fr": "Omni"
+    },
+    {
+      "en": "Words of Mormon",
+      "fr": "Palabras de Mormón"
+    },
+    {
+      "en": "Mosiah",
+      "fr": "Mosíah"
+    },
+    {
+      "en": "Alma",
+      "fr": "Alma"
+    },
+    {
+      "en": "Helaman",
+      "fr": "Helamán"
+    },
+    {
+      "en": "3 Nephi",
+      "fr": "3 Nefi"
+    },
+    {
+      "en": "4 Nephi",
+      "fr": "4 Nefi"
+    },
+    {
+      "en": "Mormon",
+      "fr": "Mormón"
+    },
+    {
+      "en": "Ether",
+      "fr": "Éter"
+    },
+    {
+      "en": "Moroni",
+      "fr": "Moroni"
+    },
+    {
+      "en": "Doctrine and Covenants",
+      "fr": "Doctrina y Convenios"
+    },
+    {
+      "en": "Pearl of Great Price",
+      "fr": "Perla de Gran Precio"
+    },
+    {
+      "en": "Moses (Pearl of Great Price)",
+      "fr": "Moisés"
+    },
+    {
+      "en": "Abraham",
+      "fr": "Abraham"
+    },
+    {
+      "en": "Joseph Smith—Matthew",
+      "fr": "José Smith—Mateo"
+    },
+    {
+      "en": "Joseph Smith—History",
+      "fr": "José Smith—Historia"
+    },
+    {
+      "en": "Articles of Faith",
+      "fr": "Artículos de Fe"
+    }
+  ]
+}

@@ -143,6 +143,8 @@ class VoiceCfg(BaseModel):
 # Wolof: SpeechT5 (male/female) is fast on Apple Silicon; elsewhere the faster MMS voice keeps up better.
 DEFAULT_VOICES: dict[str, VoiceCfg] = {
     "wo": VoiceCfg(engine="speecht5", voice="male") if sys.platform == "darwin" else VoiceCfg(engine="mms", voice="default"),
+    "es": VoiceCfg(engine="piper", voice="es_MX-ald-medium"),
+    "ru": VoiceCfg(engine="piper", voice="ru_RU-denis-medium"),
     "en": VoiceCfg(engine="say", voice="")}
 
 

@@ -39,9 +39,21 @@ def speechify_wo(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+# How a reference like 3:16 is read aloud: the voices would otherwise read it as a time of day.
+_CHAPTER_VERSE = {"es": ("capítulo", "versículo"), "ru": ("глава", "стих")}
+
+
+def speechify_refs(code: str, text: str) -> str:
+    chapter, verse = _CHAPTER_VERSE[code]
+    t = re.sub(r"(\d+)\s*:\s*(\d+)", rf"{chapter} \1, {verse} \2", text)
+    return re.sub(r"\s+", " ", t.replace("«", "").replace("»", "")).strip()
+
+
 def speechify(code: str, text: str) -> str:
     if code == "fr":
         return speechify_fr(text)
     if code == "wo":
         return speechify_wo(text)
+    if code in _CHAPTER_VERSE:
+        return speechify_refs(code, text)
     return re.sub(r"\s+", " ", text).strip()
