@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,28 @@ from pathlib import Path
 log = logging.getLogger("claude")
 
 _HELP_CACHE: str | None = None
+
+
+_installing = threading.Lock()
+
+
+def ensure_claude_cli() -> str | None:
+    """Install Claude Code with Anthropic's official installer (into ~/.local/bin) when it is missing.
+    Used by the Mac app when the congregation pasted a subscription token instead of an API key."""
+    if claude_binary():
+        return claude_binary()
+    with _installing:
+        if claude_binary():
+            return claude_binary()
+        log.info("Claude Code is not installed: installing it for the subscription token")
+        try:
+            r = subprocess.run(["/bin/bash", "-c", "curl -fsSL https://claude.ai/install.sh | bash"],
+                               capture_output=True, text=True, timeout=600)
+            if r.returncode:
+                log.warning("Claude Code install failed (%s): %s", r.returncode, (r.stderr or r.stdout)[-500:])
+        except Exception as e:  # noqa: BLE001
+            log.warning("Claude Code install failed: %s", e)
+    return claude_binary()
 
 
 def claude_binary() -> str | None:
@@ -118,6 +141,8 @@ class ClaudeSession:
     async def start(self) -> None:
         binary = claude_binary()
         if not binary:
+            if _installing.locked():
+                raise RuntimeError("installing Claude Code, one moment")
             raise RuntimeError("the `claude` CLI is not installed")
         self.workdir.mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE") and k != "CLAUDE_CODE_ENTRYPOINT"}

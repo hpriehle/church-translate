@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -250,9 +251,15 @@ async def lifespan(app: FastAPI):
         S.settings.server.port = S.port_override
     if S.mode_override:
         S.settings.translate.mode = S.mode_override
-    if S.app_mode:  # no Ollama and no Claude Code inside the app: the congregation's own API key
+    if S.app_mode:  # no Ollama inside the app: the congregation's own API key, straight to the API
         S.settings.translate.mode = "claude"
         S.settings.translate.backend = "api"
+        # Unadvertised: a Claude subscription token (sk-ant-oat…) only works through Claude Code itself.
+        if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") and not os.environ.get("ANTHROPIC_API_KEY"):
+            S.settings.translate.backend = "cli"
+            from .translate.claude_session import ensure_claude_cli
+
+            asyncio.create_task(asyncio.to_thread(ensure_claude_cli))
     S.started = time.time()
     hear_api.setup(S.settings)
     from .packages import PACKAGES

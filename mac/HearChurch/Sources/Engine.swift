@@ -90,7 +90,8 @@ final class Engine: ObservableObject {
         p.executableURL = exe
         p.arguments = args + ["-m", "app", "--app", "--no-browser", "--port", String(port)]
         p.currentDirectoryURL = cwd
-        var env = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("HEARCHURCH_") && $0.key != "ANTHROPIC_API_KEY" }
+        var env = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("HEARCHURCH_") && $0.key != "ANTHROPIC_API_KEY"
+            && $0.key != "CLAUDE_CODE_OAUTH_TOKEN" }
         env["HEARCHURCH_HOME"] = AppPaths.home.path
         env["PYTHONUNBUFFERED"] = "1"
         env["PATH"] = (Bundle.main.resourceURL.map { $0.appendingPathComponent("bin").path + ":" } ?? "")

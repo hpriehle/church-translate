@@ -104,7 +104,10 @@ final class AppModel: ObservableObject {
 
     private func engineEnvironment() -> [String: String] {
         var env: [String: String] = ["HEARCHURCH_DEVICE_NAME": deviceName]
-        if let key = Keychain.get(.apiKey) { env["ANTHROPIC_API_KEY"] = key }
+        if let key = Keychain.get(.apiKey) {
+            // Unadvertised: a Claude subscription token runs through Claude Code instead of the API.
+            env[HubClient.isSubscriptionToken(key) ? "CLAUDE_CODE_OAUTH_TOKEN" : "ANTHROPIC_API_KEY"] = key
+        }
         if profile.setupDone, let token = Keychain.get(.deviceToken),
            var c = URLComponents(url: AppPaths.hub, resolvingAgainstBaseURL: false) {
             c.scheme = c.scheme == "http" ? "ws" : "wss"

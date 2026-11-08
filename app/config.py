@@ -220,6 +220,8 @@ def claude_access(path: Path = SECRETS_PATH) -> str:
     s = load_secrets(path)
     if os.environ.get("ANTHROPIC_API_KEY"):  # e.g. passed in by the Mac app from the Keychain
         return "api_key"
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):  # a subscription token, also from the Mac app
+        return "token"
     return "api_key" if "ANTHROPIC_API_KEY" in s else "token" if "CLAUDE_CODE_OAUTH_TOKEN" in s else "login"
 
 

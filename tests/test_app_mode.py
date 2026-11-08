@@ -90,6 +90,24 @@ def test_router_uses_the_api_without_the_claude_cli(monkeypatch, tmp_path):
     assert not Translator(TranslateCfg(mode="claude"), {}, tmp_path).has_claude
 
 
+def test_cli_appearing_later_turns_claude_on(monkeypatch, tmp_path):
+    """Subscription token in the Mac app: Claude Code may be installed after the translator was made."""
+    found = {"bin": None}
+    monkeypatch.setattr("app.translate.router.claude_binary", lambda: found["bin"])
+    t = Translator(TranslateCfg(mode="claude", backend="cli"), {}, tmp_path)
+    assert not t.has_claude
+    found["bin"] = "/usr/local/bin/claude"
+    assert t.has_claude
+
+
+def test_subscription_token_from_the_app_counts_as_token(monkeypatch, tmp_path):
+    from app.config import claude_access
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-" + "x" * 40)
+    assert claude_access(tmp_path / "none.env") == "token"
+
+
 def test_env_overrides_win(monkeypatch):
     from app import config
 

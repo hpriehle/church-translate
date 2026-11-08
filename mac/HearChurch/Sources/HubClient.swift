@@ -114,8 +114,16 @@ enum HubClient {
         return (resp as? HTTPURLResponse)?.statusCode == 200
     }
 
+    static func isSubscriptionToken(_ key: String) -> Bool { key.hasPrefix("sk-ant-oat") }
+
     /// A free call that proves the key works: list the models it may use.
     static func checkAnthropicKey(_ key: String) async -> Result<Void, Failure> {
+        // A subscription token (from `claude setup-token`) can't be checked against the API; Claude Code
+        // uses it, and the engine reports any problem with it.
+        if isSubscriptionToken(key) {
+            return key.count >= 40 && key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+                ? .success(()) : .failure(Failure(message: "That token looks incomplete. Copy it again."))
+        }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/models?limit=1")!)
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")

@@ -72,11 +72,22 @@ class Translator:
         self.retired_usage = Usage()
         self.counts: Counter[str] = Counter()
         self.last_error = ""
-        self.has_claude = cfg.backend == "api" or claude_binary() is not None
+        self._has_claude: bool | None = None
         self.sessions_started = 0
         self.last_activity = 0.0
 
     # ------------------------------------------------------------ lifecycle
+    @property
+    def has_claude(self) -> bool:
+        # Checked live: the Mac app may install Claude Code after the engine started (subscription token).
+        if self._has_claude is not None:
+            return self._has_claude
+        return self.cfg.backend == "api" or claude_binary() is not None
+
+    @has_claude.setter
+    def has_claude(self, value: bool) -> None:
+        self._has_claude = value
+
     @property
     def uses_ollama(self) -> bool:
         return self.lang.fallback == "ollama" and self.cfg.mode != "claude"
@@ -138,7 +149,6 @@ class Translator:
         restart = (new_prompt != self.system_prompt or cfg.claude_model != self.cfg.claude_model
                    or cfg.claude_effort != self.cfg.claude_effort or cfg.backend != self.cfg.backend)
         self.cfg = cfg
-        self.has_claude = cfg.backend == "api" or claude_binary() is not None
         self.system_prompt = new_prompt
         self.ollama.url = cfg.ollama_url.rstrip("/")
         self.ollama.timeout_s = cfg.ollama_timeout_s
