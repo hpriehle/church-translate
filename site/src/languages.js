@@ -10,6 +10,7 @@ export const LANGUAGES = [
   { code: "fa", name: "Persian", native: "فارسی", flag: "ir", also: "farsi", rtl: true },
   { code: "ne", name: "Nepali", native: "नेपाली", flag: "np" },
   { code: "vi", name: "Vietnamese", native: "Tiếng Việt", flag: "vn" },
+  { code: "zh", name: "Chinese", native: "中文", flag: "cn", also: "mandarin" },
   { code: "en", name: "English", native: "English", flag: "us" },
 ];
 
