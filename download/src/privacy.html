@@ -45,7 +45,7 @@ footer a { color: inherit; }
 
 <h2>If you listen</h2>
 <ul>
-  <li><b>Finding a congregation.</b> If you tap the button to find one nearby, your phone sends your location, rounded to about 100 meters, to our server. It is used to answer that one request. We don't store it or write it to our logs. If you search by name instead, the search text is used the same way.</li>
+  <li><b>Finding a congregation.</b> When you open the finder, your phone asks whether to share your location. If you allow it, your phone sends your location, rounded to about 100 meters, to our server. It is used to answer that one request. We don't store it or write it to our logs. If you search by name instead, the search text is used the same way.</li>
   <li><b>Listening.</b> Captions and translated voice are held in memory only while the meeting is live. They are not saved on our server. Your phone remembers your language choice in its own storage.</li>
   <li><b>You're not identified.</b> We don't ask for your name or email. Anyone with a congregation's link can listen, and meetings are not protected by a password.</li>
 </ul>
@@ -82,6 +82,7 @@ footer a { color: inherit; }
   <li><b>Anthropic</b> receives the text of what is said in the meeting so Claude can translate it, using the API key you provide. Your use of that key is governed by your agreement with Anthropic; see <a href="https://www.anthropic.com/legal/privacy">Anthropic's privacy policy</a>.</li>
   <li><b>Cloudflare</b> runs the network in front of hearchurch.com and stores app downloads. All website traffic, including IP addresses and the rounded location above, passes through it, and it may keep short-term logs.</li>
   <li><b>OpenStreetMap Nominatim or Mapbox</b> receive the address or building location you enter at sign-up, to place it on the map.</li>
+  <li><b>Apple</b> receives the address you type in the Mac app during setup, or the Mac's location if you use it, to place the building on the map.</li>
   <li><b>Hugging Face</b> hosts the speech and voice models. The app downloads them from there, so Hugging Face sees your Mac's IP address.</li>
   <li><b>Email providers</b> handle messages you send to our support address.</li>
 </ul>
