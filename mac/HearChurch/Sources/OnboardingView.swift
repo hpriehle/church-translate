@@ -476,7 +476,7 @@ struct LanguageToggle: View {
                 Text(language.name)
                 Spacer()
                 if !language.available {
-                    Text("coming soon").foregroundStyle(.secondary)
+                    Text(language.unavailableReason ?? "Not available").foregroundStyle(.secondary)
                 } else {
                     PackageBadge(package: pkg, sizeMB: language.sizeMB, selected: on)
                 }
@@ -517,7 +517,7 @@ private struct LanguagesStep: View {
             Text("Speech recognition").foregroundStyle(.secondary)
             Text("needed for every language").font(.callout).foregroundStyle(.tertiary)
             Spacer()
-            PackageBadge(package: model.engine.packages.first { $0.id == "speech" }, sizeMB: 1615, selected: model.profile.languagesPicked)
+            PackageBadge(package: model.engine.packages.first { $0.id == "speech" }, sizeMB: speechDownloadMB, selected: model.profile.languagesPicked)
         }
     }
 }

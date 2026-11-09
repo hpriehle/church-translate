@@ -4,6 +4,8 @@
 #   mac/build.sh                 → mac/build/Hear Church.app (signed with your Apple Development identity)
 #   SIGN_ID="Developer ID Application" mac/build.sh     (sign for distribution: mac/release.sh does this)
 #   mac/build.sh --app-only      → rebuild the Swift app and engine code, reuse the last bundled Python
+#   HC_ARCH=intel mac/build.sh   → mac/build/intel/Hear Church.app for Intel Macs: x86_64 Python and Swift,
+#                                  CPU speech recognition (faster-whisper), no Wolof voice, its own update feed
 #
 # The app contains a standalone CPython (python-build-standalone, via uv) with the locked dependencies,
 # and the engine code (app/, web/, models shipped in the repo). Voices and speech models are downloaded
@@ -18,24 +20,42 @@ SIGN_ID="${SIGN_ID:-Apple Development}"
 PY_VERSION="$(cat "$REPO/.python-version")"
 OUT="$MAC/build/Hear Church.app"
 STAGE="$MAC/build/engine-stage"     # bundled Python + engine, reused by --app-only
+DD=build/dd
+INTEL=""
+if [[ "${HC_ARCH:-}" == "intel" ]]; then
+  INTEL=1
+  OUT="$MAC/build/intel/Hear Church.app"
+  STAGE="$MAC/build/intel/engine-stage"
+  DD=build/dd-intel
+  mkdir -p "$MAC/build/intel"
+fi
+PY_REQ="$PY_VERSION"
+[[ -n "$INTEL" ]] && PY_REQ="cpython-$PY_VERSION-macos-x86_64-none"
 
 step() { echo "== $*"; }
 
 if [[ "${1:-}" != "--app-only" || ! -d "$STAGE/python" ]]; then
   step "Standalone Python $PY_VERSION"
-  uv python install --quiet "$PY_VERSION"
-  PY_SRC="$(dirname "$(dirname "$(uv python find --no-project --system --managed-python "$PY_VERSION")")")"
+  uv python install --quiet "$PY_REQ"
+  PY_SRC="$(dirname "$(dirname "$(uv python find --no-project --system --managed-python "$PY_REQ")")")"
   rm -rf "$STAGE" && mkdir -p "$STAGE"
   cp -R "$PY_SRC" "$STAGE/python"
   rm -f "$STAGE/python/lib/python$PY_VERSION/EXTERNALLY-MANAGED"
   PY="$STAGE/python/bin/python3"
 
   step "Python packages (from uv.lock)"
-  (cd "$REPO" && uv export --quiet --frozen --no-dev --no-hashes --no-emit-project -o "$STAGE/requirements.txt")
-  "$PY" -I "$MAC/split_requirements.py" "$REPO/uv.lock" "$STAGE/requirements.txt" "$STAGE/app.txt" "$STAGE/wolof.txt"
-  uv pip install --quiet --python "$PY" --no-deps --link-mode copy --compile-bytecode -r "$STAGE/app.txt"
-  # A package wrongly left out would only show up on a church's Mac, so try the imports here.
-  "$PY" -I -c 'import importlib.util as u, anthropic, fastapi, huggingface_hub, mlx_whisper, onnxruntime, piper; assert u.find_spec("torch") is None'
+  if [[ -n "$INTEL" ]]; then
+    uv pip install --quiet --python "$PY" --python-platform x86_64-apple-darwin --only-binary :all: --no-deps \
+      --link-mode copy --compile-bytecode -r "$MAC/requirements-intel.txt"
+    # A package wrongly left out would only show up on a church's Mac, so try the imports here (runs under Rosetta).
+    "$PY" -I -c 'import importlib.util as u, platform, anthropic, fastapi, huggingface_hub, faster_whisper, onnxruntime, piper; assert platform.machine() == "x86_64" and u.find_spec("torch") is None'
+  else
+    (cd "$REPO" && uv export --quiet --frozen --no-dev --no-hashes --no-emit-project -o "$STAGE/requirements.txt")
+    "$PY" -I "$MAC/split_requirements.py" "$REPO/uv.lock" "$STAGE/requirements.txt" "$STAGE/app.txt" "$STAGE/wolof.txt"
+    uv pip install --quiet --python "$PY" --no-deps --link-mode copy --compile-bytecode -r "$STAGE/app.txt"
+    # A package wrongly left out would only show up on a church's Mac, so try the imports here.
+    "$PY" -I -c 'import importlib.util as u, anthropic, fastapi, huggingface_hub, mlx_whisper, onnxruntime, piper; assert u.find_spec("torch") is None'
+  fi
   # Not needed at run time; saves space.
   rm -rf "$STAGE/python/lib/python$PY_VERSION/test" "$STAGE/python/lib/python$PY_VERSION/idlelib" \
          "$STAGE/python/lib/python$PY_VERSION/tkinter" "$STAGE/python/lib/python$PY_VERSION/turtledemo"
@@ -53,9 +73,13 @@ mkdir -p "$STAGE/engine/models"
 rsync -a --delete --exclude "__pycache__" "$REPO/app" "$REPO/web" "$STAGE/engine/"
 rsync -a "$REPO/models/silero_vad.onnx" "$REPO/models/wolof" "$STAGE/engine/models/"
 cp "$REPO/config.toml" "$REPO/glossary.json" "$REPO/glossary.wo.json" "$REPO/glossary.es.json" "$REPO/glossary.ru.json" "$REPO/LICENSE" "$REPO/THIRD_PARTY_NOTICES.md" "$STAGE/engine/"
+# Intel: the multilingual CPU model (the speaker may not be speaking English), and no Wolof.
+[[ -n "$INTEL" ]] && sed -i '' -e 's/^faster_whisper_model = .*/faster_whisper_model = "small"/' -e 's/^languages = .*/languages = ["fr"]/' "$STAGE/engine/config.toml"
 "$STAGE/python/bin/python3" -m compileall -q "$STAGE/engine/app"
 rm -f "$STAGE/engine/wolof_libs.json"
-if [[ "$SIGN_ID" == "Developer ID"* ]]; then
+if [[ -n "$INTEL" ]]; then
+  echo "(Intel build: no Wolof voice)"
+elif [[ "$SIGN_ID" == "Developer ID"* ]]; then
   step "Wolof libraries"
   LIBS_ID="$("$MAC/wolof_libs.sh" "$STAGE/python/bin/python3" "$STAGE/wolof.txt" "$PY_VERSION" "$SIGN_ID")"
   cp "$MAC/wolof-libs/$LIBS_ID.json" "$STAGE/engine/wolof_libs.json"
@@ -71,10 +95,14 @@ XC_SIGN=()
 # It holds only the Developer ID identity (everything is re-signed with it below anyway).
 [[ -n "${SIGN_KEYCHAIN:-}" ]] && XC_SIGN=("OTHER_CODE_SIGN_FLAGS=--keychain $SIGN_KEYCHAIN"
   CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=$SIGN_ID" PROVISIONING_PROFILE_SPECIFIER=)
-xcodebuild -project HearChurch.xcodeproj -scheme HearChurch -configuration Release -derivedDataPath build/dd \
-  -quiet build ${XC_SIGN[@]+"${XC_SIGN[@]}"}
+XC_ARCH=()
+[[ -n "$INTEL" ]] && XC_ARCH=(ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO)
+xcodebuild -project HearChurch.xcodeproj -scheme HearChurch -configuration Release -derivedDataPath "$DD" \
+  -quiet build ${XC_ARCH[@]+"${XC_ARCH[@]}"} ${XC_SIGN[@]+"${XC_SIGN[@]}"}
 rm -rf "$OUT"
-ditto "build/dd/Build/Products/Release/Hear Church.app" "$OUT"
+ditto "$DD/Build/Products/Release/Hear Church.app" "$OUT"
+# Intel copies update from their own feed, so an Apple Silicon update never reaches them.
+[[ -n "$INTEL" ]] && /usr/libexec/PlistBuddy -c "Set :SUFeedURL https://hearchurch.com/appcast-intel.xml" "$OUT/Contents/Info.plist"
 ditto "$STAGE/python" "$OUT/Contents/Resources/python"
 ditto "$STAGE/engine" "$OUT/Contents/Resources/engine"
 # The engine shows this as its version; it never runs git on a congregation's Mac.

@@ -38,6 +38,8 @@ PIPER_VOICES = {
 }
 WOLOF_REPOS = ("bilalfaye/speecht5_tts-wolof", "microsoft/speecht5_hifigan")
 # Download sizes in MB (measured), shown before a download starts and used for its progress.
+# The speech figure is the mlx model; Intel Macs use the smaller CPU model (FASTER_WHISPER_MB).
+FASTER_WHISPER_MB = 486
 SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127}
 LIBS_MANIFEST = ROOT / "wolof_libs.json"
 LIBS_DIR = HOME / "packages"
@@ -119,7 +121,8 @@ def _piper_files(voice: str) -> list[tuple[str, Path]]:
 
 def package_for(code: str, stt_model: str) -> Package | None:
     if code == "speech":
-        return Package("speech", "Speech recognition", SIZES_MB["speech"], hf_repos=(stt_model,))
+        size = FASTER_WHISPER_MB if "faster-whisper" in stt_model else SIZES_MB["speech"]
+        return Package("speech", "Speech recognition", size, hf_repos=(stt_model,))
     if code in PIPER_VOICES:
         name, voices = PIPER_VOICES[code]
         return Package(code, name, SIZES_MB[code], piper_voices=voices)

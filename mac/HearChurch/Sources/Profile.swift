@@ -77,14 +77,26 @@ enum Churches {
 }
 
 /// Output languages listeners can choose.
+// Speech model download (app/packages.py): Intel Macs use the smaller CPU model.
+// Wolof needs torch, which has no current Intel Mac builds.
+#if arch(arm64)
+let speechDownloadMB = 1615.0
+let wolofSupported = true
+#else
+let speechDownloadMB = 486.0
+let wolofSupported = false
+#endif
+
 struct OutputLanguage: Identifiable {
     let id: String
     let name: String
     let available: Bool
     let sizeMB: Double        // its voice download (app/packages.py SIZES_MB)
+    /// Why this Mac can't use it, shown in setup and Settings. Only Wolof on Intel, so far.
+    var unavailableReason: String? { available ? nil : "Not available on Intel Macs" }
     static let all = [
         OutputLanguage(id: "fr", name: "French", available: true, sizeMB: 127),
-        OutputLanguage(id: "wo", name: "Wolof", available: true, sizeMB: 634),
+        OutputLanguage(id: "wo", name: "Wolof", available: wolofSupported, sizeMB: 634),
         OutputLanguage(id: "es", name: "Spanish", available: true, sizeMB: 127),
         OutputLanguage(id: "ru", name: "Russian", available: true, sizeMB: 127),
     ]

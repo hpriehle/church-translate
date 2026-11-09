@@ -15,5 +15,6 @@ models/piper/
 mac/build/
 mac/HearChurch.xcodeproj/
 mac/dist/
+mac/dist-intel/
 download/.wrangler/
 mac/wolof-libs/

@@ -54,6 +54,17 @@ private struct GeneralSettings: View {
                 Toggle("Open Hear Church when this Mac starts", isOn: $atLogin)
                     .onChange(of: atLogin) { _, on in LoginItem.set(on) }
             }
+            Section("Languages on this Mac") {
+                ForEach(OutputLanguage.all) { language in
+                    LabeledContent(language.name) {
+                        if let reason = language.unavailableReason {
+                            Label(reason, systemImage: "xmark.circle").foregroundStyle(.secondary)
+                        } else {
+                            Label("Works on this Mac", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
             Section("About and help") {
                 HelpLinks()
             }
