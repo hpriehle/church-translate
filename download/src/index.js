@@ -4,7 +4,7 @@
 //   /download/HearChurch.dmg   always the newest DMG (the link to share); counted, anonymously, in D1
 //   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
-//   /privacy, /terms           the legal pages
+//   /privacy, /terms, /credits  the legal pages
 //   /download/icon.png, *.woff2  the page's icon and fonts
 //   /sitemap.xml               the pages we want in search
 //   /<key>.txt                 IndexNow's key file, so search engines accept our URL submissions
@@ -18,6 +18,7 @@ import TRACKER from "./tracker/rr.min.js.txt";
 import RECORDER from "./tracker/rrweb.min.js.txt";
 import PRIVACY from "./privacy.html";
 import TERMS from "./terms.html";
+import CREDITS from "./credits.html";
 import ICON from "../../mac/HearChurch/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png";
 import ALEGREYA from "./fonts/alegreya.woff2";
 import ALEGREYA_SANS_400 from "./fonts/alegreya-sans-400.woff2";
@@ -37,7 +38,7 @@ const INDEXNOW_KEY = "b8a8b0718483acd04cef33be1f6d395c";
 // here, has a route in wrangler.toml and is in the sitemap; site/src/site.js lists the same pages.
 const SITE_PAGE = /^(\/(how-it-works|lds|blog)(\/[a-z0-9-]+)?)?$/;
 // Everything else this Worker answers itself.
-const OWN = /^\/(download(\/.*)?|appcast\.xml|privacy|terms|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
+const OWN = /^\/(download(\/.*)?|appcast\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
 const SITE_PATHS = ["/", "/how-it-works", "/lds", "/blog", "/blog/sacrament-meeting-translation"];
 
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
@@ -92,6 +93,7 @@ export default {
     }
     if (path === "/privacy") return html(PRIVACY);
     if (path === "/terms") return html(TERMS);
+    if (path === "/credits") return html(CREDITS);
     if (path === "/appcast.xml") return file(request, env, "appcast.xml", "application/xml", "max-age=300");
     if (path === "/download/HearChurch.dmg") {
       const latest = await latestRelease(env);
