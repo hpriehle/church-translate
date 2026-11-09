@@ -161,7 +161,7 @@ printf '{"version":"%s","build":%s,"file":"%s","size":%s,"date":"%s"}\n' \
 step "Uploading to R2"
 # Files first, the feed last: the appcast never points at something not uploaded yet.
 rclone copy --stats-one-line --stats 30s --include "*.dmg" --include "*.delta" "$DIST" "r2:$BUCKET"
-rclone copyto "$DIST/appcast.xml" "r2:$BUCKET/$FEED"
+rclone copyto "$DIST/$FEED" "r2:$BUCKET/$FEED"     # generate_appcast names it after the app's SUFeedURL
 rclone copyto "$DIST/$LATEST" "r2:$BUCKET/$LATEST"
 
 step "Live"
