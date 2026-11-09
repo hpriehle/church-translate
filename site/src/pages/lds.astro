@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import Flags from "../components/Flags.astro";
+import { LANGUAGE_LIST } from "../languages.js";
 
 const faq = [
   ["Who should approve using it?",
@@ -48,10 +48,8 @@ const schema = {
       <p>Members listen with headphones, so the chapel stays quiet. The sound of the meeting stays on the Mac: speech is turned into text there, and only the text is sent out to be translated. Nothing is saved on our server. Agree with your bishopric on what to translate, and turn translation off for anything that should stay private.</p>
 
       <h2>Languages members can choose</h2>
-    </div>
-    <Flags />
-    <div class="prose">
-      <p class="quiet">Speakers can talk in English, French, Spanish or Russian. Wolof is for listening.</p>
+      <p>{LANGUAGE_LIST}.</p>
+      <p class="quiet">Speakers can talk in English, French, Spanish or Russian. The others are for listening.</p>
 
       <h2>Setting it up for your unit</h2>
       <p>A ward clerk, a member of the bishopric or a tech-minded member can set it up in about 5 minutes on a Mac with Apple silicon. Print the QR code for the chapel doors or the bulletin, and members can also find your congregation at <a href="/listen">hearchurch.com/listen</a>. The <a href="/blog/sacrament-meeting-translation">sacrament meeting guide</a> walks through the first Sunday.</p>

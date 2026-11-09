@@ -1,4 +1,5 @@
 ---
+import { LANGUAGE_LIST } from "../../languages.js";
 import Base from "../../layouts/Base.astro";
 
 const published = "2026-11-09";
@@ -78,7 +79,7 @@ const schema = {
         <dt>Is the meeting recorded?</dt>
         <dd>The sound is turned into text on the Mac and never leaves it. Only the text is sent out to be translated. A log stays on that Mac and isn't sent to us.</dd>
         <dt>Which languages can members choose?</dt>
-        <dd>French, Wolof, Spanish and Russian today.</dd>
+        <dd>{LANGUAGE_LIST} today.</dd>
       </dl>
 
       <div class="ctas">

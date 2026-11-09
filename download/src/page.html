@@ -87,9 +87,8 @@ ol.steps span { color: var(--quiet); }
 .langs h2 { margin-bottom: .4rem; }
 .langs > p { color: var(--quiet); margin: 0 0 1.75rem; }
 .langs ul { list-style: none; display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem 1.5rem; margin: 0; padding: 0; }
-.langs svg { display: block; width: 5.25rem; height: 3.5rem; border-radius: .4rem; margin-bottom: .75rem; box-shadow: 0 0 0 1px rgb(255 255 255 / .14); }
+.langs img { display: block; width: 5.25rem; height: 3.9375rem; border-radius: .4rem; margin-bottom: .75rem; box-shadow: 0 0 0 1px rgb(255 255 255 / .14); }
 .langs b { display: block; font-size: 1.3125rem; line-height: 1.25; }
-.langs span { color: var(--quiet); }
 
 .needs { display: grid; gap: 1.5rem clamp(2rem, 4vw, 3.5rem); }
 .needs h2 { margin-bottom: .9rem; }
@@ -106,7 +105,7 @@ footer a { color: inherit; margin: 0 .6rem; }
 
 @media (min-width: 48rem) {
   ol.steps { grid-template-columns: repeat(3, 1fr); }
-  .langs ul { grid-template-columns: repeat(4, 1fr); }
+  .langs ul { grid-template-columns: repeat(5, 1fr); }
   .needs { grid-template-columns: 2fr 3fr; }
 }
 </style>
@@ -147,24 +146,18 @@ footer a { color: inherit; margin: 0 .6rem; }
   <div class="more">
     <section class="langs">
       <h2>Languages</h2>
-      <p>Meetings are translated from English.</p>
+      <p>Listeners choose any of these on their own phone. The speaker can talk in English, French, Spanish or Russian.</p>
       <ul>
-        <li>
-          <svg viewBox="0 0 90 60" aria-hidden="true"><path fill="#000091" d="M0 0h30v60H0z"/><path fill="#fff" d="M30 0h30v60H30z"/><path fill="#e1000f" d="M60 0h30v60H60z"/></svg>
-          <b>French</b><span>Available now</span>
-        </li>
-        <li>
-          <svg viewBox="0 0 90 60" aria-hidden="true"><path fill="#00853f" d="M0 0h30v60H0z"/><path fill="#fdef42" d="M30 0h30v60H30z"/><path fill="#e31b23" d="M60 0h30v60H60z"/><path fill="#00853f" d="M45 21l2.02 6.22h6.54l-5.29 3.84 2.02 6.22L45 33.44l-5.29 3.84 2.02-6.22-5.29-3.84h6.54z"/></svg>
-          <b>Wolof</b><span>Available now</span>
-        </li>
-        <li>
-          <svg viewBox="0 0 90 60" aria-hidden="true"><path fill="#aa151b" d="M0 0h90v60H0z"/><path fill="#f1bf00" d="M0 15h90v30H0z"/></svg>
-          <b>Spanish</b><span>Available now</span>
-        </li>
-        <li>
-          <svg viewBox="0 0 90 60" aria-hidden="true"><path fill="#fff" d="M0 0h90v20H0z"/><path fill="#0039a6" d="M0 20h90v20H0z"/><path fill="#d52b1e" d="M0 40h90v20H0z"/></svg>
-          <b>Russian</b><span>Available now</span>
-        </li>
+        <li><img src="/download/media/flags/fr.svg" width="84" height="63" alt="" loading="lazy"><b>French</b></li>
+        <li><img src="/download/media/flags/sn.svg" width="84" height="63" alt="" loading="lazy"><b>Wolof</b></li>
+        <li><img src="/download/media/flags/es.svg" width="84" height="63" alt="" loading="lazy"><b>Spanish</b></li>
+        <li><img src="/download/media/flags/ru.svg" width="84" height="63" alt="" loading="lazy"><b>Russian</b></li>
+        <li><img src="/download/media/flags/br.svg" width="84" height="63" alt="" loading="lazy"><b>Portuguese</b></li>
+        <li><img src="/download/media/flags/ua.svg" width="84" height="63" alt="" loading="lazy"><b>Ukrainian</b></li>
+        <li><img src="/download/media/flags/ir.svg" width="84" height="63" alt="" loading="lazy"><b>Persian</b></li>
+        <li><img src="/download/media/flags/np.svg" width="84" height="63" alt="" loading="lazy"><b>Nepali</b></li>
+        <li><img src="/download/media/flags/vn.svg" width="84" height="63" alt="" loading="lazy"><b>Vietnamese</b></li>
+        <li><img src="/download/media/flags/us.svg" width="84" height="63" alt="" loading="lazy"><b>English</b></li>
       </ul>
     </section>
 
