@@ -85,6 +85,9 @@ final class MicMonitor: ObservableObject {
     private var device = ""
     private var history: [Float] = []
     private var observers: [NSObjectProtocol] = []
+    private var wanted = false    // start() was called with no stop() since, even if the input isn't open yet
+    private var retries = 0
+    private var retryTask: Task<Void, Never>?
 
     init() {
         var addr = Self.address(kAudioHardwarePropertyDevices)
@@ -110,6 +113,7 @@ final class MicMonitor: ObservableObject {
             device = name
             stop()
         }
+        wanted = true
         permission = AVCaptureDevice.authorizationStatus(for: .audio)
         guard permission == .authorized, engine == nil else { return }
         let e = AVAudioEngine()
@@ -119,15 +123,20 @@ final class MicMonitor: ObservableObject {
                                  UInt32(MemoryLayout<AudioDeviceID>.size))
         }
         let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { return }
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buf, _ in
-            guard let ch = buf.floatChannelData?[0] else { return }
-            let n = Int(buf.frameLength)
-            var sum: Float = 0
-            for i in 0..<n { sum += ch[i] * ch[i] }
-            let db = 10 * log10(max(sum / Float(max(n, 1)), 1e-10))
-            Task { @MainActor in self?.push(db) }
+        guard format.sampleRate > 0, format.channelCount > 0 else { retryLater(); return }
+        // While the Mac is switching inputs this format can already be out of date, and AVFAudio raises an
+        // exception rather than returning an error. Try again with a new engine once the hardware has settled.
+        let failure = HCCatchException {
+            input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buf, _ in
+                guard let ch = buf.floatChannelData?[0] else { return }
+                let n = Int(buf.frameLength)
+                var sum: Float = 0
+                for i in 0..<n { sum += ch[i] * ch[i] }
+                let db = 10 * log10(max(sum / Float(max(n, 1)), 1e-10))
+                Task { @MainActor in self?.push(db) }
+            }
         }
+        guard failure == nil else { retryLater(); return }
         do {
             try e.start()
             engine = e
@@ -138,10 +147,15 @@ final class MicMonitor: ObservableObject {
             })
         } catch {
             input.removeTap(onBus: 0)
+            retryLater()
         }
     }
 
     func stop() {
+        wanted = false
+        retries = 0
+        retryTask?.cancel()
+        retryTask = nil
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         engine?.inputNode.removeTap(onBus: 0)
@@ -151,12 +165,21 @@ final class MicMonitor: ObservableObject {
         history = []
     }
 
-    private var listening: Bool { engine != nil }
-
     private func restart() {
-        guard listening else { return }
+        guard wanted else { return }
         stop()
         start()
+    }
+
+    private func retryLater() {
+        guard retries < 5 else { return }
+        retries += 1
+        retryTask?.cancel()
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.start()
+        }
     }
 
     private func devicesChanged() {
