@@ -77,7 +77,7 @@ CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", 
 # (docs/seo-site-structure.md). Add a new top-level page here before it goes live, after checking that no
 # congregation already has that slug.
 SITE_PAGES = frozenset({
-    "app", "appcast", "blog", "compare", "demo", "download", "faq", "features", "how-it-works", "languages", "lds",
+    "app", "appcast", "blog", "compare", "credits", "demo", "download", "faq", "features", "how-it-works", "languages", "lds",
     "multilingual", "pricing", "rr", "rrweb", "setup", "sitemap", "small-churches"})
 
 # Listener pages live at hearchurch.com/<slug>, so a slug may never be one of the site's own top-level paths
