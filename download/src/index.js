@@ -37,6 +37,7 @@ const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 <url><loc>https://hearchurch.com/download</loc></url>
 <url><loc>https://hearchurch.com/</loc></url>
+<url><loc>https://hearchurch.com/listen</loc></url>
 </urlset>
 `;
 
