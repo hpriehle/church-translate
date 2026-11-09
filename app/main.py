@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -642,9 +643,35 @@ def _site(request: Request) -> bool:
     return not S.app_mode and host == S.settings.hearchurch.site_host.lower()
 
 
+_HOME_KEEP_SECONDS = 300
+_home_copy: tuple[float, str] = (0.0, "")
+
+
+async def _marketing_home() -> str:
+    """hearchurch.com/ from the Worker, or "" if it can't be had.
+
+    The Worker owns the home page, but Cloudflare routes can't match a query string, so /?utm_source=... lands here.
+    The request below has no query string, so it goes to the Worker and can't come back to this function."""
+    global _home_copy
+    fetched, text = _home_copy
+    if text and time.monotonic() - fetched < _HOME_KEEP_SECONDS:
+        return text
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            reply = await client.get(f"https://{S.settings.hearchurch.site_host}/")
+        reply.raise_for_status()
+    except httpx.HTTPError as e:
+        log.warning("Could not fetch the home page: %s", e)
+        return text
+    _home_copy = (time.monotonic(), reply.text)
+    return reply.text
+
+
 @app.get("/", response_class=HTMLResponse)
 async def listener_page(request: Request):
     if _site(request):   # hearchurch.com: find the congregation first (location, then name)
+        if request.url.query and (home := await _marketing_home()):
+            return HTMLResponse(home)
         return page(WEB_DIR / "find" / "index.html")
     if not _may_listen(request.client.host if request.client else None, request.headers, request.cookies):
         return HTMLResponse(_NO_ENTRY, status_code=403)

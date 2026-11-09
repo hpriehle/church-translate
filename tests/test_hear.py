@@ -737,6 +737,20 @@ def test_hearchurch_com_opens_the_finder_and_the_ward_address_keeps_its_page(cli
     assert "listener.js" in client.get("/", headers={"host": "live.clntacq.com"}).text
 
 
+def test_tagged_links_to_hearchurch_com_get_the_home_page(client, hear, monkeypatch):
+    site = {"host": "hearchurch.com"}
+    async def home():
+        return "<title>The home page</title>"
+    monkeypatch.setattr("app.main._marketing_home", home)
+    assert "The home page" in client.get("/?utm_source=x", headers=site).text
+    assert "find.js" in client.get("/", headers=site).text                                # no tags: as before
+    assert "listener.js" in client.get("/?x=1", headers={"host": "live.clntacq.com"}).text  # a ward's own address
+    async def unreachable():
+        return ""
+    monkeypatch.setattr("app.main._marketing_home", unreachable)
+    assert "find.js" in client.get("/?utm_source=x", headers=site).text                   # never a blank page
+
+
 def test_search_lists_name_and_town_while_typing(client, hear):
     c = hear.db.create_congregation(church="LDS", name="Harlem First", unit_type="ward", email="h@x.org",
                                     address="267 Lenox Ave, New York, NY 10027, USA")
