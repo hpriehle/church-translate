@@ -39,7 +39,7 @@ const INDEXNOW_KEY = "b8a8b0718483acd04cef33be1f6d395c";
 // here, has a route in wrangler.toml and is in the sitemap; site/src/site.js lists the same pages.
 const SITE_PAGE = /^(\/(how-it-works|lds|blog)(\/[a-z0-9-]+)?)?$/;
 // Everything else this Worker answers itself.
-const OWN = /^\/(download(\/.*)?|appcast\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
+const OWN = /^\/(download(\/.*)?|appcast(?:-intel)?\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
 const SITE_PATHS = ["/", "/how-it-works", "/lds", "/blog", "/blog/sacrament-meeting-translation"];
 
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
