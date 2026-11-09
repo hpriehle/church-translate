@@ -1,0 +1,140 @@
+---
+// A shortened run of what happens in a meeting: the speaker's sentence, the Mac, and a phone showing the caption while
+// Hear Church's voice for that language plays. The audio files are real output of the app's voices (Piper:
+// fr_FR-siwis-medium CC BY 4.0, es_MX-ald-medium Unlicense, ru_RU-denis-medium CC0); the translations are ours.
+const english = "Good morning, and welcome. Today we're talking about how we can love our neighbor.";
+const langs = [
+  { code: "fr", name: "French", text: "Bonjour et bienvenue. Aujourd'hui, nous allons parler de la façon dont nous pouvons aimer notre prochain." },
+  { code: "es", name: "Spanish", text: "Buenos días y bienvenidos. Hoy vamos a hablar de cómo podemos amar a nuestro prójimo." },
+  { code: "ru", name: "Russian", text: "Доброе утро и добро пожаловать. Сегодня мы поговорим о том, как мы можем любить своего ближнего." },
+];
+---
+<div class="demo" data-demo>
+  <div class="pick" role="group" aria-label="Language to hear">
+    {langs.map((l, i) => <button type="button" data-lang={l.code} aria-pressed={i === 0 ? "true" : "false"}>{l.name}</button>)}
+  </div>
+
+  <div class="stage">
+    <figure class="node speaker">
+      <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="18" y="5" width="12" height="22" rx="6"/><path d="M12 22a12 12 0 0 0 24 0M24 34v8M16 42h16" fill="none" stroke-width="3" stroke-linecap="round"/></svg>
+      <figcaption>The speaker</figcaption>
+      <p class="said" lang="en" data-said>{english}</p>
+    </figure>
+
+    <div class="flow" aria-hidden="true"><span></span></div>
+
+    <figure class="node mac" data-mac>
+      <img src="/download/icon.png" width="64" height="64" alt="">
+      <figcaption>Hear Church on the Mac</figcaption>
+      <p class="quiet small">Hears it, translates it, sends it out</p>
+    </figure>
+
+    <div class="flow" aria-hidden="true"><span></span></div>
+
+    <figure class="node phone">
+      <div class="screen">
+        <p class="lang-name" data-lang-name>{langs[0].name}</p>
+        {langs.map((l, i) => <p class="cap" lang={l.code} data-cap={l.code} hidden={i !== 0}>{l.text}</p>)}
+        <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <figcaption>A listener's phone</figcaption>
+    </figure>
+  </div>
+
+  <div class="go">
+    <button type="button" class="get play" data-play>Play the sample</button>
+    <p class="quiet small">Sped up for the demo. In a meeting, the translation follows a few seconds behind the speaker.</p>
+  </div>
+  {langs.map((l) => <audio preload="none" data-audio={l.code} src={`/download/media/${l.code}.mp3`}></audio>)}
+</div>
+
+<script is:inline>
+  document.querySelectorAll("[data-demo]").forEach((demo) => {
+    const $ = (s) => demo.querySelector(s), $$ = (s) => demo.querySelectorAll(s);
+    const said = $("[data-said]"), full = said.textContent, play = $("[data-play]"), mac = $("[data-mac]");
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let lang = "fr", run = 0;
+
+    const stop = () => { run++; $$("audio").forEach((a) => { a.pause(); a.currentTime = 0; }); demo.classList.remove("typing", "sending", "showing", "playing"); };
+    const show = (code) => {
+      lang = code;
+      $$("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === code)));
+      $$("[data-cap]").forEach((c) => { c.hidden = c.dataset.cap !== code; });
+      $("[data-lang-name]").textContent = demo.querySelector(`[data-lang="${code}"]`).textContent;
+    };
+    const wait = (ms, id) => new Promise((ok, no) => setTimeout(() => (id === run ? ok() : no()), ms));
+
+    $$("[data-lang]").forEach((b) => b.addEventListener("click", () => { stop(); said.textContent = full; show(b.dataset.lang); }));
+
+    play.addEventListener("click", async () => {
+      stop();
+      const id = run, audio = $(`[data-audio="${lang}"]`);
+      audio.load();
+      play.textContent = "Playing…";
+      try {
+        demo.classList.add("typing");
+        if (!still) {
+          const words = full.split(" ");
+          for (let n = 1; n <= words.length; n++) { said.textContent = words.slice(0, n).join(" "); await wait(110, id); }
+        }
+        said.textContent = full;
+        demo.classList.replace("typing", "sending");
+        await wait(still ? 0 : 900, id);
+        demo.classList.replace("sending", "showing");
+        demo.classList.add("playing");
+        const playing = await audio.play().then(() => true, () => false);
+        if (playing) await new Promise((ok) => { audio.addEventListener("ended", ok, { once: true }); audio.addEventListener("error", ok, { once: true }); });
+        if (id === run) demo.classList.remove("playing");
+      } catch { /* a newer run took over */ }
+      if (id === run) play.textContent = "Play again";
+    });
+  });
+</script>
+
+<style>
+.demo { border: 1px solid var(--line); border-radius: 1.4rem; padding: clamp(1.25rem, 3vw, 2.25rem); background: var(--cloth-deep); }
+.pick { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.5rem; }
+.pick button {
+  font: 700 1.05rem var(--sans); color: var(--quiet); background: none; border: 1px solid var(--line); border-radius: 99px;
+  padding: .45rem 1.1rem; cursor: pointer;
+}
+.pick button[aria-pressed="true"] { color: var(--ink); background: var(--gold); border-color: var(--gold); }
+.stage { display: grid; gap: 1rem; align-items: center; }
+.node { margin: 0; text-align: center; }
+.node figcaption { font: 600 1.15rem var(--serif); margin: .6rem 0 .3rem; }
+.small { font-size: 1rem; margin: 0; }
+.speaker svg { width: 3.25rem; height: 3.25rem; fill: var(--gold); stroke: var(--gold); }
+.said { min-height: 4.6em; margin: .4rem auto 0; max-width: 18rem; font-size: 1.05rem; line-height: 1.45; color: var(--paper); }
+.mac img { display: block; margin: 0 auto; border-radius: 14px; transition: transform .3s; }
+.flow { height: 2.5rem; display: flex; justify-content: center; }
+.flow span { width: 2px; background: linear-gradient(var(--line), var(--gold-deep), var(--line)); background-size: 100% 300%; }
+.phone .screen {
+  width: min(15rem, 100%); min-height: 13rem; margin: 0 auto; padding: 1rem 1.1rem; text-align: left;
+  border: 2px solid #4b6f63; border-radius: 1.6rem; background: #0a1f1a; display: flex; flex-direction: column;
+}
+.lang-name { margin: 0 0 .6rem; font-size: .95rem; color: var(--quiet); }
+.cap { margin: 0; font-size: 1.05rem; line-height: 1.45; opacity: .25; transition: opacity .5s; flex: 1; }
+.eq { display: flex; gap: 4px; align-items: flex-end; height: 1.25rem; margin-top: .75rem; opacity: 0; transition: opacity .3s; }
+.eq i { width: 4px; height: 30%; border-radius: 2px; background: var(--gold); }
+.go { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; margin-top: 1.75rem; }
+.play { border: 0; cursor: pointer; font-size: 1.15rem; padding: .75rem 1.6rem; }
+
+.demo.typing .said { color: var(--gold); }
+.demo.sending .mac img { transform: scale(1.08); }
+.demo.sending .flow span, .demo.showing .flow span { animation: pass 0.9s linear infinite; }
+.demo.showing .cap:not([hidden]) { opacity: 1; }
+.demo.playing .eq { opacity: 1; }
+.demo.playing .eq i { animation: bounce .9s ease-in-out infinite; }
+.demo.playing .eq i:nth-child(2) { animation-delay: .15s; } .demo.playing .eq i:nth-child(3) { animation-delay: .3s; }
+.demo.playing .eq i:nth-child(4) { animation-delay: .45s; } .demo.playing .eq i:nth-child(5) { animation-delay: .6s; }
+@keyframes pass { from { background-position: 0 100%; } to { background-position: 0 0; } }
+@keyframes bounce { 50% { height: 100%; } }
+@media (prefers-reduced-motion: reduce) { .demo * { animation: none !important; transition: none !important; } }
+
+@media (min-width: 56rem) {
+  .stage { grid-template-columns: 1fr 5rem auto 5rem 1fr; }
+  .flow { height: 2px; align-items: center; }
+  .flow span { width: 100%; height: 2px; background: linear-gradient(90deg, var(--line), var(--gold-deep), var(--line)); background-size: 300% 100%; }
+  @keyframes pass { from { background-position: 100% 0; } to { background-position: 0 0; } }
+}
+</style>

@@ -100,6 +100,8 @@ export default {
       if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, latest.version));
       return response;
     }
+    // The site's audio samples (site/public/download/media/).
+    if (path.startsWith("/download/media/")) return env.SITE.fetch(request);
     // generate_appcast names deltas after the app, so they have a space: "Hear Church4-3.delta".
     const name = path.slice("/download/".length).replaceAll("%20", " ");
     if (path.startsWith("/download/") && /^[\w. -]+\.(dmg|delta|tar\.gz)$/.test(name)) {

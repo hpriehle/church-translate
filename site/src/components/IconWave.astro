@@ -22,7 +22,7 @@
 
 <style>
 .art { --icon: clamp(12rem, min(26vw, 30vh), 21rem); display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; }
-.art img { display: block; width: var(--icon); height: var(--icon); margin: 0 calc(var(--icon) * -.05); position: relative; filter: drop-shadow(0 1.1rem 1.6rem rgb(0 0 0 / .32)); }
+.art img { display: block; max-width: none; width: var(--icon); height: var(--icon); margin: 0 calc(var(--icon) * -.05); position: relative; filter: drop-shadow(0 1.1rem 1.6rem rgb(0 0 0 / .32)); }
 .wave { display: flex; align-items: center; gap: clamp(.4rem, .8vw, .75rem); height: calc(var(--icon) * .7); overflow: hidden; }
 .wave.out-left { flex-direction: row-reverse; }
 .wave :global(i) {

@@ -47,7 +47,8 @@ migrations_dir = "migrations"
 
 # Astro builds site/ into site/dist before every deploy; the Worker serves those pages (sitePage in src/index.js).
 [build]
-command = "npm --prefix ../site ci --silent && npm --prefix ../site run build"
+command = "npm --prefix ../site install --silent --no-audit --no-fund && npm --prefix ../site run build"
+watch_dir = ["src", "../site/src", "../site/public"]
 
 [assets]
 directory = "../site/dist"

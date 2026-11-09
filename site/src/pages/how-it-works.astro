@@ -1,10 +1,11 @@
 ---
 import Base from "../layouts/Base.astro";
+import Demo from "../components/Demo.astro";
 
 const schema = {
   "@context": "https://schema.org",
   "@type": "HowTo",
-  name: "How to translate a church meeting live with Hear Church",
+  name: "How to translate a church service live with Hear Church",
   step: [
     { "@type": "HowToStep", name: "Set up the Mac", text: "Install Hear Church on a Mac with Apple silicon, enter your congregation and choose its languages." },
     { "@type": "HowToStep", name: "Connect the sound", text: "Use the Mac's microphone or a cable from the sound system, and check that the Mac hears the speaker." },
@@ -14,57 +15,91 @@ const schema = {
 ---
 <Base
   title="How Live Church Translation Works | Hear Church"
-  description="How a Sunday runs with Hear Church: set up a Mac once, connect it to the sound, press Start, and members hear the meeting translated live on their phones."
+  description="See how Hear Church works: the speaker talks, a Mac translates, and every listener hears it in their own language on their phone. Hear a sample."
   schema={schema}>
 
-  <article class="wrap">
-    <header class="head prose">
-      <h1>How live church translation works</h1>
-      <p class="lede">One Mac in the chapel listens to the meeting and translates it as people speak. Anyone who needs the translation follows along on their own phone. Here is what that looks like from setup to the closing prayer.</p>
-    </header>
+  <section class="wrap top-sec">
+    <h1>How it works</h1>
+    <p class="lede">A speaker, a Mac and the phones already in people's pockets. Here's one sentence making the trip.</p>
+    <Demo />
+  </section>
 
-    <div class="prose">
-      <h2>Before your first Sunday</h2>
-      <p>You need a Mac with Apple silicon (M1 or newer) running macOS 14 or later, with 8 GB of memory, or 16 GB if you'll translate into Wolof. Download Hear Church, drag it to Applications and open it.</p>
-      <p>Setup takes about 5 minutes. You enter your congregation's name, where you meet and when, choose the languages your members need, and pick the microphone. While you do that, the app downloads its speech recognition and the voices for your languages in the background: about 2 GB for most languages, more if you add Wolof.</p>
-      <p>If your congregation already uses Hear Church on another Mac, you don't set it up again. Find the congregation by name and enter its 6-digit connect code.</p>
+  <section class="wrap band">
+    <h2>The three parts</h2>
+    <div class="cols">
+      <div>
+        <h3>The Mac</h3>
+        <p class="quiet">Any Mac with Apple silicon and macOS 14 or newer. Setup takes about 5 minutes: your congregation, when you meet, and the languages people need.</p>
+        <ul>
+          <li>Hears the speaker through its microphone or a cable from the sound system</li>
+          <li>Turns speech into text on the Mac itself</li>
+          <li>Translates and sends captions and a voice to every listener</li>
+        </ul>
+      </div>
+      <div>
+        <h3>The speaker</h3>
+        <p class="quiet">Nothing changes at the pulpit. Speak as usual.</p>
+        <ul>
+          <li>English, French, Spanish or Russian</li>
+          <li>The person at the Mac switches the language when a speaker changes</li>
+          <li>Music is skipped, so hymns don't fill phones with noise</li>
+        </ul>
+      </div>
+      <div>
+        <h3>The listeners</h3>
+        <p class="quiet">No app, no account. Just a phone and headphones.</p>
+        <ul>
+          <li>Scan the QR code or open your congregation's link</li>
+          <li>Pick French, Wolof, Spanish or Russian</li>
+          <li>Read the captions and hear the voice, a few seconds behind the speaker</li>
+        </ul>
+      </div>
+    </div>
+  </section>
 
-      <h2>Getting the sound in</h2>
-      <p>The clearer the sound the Mac hears, the better the translation. You can use the Mac's built-in microphone near the pulpit, or run a cable from the sound system into the Mac. Hear Church can use any audio input the Mac sees, lets you pick a single channel on a multi-channel interface, and keeps that input for the whole meeting, so a phone or earbuds connecting nearby won't take over.</p>
-      <p>Before you can press Start, the app checks that it has the microphone, that it can hear sound, that the Mac is on power and that the internet is connected. If the sound stops during a meeting, for example because a cable comes loose, it shows a red warning and a notification.</p>
+  <section class="wrap band">
+    <h2>On Sunday</h2>
+    <ol class="steps three">
+      <li><b>Press Start meeting</b>
+        <span>The Mac checks the microphone, the sound, its power and the internet first. If a cable comes loose mid-meeting, it warns you.</span></li>
+      <li><b>People join as they sit down</b>
+        <span>Before the meeting starts, phones show when it begins and wait. If a connection drops, it comes back by itself.</span></li>
+      <li><b>Press Stop when it ends</b>
+        <span>A log of the meeting stays on that Mac. Nothing is saved on our server.</span></li>
+    </ol>
+  </section>
 
-      <h2>During the meeting</h2>
-      <p>Press <b>Start meeting</b>. The Mac turns each sentence into text, translates it and sends the captions and a spoken voice to everyone listening. Captions usually appear a few seconds after the speaker pauses, and the voice follows shortly after. If the voice starts to fall behind, it speeds up a little to catch up.</p>
-      <p>Most talks are in English. If someone speaks in French, Spanish or Russian, the person at the Mac switches the speaker's language. Hear Church then adds an English translation, and members who share the speaker's language are told to listen in the room.</p>
-      <p>Keep the Mac plugged in with the lid open. It stays awake during a meeting, and app updates never install while one is running.</p>
-
-      <h2>What listeners see</h2>
-      <p>Listeners don't install anything or make an account. They scan the QR code in the chapel, open your congregation's link, or go to <a href="/listen">hearchurch.com/listen</a>, which shows congregations nearby and lets them search by name or town.</p>
-      <p>On their phone they pick a language and see the latest captions while the translated voice plays. Headphones keep the chapel quiet. If the meeting hasn't started, the page shows when the next one begins and waits. If the connection drops, it reconnects by itself.</p>
-
-      <h2>After the meeting</h2>
-      <p>Press Stop. A log of the meeting, with the transcript and its translations, stays on that Mac. It isn't sent to us.</p>
-
-      <h2>What to watch for</h2>
-      <ul>
-        <li><b>Mistakes happen.</b> It is machine translation. Names are the most common problem, so add local names in the app's settings.</li>
-        <li><b>Noise and overlap.</b> Several people talking at once, or a microphone far from the pulpit, make the translation worse.</li>
-        <li><b>Private moments.</b> Turn translation off for anything that shouldn't be sent out, and agree with your leaders on when to use it.</li>
+  <section class="wrap band split">
+    <div>
+      <h2>Get the best results</h2>
+      <ul class="tips">
+        <li><b>Give it clean sound.</b> A cable from the sound system beats a microphone across the room.</li>
+        <li><b>Add your names.</b> Names are where machine translation slips most. Add your congregation's in the app.</li>
+        <li><b>Test before people arrive.</b> Say a sentence at the pulpit and check a phone.</li>
       </ul>
-
+    </div>
+    <div>
+      <h2>Ready for your first Sunday?</h2>
+      <p class="quiet">Download the app, set it up this week and try it at your next service.</p>
       <div class="ctas">
         <a class="get" href="/download">Download for Mac</a>
-        <a class="second" href="/lds">For Latter-day Saint wards</a>
       </div>
-      <p class="quiet next">Planning the first Sunday? Read <a href="/blog/sacrament-meeting-translation">how to translate sacrament meeting live</a>.</p>
+      <p class="quiet next">Latter-day Saint ward? Read <a href="/blog/sacrament-meeting-translation">how to translate sacrament meeting live</a>.</p>
     </div>
-  </article>
+  </section>
+
+  <p class="wrap credits">Sample voices: French, SIWIS (CC BY 4.0); Spanish, Ald (public domain); Russian, Denis (CC0). All from the Piper voice project.</p>
 </Base>
 
 <style>
-.head { padding: clamp(1.5rem, 5vh, 3rem) 0 1rem; }
-article { padding-bottom: clamp(3rem, 8vh, 5rem); }
-.prose ul { padding-left: 1.2rem; }
-.prose li { margin-bottom: .6rem; }
+.top-sec { padding-top: clamp(1.25rem, 4vh, 2.5rem); padding-bottom: clamp(3rem, 7vh, 4.5rem); }
+.top-sec .lede { max-width: 36rem; margin: 0 0 2rem; }
+.cols { display: grid; gap: 2.25rem clamp(2rem, 4vw, 3.5rem); }
+.cols h3 { margin-top: 0; color: var(--gold); }
+.cols ul, .tips { padding-left: 1.15rem; margin: .8rem 0 0; }
+.cols li, .tips li { margin-bottom: .55rem; }
+.split { display: grid; gap: 2.5rem clamp(2rem, 5vw, 4rem); }
 .next { margin-top: 1.5rem; }
+.credits { color: var(--quiet); font-size: .95rem; padding-bottom: 2.5rem; }
+@media (min-width: 48rem) { .cols { grid-template-columns: repeat(3, 1fr); } .split { grid-template-columns: 1fr 1fr; } }
 </style>
