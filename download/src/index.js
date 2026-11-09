@@ -4,6 +4,7 @@
 //   /download/HearChurch.dmg   always the newest DMG (the link to share); counted, anonymously, in D1
 //   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
+//   /download/HearChurch-Intel.dmg, /appcast-intel.xml   the same for Intel Macs (separate build and feed)
 //   /privacy, /terms, /credits  the legal pages
 //   /download/icon.png, *.woff2  the page's icon and fonts
 //   /sitemap.xml               the pages we want in search
@@ -95,6 +96,14 @@ export default {
     if (path === "/terms") return html(TERMS);
     if (path === "/credits") return html(CREDITS);
     if (path === "/appcast.xml") return file(request, env, "appcast.xml", "application/xml", "max-age=300");
+    if (path === "/appcast-intel.xml") return file(request, env, "appcast-intel.xml", "application/xml", "max-age=300");
+    if (path === "/download/HearChurch-Intel.dmg") {
+      const latest = await latestRelease(env, "latest-intel.json");
+      if (!latest) return new Response("Not released yet", { status: 404 });
+      const response = await file(request, env, latest.file, "application/x-apple-diskimage", "no-store", latest.file);
+      if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, `${latest.version}-intel`));
+      return response;
+    }
     if (path === "/download/HearChurch.dmg") {
       const latest = await latestRelease(env);
       if (!latest) return new Response("Not released yet", { status: 404 });
@@ -142,8 +151,8 @@ async function countDownload(env, version) {
   }
 }
 
-async function latestRelease(env) {
-  const obj = await env.FILES.get("latest.json");
+async function latestRelease(env, key = "latest.json") {
+  const obj = await env.FILES.get(key);
   return obj ? obj.json() : null;
 }
 
