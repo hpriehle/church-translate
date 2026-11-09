@@ -724,6 +724,13 @@ def test_congregation_page_is_at_its_slug_and_the_old_link_redirects(client, hea
     assert client.get("/login").status_code == 200 and "listener.js" not in client.get("/login").text
 
 
+def test_the_finder_is_at_listen(client, hear):
+    r = client.get("/listen")
+    assert r.status_code == 200 and "find.js" in r.text
+    assert '<link rel="canonical" href="https://hearchurch.com/listen">' in r.text
+    assert "hearchurch.com/listen" in client.get("/nobody-here").text           # the not-found page points there
+
+
 def test_hearchurch_com_opens_the_finder_and_the_ward_address_keeps_its_page(client, hear):
     assert "find.js" in client.get("/", headers={"host": "hearchurch.com"}).text
     assert "find.js" in client.get("/", headers={"host": "www.hearchurch.com"}).text
@@ -766,6 +773,9 @@ def test_slugs_never_take_a_site_path(hear):
     assert {slugify(t) for t in tops} <= RESERVED_SLUGS, {slugify(t) for t in tops} - RESERVED_SLUGS
     c = hear.db.create_congregation(church="LDS", name="Find", unit_type="ward", email="f@x.org")
     assert c["slug"] == "find-2"
+    # The marketing site's pages are kept free too, including ones that aren't live yet.
+    c = hear.db.create_congregation(church="LDS", name="Pricing", unit_type="ward", email="p@x.org")
+    assert c["slug"] == "pricing-2"
 
 
 def test_old_database_gets_the_town_column(tmp_path):

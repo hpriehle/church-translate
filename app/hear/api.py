@@ -435,7 +435,7 @@ async def listener_page(slug: str):
 
     c = _hear().db.by_slug(slug) if SLUG_RE.fullmatch(slug) and slug not in RESERVED_SLUGS else None
     if c is None or c["hidden"] or not c["email_verified"]:
-        return _page("Not found", "No congregation has this address. Find yours on hearchurch.com.", 404)
+        return _page("Not found", "No congregation has this address. Find yours at hearchurch.com/listen.", 404)
     return main.page(WEB_DIR / "listener" / "index.html")
 
 
@@ -475,6 +475,7 @@ async def search(request: Request, q: str = Query(default="", max_length=80)):
     return {"results": [_entry(c, now) for c in _hear().db.search(q, 10)]}
 
 
+@router.get("/listen", response_class=HTMLResponse)   # its address; hearchurch.com/ becomes the marketing site
 @router.get("/find", response_class=HTMLResponse)
 async def find_page():
     from .. import main

@@ -73,12 +73,19 @@ CREATE INDEX IF NOT EXISTS devices_cong ON devices(congregation_id);
 CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", "city", "lat", "lng", "meeting_times",
                "timezone", "email", "email_verified", "created_at", "hidden")
 
+# hearchurch.com paths served by the download Worker and the marketing site, not by this app
+# (docs/seo-site-structure.md). Add a new top-level page here before it goes live, after checking that no
+# congregation already has that slug.
+SITE_PAGES = frozenset({
+    "app", "appcast", "blog", "compare", "demo", "download", "faq", "features", "how-it-works", "languages", "lds",
+    "multilingual", "pricing", "rr", "rrweb", "setup", "sitemap", "small-churches"})
+
 # Listener pages live at hearchurch.com/<slug>, so a slug may never be one of the site's own top-level paths
 # (tests/test_hear.py checks this list against the routes).
 RESERVED_SLUGS = frozenset({
-    "about", "admin", "api", "c", "clips", "favicon-ico", "find", "guide", "health", "help", "listener", "login",
-    "logout", "operator", "print", "privacy", "qr", "robots", "s", "signs", "signup", "speak", "static", "stream",
-    "support", "terms", "voices", "ws", "www"})
+    "about", "admin", "api", "c", "clips", "favicon-ico", "find", "guide", "health", "help", "listen", "listener",
+    "login", "logout", "operator", "print", "privacy", "qr", "robots", "s", "signs", "signup", "speak", "static",
+    "stream", "support", "terms", "voices", "ws", "www"}) | SITE_PAGES
 
 
 def city_of(address: str) -> str:
