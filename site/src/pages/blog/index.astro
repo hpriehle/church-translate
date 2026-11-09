@@ -1,0 +1,31 @@
+---
+import Base from "../../layouts/Base.astro";
+import { POSTS } from "../../posts.js";
+---
+<Base
+  title="Blog: Translating Church Meetings Live | Hear Church"
+  description="Guides to translating church meetings live: setting up a ward, getting clean sound, choosing languages and helping members who speak another language follow along.">
+  <section class="wrap list">
+    <h1>Translating church meetings</h1>
+    <p class="lede">Practical guides for the people who set up translation on Sunday.</p>
+    <ul>
+      {POSTS.map((p) => (
+        <li>
+          <a href={p.href}><h2>{p.title}</h2></a>
+          <p class="quiet">{p.summary}</p>
+        </li>
+      ))}
+    </ul>
+    <p class="quiet">New to Hear Church? Start with <a href="/how-it-works">how it works</a> or the page <a href="/lds">for Latter-day Saint wards</a>.</p>
+  </section>
+</Base>
+
+<style>
+.list { padding-top: clamp(1.5rem, 5vh, 3rem); padding-bottom: clamp(3rem, 8vh, 5rem); }
+.list ul { list-style: none; padding: 0; margin: 2rem 0; max-width: var(--read); }
+.list li { border-top: 1px solid var(--line); padding: 1.5rem 0; }
+.list li a { text-decoration: none; }
+.list li h2 { margin: 0 0 .4rem; color: var(--paper); }
+.list li a:hover h2 { color: var(--gold); }
+.list li p { margin: 0; }
+</style>

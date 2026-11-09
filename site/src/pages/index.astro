@@ -1,0 +1,110 @@
+---
+import Base from "../layouts/Base.astro";
+import IconWave from "../components/IconWave.astro";
+import Flags from "../components/Flags.astro";
+
+const faq = [
+  ["Do listeners need to install an app?",
+   "No. Listeners open the congregation's link or scan its QR code, and the translation plays in their phone's web browser. They don't need an account either."],
+  ["How far behind the speaker is the translation?",
+   "A few seconds. In our tests on a recent Mac, captions appeared about 3 seconds after each pause and the voice followed a second or two later."],
+  ["Can we use our sound system instead of the Mac's microphone?",
+   "Yes. Hear Church works with the Mac's built-in microphone or a cable from the sound system, and you can choose any audio input the Mac sees."],
+  ["How accurate is it?",
+   "It is machine translation, so it will make mistakes, especially with names. A built-in list of Church terms, names and scripture books helps, and you can add your own local names."],
+  ["Does it only work for Latter-day Saint wards?",
+   "It is built for Latter-day Saint meetings, and its translations follow Church terms. Other congregations can set it up too."],
+  ["What does it cost?",
+   "The app is free to download. Today the translating is done by Claude, using your own Anthropic API key, and Anthropic bills you for what you use."],
+];
+
+const schema = [
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Hear Church",
+    applicationCategory: "MultimediaApplication",
+    operatingSystem: "macOS 14 or later (Apple silicon)",
+    description: "Live translation for church meetings. A Mac translates the talks as they're spoken, and listeners follow along on their own phones with captions and a spoken voice.",
+    url: "https://hearchurch.com/",
+    downloadUrl: "https://hearchurch.com/download",
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faq.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+  },
+];
+---
+<Base
+  title="Live Church Translation App for Your Meeting | Hear Church"
+  description="Hear Church translates your church meeting live. Members follow the talks on their own phones, with captions and a spoken voice in their language."
+  schema={schema}>
+
+  <IconWave />
+
+  <section class="hero wrap">
+    <h1>Live translation for your church meeting.</h1>
+    <p class="lede">Hear Church listens to the talks, prayers and announcements through a Mac and translates them as they're spoken. Members who speak another language follow along on their own phones, with captions and a spoken voice.</p>
+    <div class="ctas">
+      <a class="get" href="/download">Download for Mac</a>
+      <a class="second" href="/how-it-works">See how it works</a>
+    </div>
+  </section>
+
+  <section class="wrap band">
+    <h2>A Sunday with Hear Church</h2>
+    <ol class="steps three">
+      <li><b>Set up the Mac once</b>
+        <span>Install the app on the Mac you'll use at church, enter your congregation and choose its languages. Setup takes about 5 minutes.</span></li>
+      <li><b>Press Start meeting</b>
+        <span>The Mac listens through its microphone or a cable from the sound system. It checks the sound and the internet before you start.</span></li>
+      <li><b>Members listen on their phones</b>
+        <span>They scan the QR code in the chapel or open your congregation's link, pick a language and put in headphones. Nothing to install.</span></li>
+    </ol>
+    <p class="more"><a href="/how-it-works">Read the full walk-through of a meeting</a></p>
+  </section>
+
+  <section class="wrap band">
+    <h2>Languages</h2>
+    <p class="quiet intro">Listeners can choose any of these. The speaker can talk in English, French, Spanish or Russian, and the person running the Mac switches the speaker's language when it changes.</p>
+    <Flags />
+  </section>
+
+  <section class="wrap band split">
+    <div>
+      <h2>Made for sacrament meeting</h2>
+      <p>Hear Church was built for Latter-day Saint wards and branches. It translates talks, prayers and announcements, takes hymn titles from the hymnbook, and uses the Church's own terms for things like Relief Society, the bishopric and fast and testimony meeting.</p>
+      <p><a href="/lds">Translation for Latter-day Saint wards</a></p>
+    </div>
+    <div>
+      <h2>The meeting's sound stays in the building</h2>
+      <p>Speech is turned into text on the Mac itself, and the audio never leaves it. Only the text is sent out to be translated. Our server passes the captions and voice to listeners while the meeting is live and doesn't save them.</p>
+      <p><a href="/privacy">Read the privacy policy</a></p>
+    </div>
+  </section>
+
+  <section class="wrap band">
+    <h2>Questions</h2>
+    <dl class="faq">
+      {faq.map(([q, a]) => <><dt>{q}</dt><dd>{a}</dd></>)}
+    </dl>
+    <div class="ctas">
+      <a class="get" href="/download">Download for Mac</a>
+      <a class="second" href="/blog/sacrament-meeting-translation">How to translate sacrament meeting</a>
+    </div>
+  </section>
+</Base>
+
+<style>
+.hero { text-align: center; padding-top: clamp(1rem, 3vh, 2rem); padding-bottom: clamp(3rem, 8vh, 5rem); }
+.hero h1 { max-width: 15em; margin-left: auto; margin-right: auto; }
+.hero .lede { max-width: 38rem; margin: 0 auto; }
+.hero .ctas { justify-content: center; }
+.more { margin: 2rem 0 0; }
+.intro { max-width: 40rem; margin: 0 0 1.75rem; }
+.split { display: grid; gap: 2.5rem clamp(2rem, 5vw, 4rem); }
+.split p { max-width: 32rem; }
+@media (min-width: 48rem) { .split { grid-template-columns: 1fr 1fr; } }
+</style>

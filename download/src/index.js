@@ -33,13 +33,28 @@ const ASSETS = {
 
 const INDEXNOW_KEY = "b8a8b0718483acd04cef33be1f6d395c";
 
+// The marketing pages, built from site/ by Astro (docs/seo-site-structure.md). A page is live when its path matches
+// here, has a route in wrangler.toml and is in the sitemap; site/src/site.js lists the same pages.
+const SITE_PAGE = /^(\/(how-it-works|lds|blog)(\/[a-z0-9-]+)?)?$/;
+// Everything else this Worker answers itself.
+const OWN = /^\/(download(\/.*)?|appcast\.xml|privacy|terms|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
+const SITE_PATHS = ["/", "/how-it-works", "/lds", "/blog", "/blog/sacrament-meeting-translation"];
+
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${SITE_PATHS.map((p) => `<url><loc>https://hearchurch.com${p}</loc></url>`).join("\n")}
 <url><loc>https://hearchurch.com/download</loc></url>
-<url><loc>https://hearchurch.com/</loc></url>
 <url><loc>https://hearchurch.com/listen</loc></url>
 </urlset>
 `;
+
+// A marketing page from the built site, or the site's own not-found page.
+async function sitePage(request, env, url) {
+  const res = await env.SITE.fetch(new Request(new URL(url.pathname || "/", url.origin), { method: request.method }));
+  if (res.status !== 404) return res;
+  const missing = await env.SITE.fetch(new Request(new URL("/404", url.origin)));
+  return new Response(missing.body, { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -53,10 +68,14 @@ export default {
         ? collectPost({ request, env, waitUntil: (p) => ctx.waitUntil(p) })
         : collectOther();
     }
+    const path = url.pathname.replace(/\/+$/, "");
+    // A route like hearchurch.com/lds* also matches a congregation's /lds-harlem: anything that isn't ours goes on
+    // to the hub on the VPS, untouched.
+    if (!SITE_PAGE.test(path) && !OWN.test(path)) return fetch(request);
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
     }
-    const path = url.pathname.replace(/\/+$/, "");
+    if (SITE_PAGE.test(path)) return sitePage(request, env, url);
 
     if (path === "/download") return page(env);
     if (ASSETS[path]) {

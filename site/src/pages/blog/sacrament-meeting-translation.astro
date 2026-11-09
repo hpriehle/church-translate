@@ -1,0 +1,101 @@
+---
+import Base from "../../layouts/Base.astro";
+
+const published = "2026-11-09";
+const schema = {
+  "@context": "https://schema.org",
+  "@type": "Article",
+  headline: "How to translate sacrament meeting live",
+  datePublished: published,
+  dateModified: published,
+  author: { "@type": "Organization", name: "Hear Church", url: "https://hearchurch.com/" },
+  publisher: { "@type": "Organization", name: "Hear Church", logo: { "@type": "ImageObject", url: "https://hearchurch.com/download/icon.png" } },
+  image: "https://hearchurch.com/download/icon.png",
+  mainEntityOfPage: "https://hearchurch.com/blog/sacrament-meeting-translation",
+};
+---
+<Base
+  title="Sacrament Meeting Translation, Live on Phones | Hear Church"
+  description="How to translate a full sacrament meeting live, talks, prayers and announcements, so members who speak another language can follow on their own phones."
+  schema={schema}
+  ogType="article">
+
+  <article class="wrap post">
+    <header class="prose">
+      <p class="crumb"><a href="/blog">Blog</a></p>
+      <h1>Live translation for sacrament meeting</h1>
+      <p class="quiet date">Published <time datetime={published}>November 9, 2026</time></p>
+    </header>
+
+    <div class="prose">
+      <p class="lede">Many wards and branches have a few members, or a whole group, who don't follow English well. They come every week and understand little of what's said. Live translation lets them hear every talk, prayer and announcement in their own language, on their own phone, without a volunteer interpreter in the back row.</p>
+
+      <p>This guide covers what makes sacrament meeting hard to translate, the options a ward has, and how to set up live translation so it works on the first Sunday.</p>
+
+      <h2>Why sacrament meeting is harder than a sermon</h2>
+      <p>Most translation tools are built for one speaker giving one speech. Sacrament meeting is different:</p>
+      <ul>
+        <li><b>Many voices.</b> A member of the bishopric conducts, then come announcements, prayers and two or three speakers, often including youth.</li>
+        <li><b>Its own vocabulary.</b> Ward, stake, bishopric, Relief Society, the sacrament, fast and testimony meeting. A general translator often gets these wrong or translates them literally.</li>
+        <li><b>Music in between.</b> Hymns and the sacrament should not be filled with half-translated noise.</li>
+        <li><b>Speakers who switch language.</b> In a multilingual ward, a talk may be given in Spanish or French instead of English.</li>
+      </ul>
+
+      <h2>The options a ward has</h2>
+      <h3>A volunteer interpreter</h3>
+      <p>A bilingual member whispers or speaks into a headset system. When you have one, it can be excellent. But it depends on the same few people every week, they miss the meeting themselves, and it only covers one language.</p>
+      <h3>A translation app on each phone</h3>
+      <p>Members can hold a phone up to the speaker with a general translation app. In a chapel, the phone is far from the pulpit, the sound echoes, and the app doesn't know Church terms. Each person also has to manage it themselves during the meeting.</p>
+      <h3>Live translation from the pulpit</h3>
+      <p>One computer hears the meeting clearly, through the sound system or a microphone near the pulpit, and sends the translation to everyone who needs it. Members open a link on their phone and listen with headphones. This is the approach <a href="/how-it-works">Hear Church</a> takes.</p>
+
+      <h2>Setting up live translation for your ward</h2>
+      <ol>
+        <li><b>Get approval.</b> Talk with your bishop or branch president, and agree on what will be translated.</li>
+        <li><b>Pick the Mac.</b> Hear Church runs on a Mac with Apple silicon and macOS 14 or newer. It needs to stay plugged in with the lid open during the meeting.</li>
+        <li><b>Set up the congregation.</b> Install the app, enter your ward or branch and its stake, your meeting times and the languages your members need. It takes about 5 minutes.</li>
+        <li><b>Get clean sound.</b> A cable from the sound system gives the best result. The Mac's own microphone works if it sits close to the pulpit.</li>
+        <li><b>Tell members how to join.</b> Print the QR code for the chapel doors or the program, and share the link. Members can also find the ward at hearchurch.com/listen.</li>
+        <li><b>Test before the meeting.</b> Start a few minutes early, have someone say a sentence at the pulpit, and check a phone.</li>
+      </ol>
+
+      <h2>On the day</h2>
+      <p>Press Start meeting before the prelude ends. Members open the link, choose their language and put in headphones. Captions appear a few seconds after each pause, followed by the spoken translation. If a speaker gives a talk in Spanish, French or Russian, the person at the Mac switches the speaker's language, and Hear Church translates that talk into English as well.</p>
+      <p>Hymns are skipped, and when one is announced, listeners get its title from the hymnbook in their language.</p>
+
+      <h2>What to watch for</h2>
+      <ul>
+        <li><b>Names.</b> Machine translation struggles most with names. Add your ward's names in the app's settings before the first Sunday.</li>
+        <li><b>Distance from the microphone.</b> A speaker who steps back from the pulpit, or a microphone far away, makes the translation worse.</li>
+        <li><b>Sacred and private moments.</b> Decide with your bishopric whether to translate the sacrament prayers and anything personal, and stop translation when you need to.</li>
+        <li><b>It isn't perfect.</b> Members will understand far more than before, but a word will sometimes be wrong. Tell them so.</li>
+      </ul>
+
+      <h2>Questions wards ask</h2>
+      <dl class="faq">
+        <dt>Do members need to install anything?</dt>
+        <dd>No. The translation plays in the phone's web browser, with no app and no account.</dd>
+        <dt>Is the meeting recorded?</dt>
+        <dd>The sound is turned into text on the Mac and never leaves it. Only the text is sent out to be translated. A log stays on that Mac and isn't sent to us.</dd>
+        <dt>Which languages can members choose?</dt>
+        <dd>French, Wolof, Spanish and Russian today.</dd>
+      </dl>
+
+      <div class="ctas">
+        <a class="get" href="/download">Download for Mac</a>
+        <a class="second" href="/lds">Hear Church for Latter-day Saint wards</a>
+      </div>
+
+      <p class="quiet indep-note">Hear Church is an independent tool, not affiliated with or endorsed by The Church of Jesus Christ of Latter-day Saints.</p>
+    </div>
+  </article>
+</Base>
+
+<style>
+.post { padding-top: clamp(1.25rem, 4vh, 2.5rem); padding-bottom: clamp(3rem, 8vh, 5rem); }
+.crumb { margin: 0 0 1rem; }
+.date { margin: -.4rem 0 2rem; font-size: 1rem; }
+.prose ul, .prose ol { padding-left: 1.3rem; }
+.prose li { margin-bottom: .7rem; }
+.indep-note { margin-top: 2.5rem; font-size: 1rem; }
+</style>

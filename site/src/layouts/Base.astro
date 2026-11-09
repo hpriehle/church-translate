@@ -1,0 +1,136 @@
+---
+// Every marketing page: metadata, the listener banner, the nav and the footer.
+import { NAV, FOOTER } from "../site.js";
+
+interface Props {
+  title: string;          // the full title tag, "<keyword> | Hear Church"
+  description: string;    // 140-160 characters
+  schema?: object;        // JSON-LD for this page
+  ogType?: string;
+}
+const { title, description, schema, ogType = "website" } = Astro.props;
+const path = Astro.url.pathname.replace(/\.html$/, "").replace(/\/index$/, "/") || "/";
+const canonical = new URL(path, "https://hearchurch.com").href.replace(/\/$/, path === "/" ? "/" : "");
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{title}</title>
+<meta name="description" content={description}>
+<link rel="canonical" href={canonical}>
+<meta name="theme-color" content="#12332b">
+<meta property="og:type" content={ogType}>
+<meta property="og:site_name" content="Hear Church">
+<meta property="og:title" content={title}>
+<meta property="og:description" content={description}>
+<meta property="og:url" content={canonical}>
+<meta property="og:image" content="https://hearchurch.com/download/icon.png">
+<link rel="icon" type="image/png" href="/download/icon.png">
+<link rel="preload" href="/download/alegreya.woff2" as="font" type="font/woff2" crossorigin>
+{schema && <script type="application/ld+json" set:html={JSON.stringify(schema)} />}
+<script src="/rr.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<p class="listen-bar">Here to listen to a meeting? <a href="/listen">Find your congregation</a></p>
+<header class="top">
+  <a class="brand" href="/"><img src="/download/icon.png" width="32" height="32" alt=""> Hear Church</a>
+  <nav aria-label="Main">
+    {NAV.map((n) => <a href={n.href} aria-current={path === n.href ? "page" : undefined}>{n.label}</a>)}
+    <a class="nav-get" href="/download">Download</a>
+  </nav>
+</header>
+<main id="main">
+  <slot />
+</main>
+<footer class="foot">
+  <nav aria-label="Site">
+    {FOOTER.map((n) => <a href={n.href}>{n.label}</a>)}
+  </nav>
+  <p><a href="/privacy">Privacy</a> <a href="/terms">Terms</a> <a href="mailto:support@hearchurch.com">support@hearchurch.com</a></p>
+  <p class="indep">Hear Church is an independent project, not affiliated with or endorsed by any church.</p>
+</footer>
+</body>
+</html>
+
+<style is:global>
+@font-face { font-family: "Alegreya"; src: url("/download/alegreya.woff2") format("woff2"); font-weight: 400 800; font-display: swap; }
+@font-face { font-family: "Alegreya Sans"; src: url("/download/alegreya-sans-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Alegreya Sans"; src: url("/download/alegreya-sans-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+
+:root {
+  --cloth: #12332b;
+  --cloth-deep: #0e2a23;
+  --line: #2c5548;
+  --gold: #f4d083;
+  --gold-deep: #e0aa4e;
+  --paper: #f7f0df;
+  --quiet: #bccabb;
+  --ink: #0d0d0d;
+  --serif: "Alegreya", Georgia, serif;
+  --sans: "Alegreya Sans", -apple-system, system-ui, sans-serif;
+  --wide: 66rem;
+  --read: 38rem;
+}
+* { box-sizing: border-box; }
+html { background: var(--cloth); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; color: var(--paper); font: 400 1.1875rem/1.55 var(--sans); overflow-x: hidden;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+a { color: var(--gold); text-underline-offset: .15em; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; border-radius: 4px; }
+img { max-width: 100%; }
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: 1rem; top: 1rem; z-index: 2; background: var(--paper); color: var(--ink); padding: .5rem .8rem; }
+
+.listen-bar { margin: 0; padding: .55rem 1rem; text-align: center; font-size: 1rem; background: var(--cloth-deep); color: var(--quiet); border-bottom: 1px solid var(--line); }
+.listen-bar a { font-weight: 700; }
+
+.top { max-width: var(--wide); margin: 0 auto; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .75rem 1.5rem; padding: 1rem clamp(1.25rem, 4vw, 2.5rem); }
+.brand { display: inline-flex; align-items: center; gap: .55rem; font: 600 1.3rem var(--serif); color: var(--paper); text-decoration: none; }
+.brand img { border-radius: 7px; }
+.top nav { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1.4rem; }
+.top nav a { color: var(--quiet); text-decoration: none; }
+.top nav a:hover, .top nav a[aria-current] { color: var(--paper); }
+.top nav a.nav-get { color: var(--ink); background: linear-gradient(var(--gold), var(--gold-deep)); padding: .35rem 1rem; border-radius: .7rem; font-weight: 700; }
+
+.foot { max-width: var(--wide); margin: 0 auto; padding: 2.5rem clamp(1.25rem, 4vw, 2.5rem) 3rem; border-top: 1px solid var(--line); color: var(--quiet); font-size: 1rem; }
+.foot nav { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin-bottom: 1.25rem; }
+.foot a { color: inherit; }
+.foot p { margin: 0 0 .5rem; }
+.foot p a + a { margin-left: 1.25rem; }
+.indep { font-size: .95rem; }
+
+/* Shared building blocks for the pages. */
+.wrap { max-width: var(--wide); margin: 0 auto; padding: 0 clamp(1.25rem, 4vw, 2.5rem); }
+.prose { max-width: var(--read); }
+.band { border-top: 1px solid var(--line); padding-block: clamp(2.75rem, 7vh, 4.5rem); }
+h1, h2, h3 { font-family: var(--serif); font-weight: 600; text-wrap: balance; }
+h1 { font-size: clamp(2.4rem, 5.6vw, 4.2rem); line-height: 1.05; letter-spacing: -.012em; margin: 0 0 1.1rem; }
+h2 { font-size: clamp(1.7rem, 3vw, 2.3rem); line-height: 1.15; margin: 0 0 1rem; }
+h3 { font-size: 1.4rem; line-height: 1.25; margin: 1.8rem 0 .5rem; }
+p, li { text-wrap: pretty; }
+.prose p, .prose li { line-height: 1.62; }
+.prose h2 { margin-top: 2.6rem; }
+.lede { font-size: clamp(1.25rem, 2vw, 1.45rem); line-height: 1.45; color: var(--paper); }
+.quiet { color: var(--quiet); }
+.get {
+  display: inline-block; padding: .9rem 2rem; border-radius: 1.1rem; color: var(--ink); text-decoration: none;
+  font: 700 1.3rem/1.2 var(--sans); background: linear-gradient(var(--gold), var(--gold-deep)); box-shadow: 0 .6rem 1.4rem rgb(0 0 0 / .25);
+}
+.get:hover { filter: brightness(1.06); }
+.get:focus-visible { outline-color: var(--paper); }
+.second { margin-left: 1.25rem; font-weight: 700; }
+.ctas { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 0; margin: 1.75rem 0 0; }
+ol.steps { list-style: none; counter-reset: step; display: grid; gap: 2rem clamp(2rem, 4vw, 3.5rem); margin: 0; padding: 0; }
+ol.steps li { counter-increment: step; }
+ol.steps li::before { content: counter(step); display: block; font: 500 3rem/1 var(--serif); color: var(--gold); margin-bottom: .6rem; }
+ol.steps b { display: block; font-size: 1.3125rem; line-height: 1.25; margin-bottom: .4rem; }
+ol.steps span { color: var(--quiet); }
+dl.faq dt { font: 600 1.3rem/1.3 var(--serif); margin-top: 1.6rem; }
+dl.faq dd { margin: .4rem 0 0; color: var(--quiet); max-width: var(--read); }
+@media (min-width: 48rem) { ol.steps.three { grid-template-columns: repeat(3, 1fr); } }
+</style>

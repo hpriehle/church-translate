@@ -41,6 +41,7 @@ a:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; border-ra
 
 .top { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 1rem clamp(1.1rem, 3vw, 2rem); }
 .top a { color: var(--quiet); text-decoration: none; }
+.top nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .3rem 1.25rem; }
 .top a:hover { color: var(--paper); }
 .top .name { font: 600 1.25rem "Alegreya", Georgia, serif; color: var(--paper); }
 
@@ -113,7 +114,7 @@ footer a { color: inherit; margin: 0 .6rem; }
 <body>
 <header class="top">
   <a class="name" href="/">Hear Church</a>
-  <a href="/">Find your congregation</a>
+  <nav><a href="/how-it-works">How it works</a><a href="/lds">For Latter-day Saints</a><a href="/blog">Blog</a><a href="/listen">Find your congregation</a></nav>
 </header>
 
 <main>
@@ -129,7 +130,7 @@ footer a { color: inherit; margin: 0 .6rem; }
       Listeners follow along on their own phones, with captions and a spoken voice.</p>
 
     <p class="phone" id="phone" hidden>Hear Church runs on a Mac. Open this page on the Mac you'll use at church to download it.
-      Listening to a meeting? <a href="/">Find your congregation</a>.</p>
+      Listening to a meeting? <a href="/listen">Find your congregation</a>.</p>
 
     <div {{RELEASED}}>
       <a class="get" href="/download/HearChurch.dmg" data-cta="download">Download free for Mac</a>

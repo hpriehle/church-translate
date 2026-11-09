@@ -17,3 +17,6 @@ mac/HearChurch.xcodeproj/
 mac/dist/
 download/.wrangler/
 mac/wolof-libs/
+site/node_modules/
+site/dist/
+site/.astro/

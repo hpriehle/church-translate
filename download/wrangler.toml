@@ -20,7 +20,14 @@ routes = [
   { pattern = "hearchurch.com/api/collect", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/rr.js", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/rrweb.min.js", zone_name = "hearchurch.com" },
+  # The marketing site (site/). The Worker hands anything that isn't one of its pages on to the VPS.
+  { pattern = "hearchurch.com/", zone_name = "hearchurch.com" },
+  { pattern = "www.hearchurch.com/", zone_name = "hearchurch.com" },
+  { pattern = "hearchurch.com/how-it-works*", zone_name = "hearchurch.com" },
+  { pattern = "hearchurch.com/lds*", zone_name = "hearchurch.com" },
+  { pattern = "hearchurch.com/blog*", zone_name = "hearchurch.com" },
 ]
+
 rules = [
   { type = "Text", globs = ["**/*.html", "**/*.txt"], fallthrough = false },
   { type = "Data", globs = ["**/*.png", "**/*.woff2"], fallthrough = false },
@@ -37,3 +44,12 @@ binding = "STATS"
 database_name = "hearchurch-stats"
 database_id = "7d370fdf-6d8b-47d3-90a7-3ebe2d0ac1c0"
 migrations_dir = "migrations"
+
+# Astro builds site/ into site/dist before every deploy; the Worker serves those pages (sitePage in src/index.js).
+[build]
+command = "npm --prefix ../site ci --silent && npm --prefix ../site run build"
+
+[assets]
+directory = "../site/dist"
+binding = "SITE"
+run_worker_first = true

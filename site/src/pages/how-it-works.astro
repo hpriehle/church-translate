@@ -1,0 +1,70 @@
+---
+import Base from "../layouts/Base.astro";
+
+const schema = {
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  name: "How to translate a church meeting live with Hear Church",
+  step: [
+    { "@type": "HowToStep", name: "Set up the Mac", text: "Install Hear Church on a Mac with Apple silicon, enter your congregation and choose its languages." },
+    { "@type": "HowToStep", name: "Connect the sound", text: "Use the Mac's microphone or a cable from the sound system, and check that the Mac hears the speaker." },
+    { "@type": "HowToStep", name: "Start the meeting", text: "Press Start meeting. Listeners scan the QR code or open the congregation's link on their phones." },
+  ],
+};
+---
+<Base
+  title="How Live Church Translation Works | Hear Church"
+  description="How a Sunday runs with Hear Church: set up a Mac once, connect it to the sound, press Start, and members hear the meeting translated live on their phones."
+  schema={schema}>
+
+  <article class="wrap">
+    <header class="head prose">
+      <h1>How live church translation works</h1>
+      <p class="lede">One Mac in the chapel listens to the meeting and translates it as people speak. Anyone who needs the translation follows along on their own phone. Here is what that looks like from setup to the closing prayer.</p>
+    </header>
+
+    <div class="prose">
+      <h2>Before your first Sunday</h2>
+      <p>You need a Mac with Apple silicon (M1 or newer) running macOS 14 or later, with 8 GB of memory, or 16 GB if you'll translate into Wolof. Download Hear Church, drag it to Applications and open it.</p>
+      <p>Setup takes about 5 minutes. You enter your congregation's name, where you meet and when, choose the languages your members need, and pick the microphone. While you do that, the app downloads its speech recognition and the voices for your languages in the background: about 2 GB for most languages, more if you add Wolof.</p>
+      <p>If your congregation already uses Hear Church on another Mac, you don't set it up again. Find the congregation by name and enter its 6-digit connect code.</p>
+
+      <h2>Getting the sound in</h2>
+      <p>The clearer the sound the Mac hears, the better the translation. You can use the Mac's built-in microphone near the pulpit, or run a cable from the sound system into the Mac. Hear Church can use any audio input the Mac sees, lets you pick a single channel on a multi-channel interface, and keeps that input for the whole meeting, so a phone or earbuds connecting nearby won't take over.</p>
+      <p>Before you can press Start, the app checks that it has the microphone, that it can hear sound, that the Mac is on power and that the internet is connected. If the sound stops during a meeting, for example because a cable comes loose, it shows a red warning and a notification.</p>
+
+      <h2>During the meeting</h2>
+      <p>Press <b>Start meeting</b>. The Mac turns each sentence into text, translates it and sends the captions and a spoken voice to everyone listening. Captions usually appear a few seconds after the speaker pauses, and the voice follows shortly after. If the voice starts to fall behind, it speeds up a little to catch up.</p>
+      <p>Most talks are in English. If someone speaks in French, Spanish or Russian, the person at the Mac switches the speaker's language. Hear Church then adds an English translation, and members who share the speaker's language are told to listen in the room.</p>
+      <p>Keep the Mac plugged in with the lid open. It stays awake during a meeting, and app updates never install while one is running.</p>
+
+      <h2>What listeners see</h2>
+      <p>Listeners don't install anything or make an account. They scan the QR code in the chapel, open your congregation's link, or go to <a href="/listen">hearchurch.com/listen</a>, which shows congregations nearby and lets them search by name or town.</p>
+      <p>On their phone they pick a language and see the latest captions while the translated voice plays. Headphones keep the chapel quiet. If the meeting hasn't started, the page shows when the next one begins and waits. If the connection drops, it reconnects by itself.</p>
+
+      <h2>After the meeting</h2>
+      <p>Press Stop. A log of the meeting, with the transcript and its translations, stays on that Mac. It isn't sent to us.</p>
+
+      <h2>What to watch for</h2>
+      <ul>
+        <li><b>Mistakes happen.</b> It is machine translation. Names are the most common problem, so add local names in the app's settings.</li>
+        <li><b>Noise and overlap.</b> Several people talking at once, or a microphone far from the pulpit, make the translation worse.</li>
+        <li><b>Private moments.</b> Turn translation off for anything that shouldn't be sent out, and agree with your leaders on when to use it.</li>
+      </ul>
+
+      <div class="ctas">
+        <a class="get" href="/download">Download for Mac</a>
+        <a class="second" href="/lds">For Latter-day Saint wards</a>
+      </div>
+      <p class="quiet next">Planning the first Sunday? Read <a href="/blog/sacrament-meeting-translation">how to translate sacrament meeting live</a>.</p>
+    </div>
+  </article>
+</Base>
+
+<style>
+.head { padding: clamp(1.5rem, 5vh, 3rem) 0 1rem; }
+article { padding-bottom: clamp(3rem, 8vh, 5rem); }
+.prose ul { padding-left: 1.2rem; }
+.prose li { margin-bottom: .6rem; }
+.next { margin-top: 1.5rem; }
+</style>

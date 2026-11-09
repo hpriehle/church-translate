@@ -1,0 +1,75 @@
+---
+import Base from "../layouts/Base.astro";
+import Flags from "../components/Flags.astro";
+
+const faq = [
+  ["Who should approve using it?",
+   "Talk with your bishop or branch president first. When you set up a congregation, Hear Church asks you to confirm that your leader has approved it."],
+  ["Can a stake or several units share it?",
+   "Each ward or branch sets up as its own congregation, with its own link and QR code. A second Mac can join an existing congregation with its connect code."],
+  ["Does it translate the hymns?",
+   "It skips music. When a hymn is announced, it uses the title from the hymnbook in the listener's language."],
+  ["What about speakers who don't speak English?",
+   "The person at the Mac switches the speaker's language to French, Spanish or Russian. Hear Church then adds an English translation, and members who share that language are told to listen in the room."],
+];
+
+const schema = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: faq.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+};
+---
+<Base
+  title="LDS Sacrament Meeting Translation, Live | Hear Church"
+  description="Live translation for Latter-day Saint wards and branches. Members hear sacrament meeting talks, prayers and announcements on their phones in their own language."
+  schema={schema}>
+
+  <article class="wrap">
+    <header class="head prose">
+      <h1>Sacrament meeting translation for your ward</h1>
+      <p class="lede">When members of your ward or branch speak another language, Hear Church lets them follow sacrament meeting as it happens. A Mac at the pulpit translates each talk, prayer and announcement, and they listen on their own phones.</p>
+      <div class="ctas">
+        <a class="get" href="/download">Download for Mac</a>
+        <a class="second" href="/how-it-works">How it works</a>
+      </div>
+    </header>
+
+    <div class="prose">
+      <h2>Built around a Latter-day Saint meeting</h2>
+      <p>A generic translation app expects one speaker giving one speech. Sacrament meeting has a conducting member of the bishopric, announcements, an opening prayer, several speakers, hymns and a closing prayer. Hear Church was written for that meeting from the start.</p>
+      <ul>
+        <li><b>Church terms, translated the way the Church does.</b> A built-in glossary covers terms such as sacrament meeting, fast and testimony meeting, bishopric, Relief Society, stake and general conference, along with names and the books of scripture.</li>
+        <li><b>Hymns by their real titles.</b> Music is skipped, and announced hymns use the title from the hymnbook in each listener's language.</li>
+        <li><b>Wards, branches and stakes.</b> You set up your unit as a ward or branch, with its stake, so members nearby can find it.</li>
+        <li><b>Your own names.</b> Add the names of members and places in your ward so they come through correctly.</li>
+      </ul>
+
+      <h2>Reverent by design</h2>
+      <p>Members listen with headphones, so the chapel stays quiet. The sound of the meeting stays on the Mac: speech is turned into text there, and only the text is sent out to be translated. Nothing is saved on our server. Agree with your bishopric on what to translate, and turn translation off for anything that should stay private.</p>
+
+      <h2>Languages members can choose</h2>
+    </div>
+    <Flags />
+    <div class="prose">
+      <p class="quiet">Speakers can talk in English, French, Spanish or Russian. Wolof is for listening.</p>
+
+      <h2>Setting it up for your unit</h2>
+      <p>A ward clerk, a member of the bishopric or a tech-minded member can set it up in about 5 minutes on a Mac with Apple silicon. Print the QR code for the chapel doors or the bulletin, and members can also find your congregation at <a href="/listen">hearchurch.com/listen</a>. The <a href="/blog/sacrament-meeting-translation">sacrament meeting guide</a> walks through the first Sunday.</p>
+
+      <h2>Questions</h2>
+      <dl class="faq">
+        {faq.map(([q, a]) => <><dt>{q}</dt><dd>{a}</dd></>)}
+      </dl>
+
+      <p class="indep-note">Hear Church is an independent tool, not affiliated with or endorsed by The Church of Jesus Christ of Latter-day Saints.</p>
+    </div>
+  </article>
+</Base>
+
+<style>
+.head { padding: clamp(1.5rem, 5vh, 3rem) 0 1.5rem; }
+article { padding-bottom: clamp(3rem, 8vh, 5rem); }
+.prose ul { padding-left: 1.2rem; }
+.prose li { margin-bottom: .7rem; }
+.indep-note { margin-top: 2.5rem; color: var(--quiet); font-size: 1rem; }
+</style>

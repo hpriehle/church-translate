@@ -41,7 +41,7 @@ hearchurch.com/
   /languages/haitian-creole  /languages/portuguese  /languages/mandarin  /languages/korean
                             Planned languages, marked "coming soon"
   /compare  /compare/hope-translator  /compare/human-interpreters  /compare/google-translate
-  /blog/  /blog/<title>
+  /blog  /blog/<title>
   /privacy  /terms          Exist (Worker)
   /sitemap.xml  /robots.txt
 ```
@@ -104,8 +104,8 @@ already uses the name. None of the paths above were taken on 2026-11-09.
 - `/compare` pages: every row factual and dated. No competitor claim we can't show.
 - The sitemap lists live marketing pages and `/listen`. Congregation pages are `noindex` and
   left out of the sitemap.
-- **Analytics:** the privacy policy covers the tracker on `/download` only. Update it before
-  the tracker runs on other marketing pages. `/listen` and `/<slug>` never load the tracker.
+- **Analytics:** every marketing page loads the tracker, and the privacy policy says so ("our pages
+  about Hear Church"). `/listen` and `/<slug>` never load it.
 
 ## Build order
 
@@ -139,3 +139,16 @@ The blog topic list in the v2 draft still applies, apart from claims these facts
   four languages.
 - **Billing plan:** update `hear-church-plan.md` from "per minute while a meeting runs" to
   speech minutes only.
+
+## How it's built (Phase 1, 2026-11-09)
+
+- `site/` is the Astro project. `download/wrangler.toml` builds it before every deploy and serves
+  `site/dist` through the Worker (`sitePage` in `download/src/index.js`).
+- To publish a page, add its path in three places: `SITE_PAGE` and `SITE_PATHS` in
+  `download/src/index.js`, a route in `download/wrangler.toml`, and `site/src/site.js` if it
+  belongs in the nav or footer. New top-level paths also go in `SITE_PAGES` in `app/hear/db.py`.
+- Paths the Worker's routes catch but doesn't own, such as a congregation at `/lds-harlem`, are
+  passed through to the VPS unchanged.
+- `/pricing` is `site/src/pages/_pricing.astro`. The underscore keeps it out of the build until
+  billing ships.
+- `/demo` waits for a recording we have permission to publish.

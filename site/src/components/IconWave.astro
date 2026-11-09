@@ -1,0 +1,35 @@
+---
+// The app icon with its sound wave carried out to both edges of the page, as on /download.
+---
+<div class="art">
+  <div class="wave out-left" aria-hidden="true"></div>
+  <img src="/download/icon.png" width="1024" height="1024" alt="The Hear Church app icon: a pulpit with a microphone and a sound wave on it">
+  <div class="wave out-right" aria-hidden="true"></div>
+</div>
+
+<script is:inline>
+  (() => {
+    const rhythm = [.62, .95, .42, .74, 1, .5, .3, .82, .58, .92, .36, .68, .86, .46, .28, .76, .54, .9, .4, .64];
+    document.querySelectorAll(".wave").forEach((wave) => {
+      for (let n = 0; n < 60; n++) {
+        const fade = 1 - n / 60, bar = document.createElement("i");
+        bar.style.cssText = `--h:${(rhythm[n % rhythm.length] * (.3 + .7 * fade)).toFixed(3)};--o:${(fade * fade * .95 + .05).toFixed(3)};--n:${n}`;
+        wave.append(bar);
+      }
+    });
+  })();
+</script>
+
+<style>
+.art { --icon: clamp(12rem, min(26vw, 30vh), 21rem); display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; }
+.art img { display: block; width: var(--icon); height: var(--icon); margin: 0 calc(var(--icon) * -.05); position: relative; filter: drop-shadow(0 1.1rem 1.6rem rgb(0 0 0 / .32)); }
+.wave { display: flex; align-items: center; gap: clamp(.4rem, .8vw, .75rem); height: calc(var(--icon) * .7); overflow: hidden; }
+.wave.out-left { flex-direction: row-reverse; }
+.wave :global(i) {
+  flex: none; display: block; width: clamp(.4rem, .8vw, .75rem); height: calc(var(--h) * var(--icon) * .68); border-radius: 99px;
+  background: linear-gradient(var(--gold), var(--gold-deep)); opacity: var(--o);
+  animation: speak .7s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: calc(var(--n) * 28ms + 150ms);
+}
+@keyframes speak { from { transform: scaleY(.06); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .wave :global(i) { animation: none; } }
+</style>
