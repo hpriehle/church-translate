@@ -86,13 +86,14 @@ final class AppModel: ObservableObject {
 
     func setSpeaker(_ code: String) async {
         await engine.set(["stt": ["language": code]])
+        if code != "en" { await engine.download(["en"]) }   // listeners get English: its voice comes with the first use
     }
 
     // MARK: engine
 
     /// The engine runs from the first launch, so voices can download while the operator is still in setup.
     func launch() {
-        engine.packageLanguages = profile.languages
+        engine.packageLanguages = OutputLanguage.all.map(\.id) + ["en"]
         engine.start(environment: engineEnvironment())
         Task { await checkKey() }
         Task { await checkHub() }
@@ -128,18 +129,50 @@ final class AppModel: ObservableObject {
         if on { profile.languages.append(code) }
         profile.languagesPicked = true
         profile.save()
-        engine.packageLanguages = profile.languages
         Task {
             if profile.setupDone && !profile.languages.isEmpty { await engine.set(["languages": profile.languages]) }
             await engine.download(profile.languages)
         }
     }
 
+    func package(_ code: String) -> PackageStatus? { engine.packages.first { $0.id == code } }
+
+    /// The checkboxes next to Start meeting: every language downloaded (or on its way), checked or not.
+    var downloadedLanguages: [OutputLanguage] {
+        OutputLanguage.all.filter { l in
+            profile.languages.contains(l.id) || ["ready", "downloading", "failed"].contains(package(l.id)?.state ?? "")
+        }
+    }
+
+    /// Download a language from Settings. It comes ready to use, except during a meeting: a download
+    /// must not change what listeners get in the middle of a talk, so there it waits unchecked.
+    func downloadLanguage(_ code: String) {
+        if running || code == "en" { Task { await engine.download([code]) } } else { setLanguage(code, on: true) }
+    }
+
+    func manageLanguages() {
+        UserDefaults.standard.set(SettingsView.languagesTab, forKey: SettingsView.tabKey)
+        openSettings?()
+    }
+
+    /// Delete a language's voice; nil if it worked, or why it couldn't. The engine unchecks it too.
+    func removeLanguage(_ code: String) async -> String? {
+        let r = await engine.post("api/packages/remove", ["language": code])
+        guard r.ok else { return r.message.isEmpty ? "Could not remove it." : r.message }
+        profile.languages.removeAll { $0 == code }
+        profile.save()
+        await engine.refreshPackages()
+        return nil
+    }
+
     /// After a (re)start of the engine, pick up downloads where they stopped.
     private func resumeDownloads() {
         guard profile.setupDone || profile.languagesPicked else { return }
-        Task { await engine.download(profile.languages) }
+        Task { await engine.download(neededDownloads) }
     }
+
+    /// What this Mac needs for the languages checked now, plus English while the speaker isn't speaking it.
+    private var neededDownloads: [String] { profile.languages + (speaker == "en" ? [] : ["en"]) }
 
     /// Downloads in progress (or failed), for the bar at the top of the window.
     var downloads: [PackageStatus] { engine.packages.filter { $0.state == "downloading" || $0.state == "failed" } }
@@ -297,16 +330,21 @@ final class AppModel: ObservableObject {
         case .bad(let why): out.append(Check(id: "key", title: "Claude API key problem", state: .bad, detail: why,
                                              action: ("Settings…", { self.openSettings?() })))
         }
+        if profile.setupDone && profile.languages.isEmpty {
+            out.append(Check(id: "languages", title: "No language chosen", state: .bad,
+                             detail: "Download a language, or check one, to start a meeting.",
+                             action: ("Languages…", { self.manageLanguages() })))
+        }
         switch engine.state {
         case .running:
-            let pk = engine.packages
+            let pk = engine.packages.filter { $0.id == "speech" || neededDownloads.contains($0.id) }
             let missing = pk.filter { $0.state == "missing" || $0.state == "failed" }
             if pk.contains(where: { $0.state == "downloading" }) {
                 out.append(Check(id: "models", title: "Downloading languages…", state: .pending))
             } else if !missing.isEmpty {
                 out.append(Check(id: "models", title: "Languages not downloaded", state: .bad,
                                  detail: missing.map(\.name).joined(separator: ", "),
-                                 action: ("Download", { Task { await self.engine.download(self.profile.languages) } })))
+                                 action: ("Download", { Task { await self.engine.download(self.neededDownloads) } })))
             } else if !pk.isEmpty {
                 out.append(Check(id: "models", title: "Languages downloaded", state: .ok))
             }

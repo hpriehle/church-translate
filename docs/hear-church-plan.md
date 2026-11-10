@@ -257,14 +257,28 @@ Not for launch. What would be needed to charge with a margin:
   built on it (not reselling raw API access).
 - **Own Wolof voice:** pay a native speaker to record a few hours with a signed release, then
   fine-tune. Owned outright, likely better quality, and a moat competitors can't copy.
-- **Revenue:** credits with a margin (e.g. $3 per language-hour vs ~$2 cost) or a flat plan
-  ($15–20/month per ward). Own-key users pay nothing unless a platform fee is added.
+- **Revenue (decided 2026-11-08): prepaid credits, $5 per language-hour**, deducted per minute
+  while a meeting runs; packs at a discount (e.g. 20 h for $80 = $4/h); first hour free. No
+  monthly plan: church use is lumpy and cost is purely per hour, so credits never lose money.
+  Measured cost (run reports Oct 18 – Nov 1, Opus low effort, after the caching fix): 2.4 h of
+  meetings in FR+WO cost $7.22 ≈ $1.55 per language-hour (single runs $0.86–2.60). A weekly
+  70-min sacrament meeting in 2 languages ≈ $16/month of Claude. hearchurch.com = paid credits;
+  self-hosting with your own API key stays free on GitHub (MIT).
 - **Business setup:** LLC; Stripe + Stripe Tax; terms of service with a "translation may contain
   errors" disclaimer; privacy and refund policies; receipts clerks can submit.
 - **Protecting it while open source:** trademark "Hear Church" (~$350 US filing). Forks can use
   the code but not the name, the hearchurch.com listener network or an owned voice.
-- **Who pays:** ask a bishop / stake clerk whether wards can pay from their local budget or
-  members would pay personally, before building billing.
+- **Who pays:** not our concern. Someone pays by card; if a ward reimburses them, that happens
+  outside the app. Receipts are enough.
+- **Never cut off a meeting (decided 2026-11-08):** a running meeting always finishes, even when
+  credits run out. The balance goes negative and the next top-up pays off that time first.
+  - Limit: a new meeting can't start once the balance is below −2 language-hours. Start asks
+    for a top-up instead. A meeting already running is never stopped.
+  - The /speak page shows the balance and a "low / negative balance" notice; it never interrupts.
+- **Auto top-up (decided 2026-11-08):** the operator saves a card and picks a pack and a
+  threshold (default: below 1 language-hour). When the balance drops below it, the card is
+  charged off-session (Stripe saved payment method). If the charge fails, the meeting goes on;
+  the operator gets an email and a banner, and the negative-balance limit above applies.
 - **Scale:** ~$4–5/month profit per ward means it only adds up at hundreds of wards. Prove it free
   in a few wards first.
 

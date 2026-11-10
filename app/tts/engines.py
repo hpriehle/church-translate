@@ -50,87 +50,44 @@ def _resample(pcm: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
     return soxr.resample(pcm, sr_in, sr_out).astype(np.int16)
 
 
-# ------------------------------------------------------------------ macOS say
-
-_VOICE_LINE = re.compile(r"^(?P<name>.+?)\s+(?P<lang>[a-z]{2,3}_[A-Z0-9]{2,3})\s+#")
-
-
-def list_say_voices() -> list[dict]:
-    if not shutil.which("say"):
-        return []
-    try:
-        out = subprocess.run(["say", "-v", "?"], capture_output=True, text=True, timeout=10).stdout
-    except Exception:
-        return []
-    voices = []
-    for line in out.splitlines():
-        m = _VOICE_LINE.match(line)
-        if m:
-            voices.append({"name": m.group("name").strip(), "lang": m.group("lang")})
-    return voices
-
-
-# macOS novelty voices: never for a meeting.
-_NOVELTY = {"Albert", "Bad News", "Bahh", "Bells", "Boing", "Bubbles", "Cellos", "Wobble", "Fred", "Good News",
-            "Jester", "Junior", "Kathy", "Organ", "Superstar", "Ralph", "Trinoids", "Whisper", "Zarvox"}
-_REGION = {"fr": "fr_FR", "en": "en_US", "es": "es_ES", "ru": "ru_RU"}
-_FAVOURITE = {"fr": "Thomas", "en": "Samantha"}
-
-
-def say_voices(lang: str = "fr") -> list[dict]:
-    """The installed macOS voices for one language, best first."""
-    def score(v: dict) -> tuple:
-        name = v["name"]
-        quality = 3 if "Premium" in name else 2 if "Enhanced" in name or "améliorée" in name.lower() else 1
-        region = 2 if v["lang"] == _REGION.get(lang) else 1
-        return (quality, region, _FAVOURITE.get(lang, "-") in name)
-
-    out = [v for v in list_say_voices() if v["lang"].startswith(lang) and v["name"].split(" (")[0] not in _NOVELTY]
-    return sorted(out, key=score, reverse=True)
-
-
-def french_voices() -> list[dict]:
-    return say_voices("fr")
-
-
-class SayTts:
-    name = "say"
-
-    def __init__(self, cfg: TtsCfg, out_sr: int):
-        if sys.platform != "darwin" or not shutil.which("say"):
-            raise RuntimeError("macOS `say` is not available on this machine")
-        self.cfg = cfg
-        self.out_sr = out_sr
-        voices = say_voices(cfg.lang)
-        names = {v["name"] for v in voices}
-        if cfg.voice and cfg.voice in names:
-            self.voice = cfg.voice
-        elif voices:
-            if cfg.voice:
-                log.warning("voice %r not installed; using %s", cfg.voice, voices[0]["name"])
-            self.voice = voices[0]["name"]
-        else:
-            raise RuntimeError(f"no {cfg.lang} voice installed (System Settings → Accessibility → Spoken Content)")
-
-    def synth(self, text: str, speed: float = 1.0) -> np.ndarray:
-        rate = int(round(self.cfg.rate * self.cfg.speed * speed))
-        with tempfile.TemporaryDirectory() as td:
-            txt = Path(td) / "t.txt"
-            wav = Path(td) / "o.wav"
-            txt.write_text(text, encoding="utf-8")
-            subprocess.run(["say", "-v", self.voice, "-r", str(rate), "-f", str(txt), "-o", str(wav),
-                            "--file-format=WAVE", f"--data-format=LEI16@{self.out_sr}"],
-                           check=True, capture_output=True, timeout=30)
-            pcm, sr = _read_wav(wav)
-        return _resample(pcm, sr, self.out_sr)
-
-
 # ------------------------------------------------------------------ Piper
 
-DEFAULT_PIPER_VOICES = {"fr_FR-tom-medium", "es_MX-ald-medium", "ru_RU-denis-medium"}
-_PIPER_NAMES = {"tom": "Tom (male)", "siwis": "Siwis (female)", "upmc": "UPMC (female)",
-                "gilles": "Gilles (male)", "mls": "MLS", "denis": "Denis (male)", "dmitri": "Dmitri (male)"}
+DEFAULT_PIPER_VOICES = {"fr_FR-tom-medium", "es_MX-ald-medium", "ru_RU-denis-medium", "pt_BR-cadu-medium",
+                        "uk_UA-tetiana-high", "fa_IR-amir-medium", "ne_NP-chitwan-medium", "vi_VN-vais1000-medium",
+                        "zh_CN-chaowen-medium", "en_US-joe-medium"}
+# What the operator sees for each voice: a common first name for that language, never a model or engine name.
+_VOICE_PEOPLE = {
+    "fr": [("fr_FR-tom-medium", "Male", "Julien"), ("fr_FR-siwis-medium", "Female", "Camille")],
+    "wo": [("male", "Male", "Moussa"), ("female", "Female", "Fatou")],
+    "es": [("es_MX-ald-medium", "Male", "Carlos"), ("es_MX-claude-high", "Female", "Lucía")],
+    "ru": [("ru_RU-denis-medium", "Male", "Ivan"), ("ru_RU-dmitri-medium", "Male", "Alexei")],
+    "pt": [("pt_BR-cadu-medium", "Male", "João"), ("pt_BR-faber-medium", "Male", "Pedro")],
+    "uk": [("uk_UA-tetiana-high", "Female", "Olena"), ("uk_UA-oleksa-high", "Male", "Andriy")],
+    "fa": [("fa_IR-amir-medium", "Male", "Ali"), ("fa_IR-ganji-medium", "Male", "Reza")],
+    "ne": [("ne_NP-chitwan-medium", "Male", "Ram")],
+    "vi": [("vi_VN-vais1000-medium", "Female", "Lan")],
+    "zh": [("zh_CN-chaowen-medium", "Female", "Mei")],
+    "en": [("en_US-joe-medium", "Male", "James"), ("en_US-kristin-medium", "Female", "Mary")],
+}
 _PIPER_LOADED: dict[str, object] = {}
+
+
+def voice_label(lang: str, voice: str) -> str:
+    """e.g. "Male 2 - Alexei": numbered within its language, the same whichever voices are downloaded."""
+    seen: dict[str, int] = {}
+    for v, kind, name in _VOICE_PEOPLE.get(lang, ()):
+        seen[kind] = seen.get(kind, 0) + 1
+        if v == voice:
+            return f"{kind} {seen[kind]} - {name}"
+    return "Voice"
+
+
+def voice_catalog() -> dict[str, list[dict]]:
+    """Every voice each language offers, downloaded or not, so the operator can hear them before downloading.
+    The Mac app plays each from a recording built into it: mac/make_voice_samples.py makes them."""
+    return {lang: [{"id": f"{'speecht5' if lang == 'wo' else 'piper'}:{v}", "engine": "speecht5" if lang == "wo" else "piper",
+                    "voice": v, "label": voice_label(lang, v), "lang": lang} for v, _, _ in people]
+            for lang, people in _VOICE_PEOPLE.items()}
 
 
 def list_piper_voices(lang: str = "fr") -> list[dict]:
@@ -141,19 +98,14 @@ def list_piper_voices(lang: str = "fr") -> list[dict]:
         parts = p.stem.split("-")  # fr_FR-tom-medium
         if not parts[0].startswith(lang):
             continue
-        nice = _PIPER_NAMES.get(parts[1], parts[1].capitalize()) if len(parts) > 1 else p.stem
-        out.append({"id": f"piper:{p.stem}", "engine": "piper", "voice": p.stem, "label": f"Piper — {nice}", "lang": parts[0]})
+        out.append({"id": f"piper:{p.stem}", "engine": "piper", "voice": p.stem, "label": voice_label(lang, p.stem), "lang": parts[0]})
     # Default first.
     return sorted(out, key=lambda v: v["voice"] not in DEFAULT_PIPER_VOICES)
 
 
 def list_voices(lang: str = "fr") -> list[dict]:
     """Every voice for one language the operator can pick, across engines."""
-    voices = list_piper_voices(lang)
-    for v in say_voices(lang):
-        voices.append({"id": f"say:{v['name']}", "engine": "say", "voice": v["name"],
-                       "label": f"{v['name']} (macOS) · {v['lang']}", "lang": v["lang"]})
-    return voices
+    return list_piper_voices(lang)
 
 
 class PiperTts:
@@ -230,13 +182,10 @@ def speecht5_available() -> bool:
 def list_wolof_voices() -> list[dict]:
     if not _torch_available():
         return []
-    names = {"male": "male", "female": "female"}
-    voices = [{"id": f"speecht5:{p.stem[8:]}", "engine": "speecht5", "voice": p.stem[8:],
-               "label": f"Wolof — {names.get(p.stem[8:], p.stem[8:])}", "lang": "wo"}
-              for p in sorted(WOLOF_DIR.glob("speaker-*.npy"))]
-    voices.append({"id": "mms:default", "engine": "mms", "voice": "default",
-                   "label": "Wolof — MMS (fast, for servers)", "lang": "wo"})
-    return voices
+    # The MMS voice is non-commercial (CC BY-NC), so the paid app never offers it.
+    return [{"id": f"speecht5:{p.stem[8:]}", "engine": "speecht5", "voice": p.stem[8:],
+             "label": voice_label("wo", p.stem[8:]), "lang": "wo"}
+            for p in sorted(WOLOF_DIR.glob("speaker-*.npy"))]
 
 
 def mms_wolof_text(text: str) -> str:
@@ -351,7 +300,7 @@ def make_tts(cfg: TtsCfg, out_sr: int):
         return SpeechT5Tts(cfg, out_sr)
     if cfg.engine == "mms":
         return MmsTts(cfg, out_sr)
-    return SayTts(cfg, out_sr)
+    raise ValueError(f"unknown voice engine {cfg.engine!r}")
 
 
 class TtsRunner:
@@ -385,6 +334,14 @@ class TtsRunner:
             # Keep the previous engine if there was one.
             self.error = str(e)
             log.warning("TTS unavailable (%s %s): %s", cfg.engine, cfg.voice, e)
+
+    def unload(self) -> None:
+        """The operator removed this language's voice: free it, and load from nothing if it comes back."""
+        self.engine = None
+        self.error = ""
+        self.ready.clear()
+        for path in [p for p in _PIPER_LOADED if Path(p).name.startswith(self.cfg.lang)]:
+            del _PIPER_LOADED[path]
 
     @property
     def voice(self) -> str:

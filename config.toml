@@ -58,10 +58,9 @@ ollama_timeout_s = 10.0
 audience = "Francophone members from West Africa, mostly Senegal"
 
 [tts]
-# "piper" (open-source voices in models/piper, any OS) or "say" (macOS voices).
+# "piper" (open-source voices in models/piper, any OS).
 engine = "piper"
 # Piper: file name without .onnx, e.g. fr_FR-tom-medium (male) or fr_FR-siwis-medium (female).
-# say: exact name from `say -v '?'`. The operator page lists every installed voice.
 voice = "fr_FR-tom-medium"
 # Words per minute (about 175 is normal speech); slightly faster keeps up better.
 rate = 190

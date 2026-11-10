@@ -1,15 +1,252 @@
+import AVFoundation
 import SwiftUI
 
-/// Hear Church → Settings… (⌘,): the key, voices, the glossary Claude follows, and the congregation.
+/// Hear Church → Settings… (⌘,): the key, languages, voices, the glossary Claude follows, and the congregation.
 struct SettingsView: View {
+    static let tabKey = "settingsTab"
+    static let languagesTab = "languages"
+    @AppStorage(SettingsView.tabKey) private var tab = "general"
+
     var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
-            VoiceSettings().tabItem { Label("Voices", systemImage: "speaker.wave.2") }
-            GlossarySettings().tabItem { Label("Glossary", systemImage: "character.book.closed") }
-            CongregationSettings().tabItem { Label("Congregation", systemImage: "building.columns") }
+        TabView(selection: $tab) {
+            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag("general")
+            LanguageSettings().tabItem { Label("Languages", systemImage: "globe") }.tag(SettingsView.languagesTab)
+            VoiceSettings().tabItem { Label("Speaking", systemImage: "speaker.wave.2") }.tag("voices")
+            GlossarySettings().tabItem { Label("Glossary", systemImage: "character.book.closed") }.tag("glossary")
+            CongregationSettings().tabItem { Label("Congregation", systemImage: "building.columns") }.tag("congregation")
         }
         .frame(width: 600, height: 520)
+    }
+}
+
+/// Every language: search for it, download it, delete it to get the disk space back, or open it to pick its voice.
+/// What's downloaded shows as a checkbox next to Start meeting, and that checkbox decides what's translated.
+private struct LanguageSettings: View {
+    @EnvironmentObject var model: AppModel
+    @State private var search = ""
+    @State private var open: OutputLanguage?
+    @State private var removing: OutputLanguage?
+    @State private var problem: String?
+
+    private var everyLanguage: [OutputLanguage] { OutputLanguage.all.filter(\.available) + [.english] }
+
+    private var shown: [OutputLanguage] {
+        let q = search.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return everyLanguage }
+        return everyLanguage.filter { $0.name.localizedCaseInsensitiveContains(q) || $0.native.localizedCaseInsensitiveContains(q) }
+    }
+
+    var body: some View {
+        Group {
+            if model.engine.packages.isEmpty {
+                Form { Text("The translation engine is starting…").foregroundStyle(.secondary) }.formStyle(.grouped)
+            } else if let open {
+                LanguageDetail(language: open, problem: problem, back: { problem = nil; self.open = nil }, remove: { askToRemove(open) })
+            } else {
+                list
+            }
+        }
+        .alert("Remove \(removing?.name ?? "this language")?", isPresented: Binding(
+            get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { language in
+            Button("Remove", role: .destructive) { Task { problem = await model.removeLanguage(language.id) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { language in
+            Text("This deletes its voices and frees \(Format.size(model.package(language.id)?.size_mb ?? language.sizeMB)). Your glossary for it is kept, and you can download it again at any time.")
+        }
+    }
+
+    private var list: some View {
+        Form {
+            Section {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search languages", text: $search).textFieldStyle(.plain)
+                    if !search.isEmpty {
+                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
+                            .buttonStyle(.plain).help("Clear the search")
+                    }
+                }
+            }
+            Section {
+                ForEach(shown) { row($0) }
+                if shown.isEmpty { Text("No language called “\(search)”.").foregroundStyle(.secondary) }
+            } footer: {
+                Text("Downloaded languages appear as checkboxes next to Start meeting. Check the ones to translate.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let problem { Text(problem).font(.callout).foregroundStyle(.orange) }
+            Section {
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("Speech recognition")
+                        Text("Needed for every language").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    PackageBadge(package: model.package("speech"), sizeMB: 1615)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func row(_ language: OutputLanguage) -> some View {
+        HStack {
+            Button { problem = nil; open = language } label: {
+                HStack {
+                    Text(language.flag).font(.title3)
+                    Text(language.name)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            PackageBadge(package: model.package(language.id), sizeMB: language.sizeMB)
+            LanguageAction(language: language, remove: { askToRemove(language) })
+            Button { problem = nil; open = language } label: { Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
+                .buttonStyle(.plain).help("Choose its voice")
+        }
+    }
+
+    /// The button always answers: with the question, or with the reason it can't be removed right now.
+    private func askToRemove(_ language: OutputLanguage) {
+        if model.running && model.profile.languages.contains(language.id) {
+            problem = "\(language.name) is being translated: uncheck it first, or stop the meeting."
+        } else {
+            problem = nil
+            removing = language
+        }
+    }
+}
+
+/// Download, Try again or Remove, whichever fits the language's state.
+private struct LanguageAction: View {
+    @EnvironmentObject var model: AppModel
+    let language: OutputLanguage
+    let remove: () -> Void
+
+    var body: some View {
+        switch model.package(language.id)?.state {
+        case "ready": Button("Remove", action: remove)
+        case "downloading": EmptyView()
+        case "failed": Button("Try again") { model.downloadLanguage(language.id) }
+        default: Button("Download") { model.downloadLanguage(language.id) }
+        }
+    }
+}
+
+/// One language: its download and which voice reads it.
+private struct LanguageDetail: View {
+    @EnvironmentObject var model: AppModel
+    let language: OutputLanguage
+    let problem: String?
+    let back: () -> Void
+    let remove: () -> Void
+
+    @State private var player: AVAudioPlayer?
+    @State private var playing: String?
+    @State private var listenProblem: String?
+
+    private var state: String? { model.package(language.id)?.state }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: back) { Label("Languages", systemImage: "chevron.left") }
+                .buttonStyle(.link).padding([.top, .leading], 20)
+            Form {
+                Section {
+                    HStack(spacing: 12) {
+                        Text(language.flag).font(.system(size: 34))
+                        VStack(alignment: .leading) {
+                            Text(language.name).font(.title3.weight(.semibold))
+                            Text(language.native).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        PackageBadge(package: model.package(language.id), sizeMB: language.sizeMB)
+                        LanguageAction(language: language, remove: remove)
+                    }
+                    if let problem { Text(problem).font(.callout).foregroundStyle(.orange) }
+                }
+                Section("Voice") { voices }
+            }
+            .formStyle(.grouped)
+        }
+        .task(id: state) { await model.engine.loadSettings() }   // a finished download brings its voices
+        .onDisappear { player?.stop(); player = nil; playing = nil }
+    }
+
+    @ViewBuilder private var voices: some View {
+        let options = model.engine.settings?.voice_catalog[language.id] ?? []
+        let usable = state == "ready" ? model.engine.settings?.voices[language.id] ?? [] : []
+        let current = selected(usable)
+        ForEach(options, id: \.self) { option in
+            let id = "\(option.engine):\(option.voice)"
+            HStack {
+                if usable.contains(option) {
+                    Button { choose(id, usable) } label: {
+                        HStack {
+                            Image(systemName: id == current ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(id == current ? Color.accentColor : Color.secondary)
+                            Text(option.label)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(option.label)
+                    Spacer()
+                }
+                listenButton(option, id)
+            }
+        }
+        if usable.isEmpty {
+            Text("Listen to each voice now. Download \(language.name) to choose one.").font(.callout).foregroundStyle(.secondary)
+        }
+        if let listenProblem { Text(listenProblem).font(.callout).foregroundStyle(.orange) }
+    }
+
+    @ViewBuilder private func listenButton(_ option: EngineSettings.VoiceOption, _ id: String) -> some View {
+        Button { listen(option, id) } label: {
+            Label(playing == id ? "Stop" : "Listen", systemImage: playing == id ? "stop.fill" : "play.fill")
+        }
+        .help("Hear this voice before choosing it")
+    }
+
+    /// A recording built into the app, so no download is needed. Plays on this Mac only.
+    private func listen(_ option: EngineSettings.VoiceOption, _ id: String) {
+        let wasPlaying = playing == id
+        player?.stop()
+        player = nil
+        playing = nil
+        listenProblem = nil
+        guard !wasPlaying else { return }
+        guard let url = Bundle.main.url(forResource: "sample-\(language.id)-\(option.voice)", withExtension: "m4a"),
+              let sound = try? AVAudioPlayer(contentsOf: url), sound.play() else {
+            listenProblem = "Couldn't play that voice."
+            return
+        }
+        player = sound
+        playing = id
+        Task {
+            try? await Task.sleep(for: .seconds(sound.duration + 0.1))
+            if player === sound { player = nil; playing = nil }
+        }
+    }
+
+    private func selected(_ options: [EngineSettings.VoiceOption]) -> String {
+        let ids = options.map { "\($0.engine):\($0.voice)" }
+        guard let s = model.engine.settings?.settings else { return ids.first ?? "" }
+        let current = language.id == "fr" ? "\(s.tts.engine):\(s.tts.voice)" : s.voices[language.id].map { "\($0.engine):\($0.voice)" }
+        return current.flatMap { ids.contains($0) ? $0 : nil } ?? ids.first ?? ""
+    }
+
+    private func choose(_ id: String, _ options: [EngineSettings.VoiceOption]) {
+        guard let o = options.first(where: { "\($0.engine):\($0.voice)" == id }) else { return }
+        let v = ["engine": o.engine, "voice": o.voice]
+        Task {
+            await model.engine.set(language.id == "fr" ? ["tts": v] : ["voices": [language.id: v]])
+            await model.engine.loadSettings()
+        }
     }
 }
 
@@ -68,21 +305,7 @@ private struct VoiceSettings: View {
     var body: some View {
         Form {
             if let s = model.engine.settings {
-                Section("Voice for each language") {
-                    ForEach(model.profile.languages, id: \.self) { code in
-                        let options = s.voices[code] ?? []
-                        // French uses the main voice (tts); the others have their own (voices)
-                        let current = code == "fr" ? "\(s.settings.tts.engine):\(s.settings.tts.voice)"
-                                                   : s.settings.voices[code].map { "\($0.engine):\($0.voice)" } ?? ""
-                        Picker(OutputLanguage.name(code), selection: Binding(get: { current }, set: { id in
-                            guard let o = options.first(where: { "\($0.engine):\($0.voice)" == id }) else { return }
-                            let v = ["engine": o.engine, "voice": o.voice]
-                            Task { await model.engine.set(code == "fr" ? ["tts": v] : ["voices": [code: v]]) }
-                        })) {
-                            if !options.contains(where: { "\($0.engine):\($0.voice)" == current }) { Text("Default").tag(current) }
-                            ForEach(options, id: \.self) { Text($0.label).tag("\($0.engine):\($0.voice)") }
-                        }
-                    }
+                Section("Test") {
                     Button("Play a test sentence") { Task { await model.engine.post("api/test-voice") } }
                         .disabled(!model.running)
                         .help("Listening phones hear a short sentence. Start the meeting first.")

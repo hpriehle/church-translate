@@ -62,6 +62,8 @@ class Channel:
     def activate(self) -> None:
         """Start this language's Claude session and load its voice, the first time it is switched on."""
         if self._started:
+            if self.tts.engine is None:   # its voice was removed and has been downloaded again
+                self._tasks.append(asyncio.create_task(self.tts.load()))
             return
         self._started = True
         self._tasks += [asyncio.create_task(self.translator.start()), asyncio.create_task(self.tts.load())]

@@ -299,7 +299,12 @@ private struct LanguagesSection: View {
 
     var body: some View {
         SectionCard(title: "Languages") {
-            ForEach(OutputLanguage.all.filter(\.available)) { LanguageToggle(language: $0) }
+            ForEach(model.downloadedLanguages) { LanguageToggle(language: $0) }
+            if model.downloadedLanguages.isEmpty {
+                Text("No languages downloaded yet.").font(.callout).foregroundStyle(.secondary)
+            }
+            Button("Manage languages…") { model.manageLanguages() }
+            .buttonStyle(.link).font(.callout)
             if model.speaker != "en" {
                 let name = ["fr": "French", "es": "Spanish", "ru": "Russian"][model.speaker] ?? model.speaker
                 Text("The speaker talks \(name): English is added for listeners."

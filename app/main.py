@@ -32,7 +32,7 @@ from .languages import AUTO, LANGUAGES, SPEAKER_LANGUAGES
 from .pipeline import Pipeline
 from .stt import Transcriber
 from .translate.router import Translator
-from .tts.engines import TtsRunner, list_voices_for
+from .tts.engines import TtsRunner, list_voices_for, voice_catalog
 
 log = logging.getLogger("app")
 
@@ -874,6 +874,7 @@ async def api_state(request: Request):
         "settings": _public_settings(),
         "devices": list_input_devices(),
         "voices": {c: list_voices_for(c) for c in S.pipeline.channels},
+        "voice_catalog": voice_catalog(),
         "samples": _samples(),
         "languages": languages_public(),
         "all_languages": [{"code": l.code, "name": l.name} for l in LANGUAGES.values() if l.code not in AUTO],
@@ -920,6 +921,27 @@ async def api_packages_download(request: Request):
     await PACKAGES.status(langs)
     PACKAGES.download_missing(langs)
     return {"packages": await PACKAGES.status(langs)}
+
+
+@app.post("/api/packages/remove")
+async def api_packages_remove(request: Request):
+    """Delete one language's downloaded voice, {"language": "es"}, switching its translation off first."""
+    require_operator(request)
+    from .packages import PACKAGES
+
+    code = str((await request.json()).get("language") or "")
+    ch = S.pipeline.channels.get(code)
+    if ch and ch.on and S.pipeline.running:
+        raise HTTPException(400, f"{ch.lang.name} is being translated: uncheck it first, or stop the meeting.")
+    try:
+        await PACKAGES.remove(code)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if ch:
+        if ch.on:
+            set_languages([c for c in S.settings.languages if c != code])
+        ch.tts.unload()
+    return {"ok": True}
 
 
 def _load_missing_voices() -> None:

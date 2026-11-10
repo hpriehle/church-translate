@@ -145,7 +145,13 @@ DEFAULT_VOICES: dict[str, VoiceCfg] = {
     "wo": VoiceCfg(engine="speecht5", voice="male") if sys.platform == "darwin" else VoiceCfg(engine="mms", voice="default"),
     "es": VoiceCfg(engine="piper", voice="es_MX-ald-medium"),
     "ru": VoiceCfg(engine="piper", voice="ru_RU-denis-medium"),
-    "en": VoiceCfg(engine="say", voice="")}
+    "pt": VoiceCfg(engine="piper", voice="pt_BR-cadu-medium"),
+    "uk": VoiceCfg(engine="piper", voice="uk_UA-tetiana-high"),
+    "fa": VoiceCfg(engine="piper", voice="fa_IR-amir-medium"),
+    "ne": VoiceCfg(engine="piper", voice="ne_NP-chitwan-medium"),
+    "vi": VoiceCfg(engine="piper", voice="vi_VN-vais1000-medium"),
+    "zh": VoiceCfg(engine="piper", voice="zh_CN-chaowen-medium"),
+    "en": VoiceCfg(engine="piper", voice="en_US-joe-medium")}
 
 
 class BacklogCfg(BaseModel):
@@ -181,9 +187,15 @@ class Settings(BaseModel):
 
 def tts_for(settings: "Settings", code: str) -> TtsCfg:
     """Voice settings for one output language (rate and volume are shared)."""
+    # "say": a choice saved by an older version. Apple's licence doesn't allow broadcasting macOS voices.
     if code == "fr":
-        return settings.tts
-    v = settings.voices.get(code) or DEFAULT_VOICES.get(code) or VoiceCfg(engine="piper", voice="")
+        tts = settings.tts
+        return tts.model_copy(update={"engine": "piper", "voice": "fr_FR-tom-medium"}) if tts.engine == "say" else tts
+    v = settings.voices.get(code)
+    if v is None or v.engine == "say":
+        v = DEFAULT_VOICES.get(code) or VoiceCfg(engine="piper", voice="")
+    elif v.engine == "mms" and sys.platform == "darwin":  # non-commercial licence: not in the paid Mac app
+        v = DEFAULT_VOICES[code].model_copy(update={"speed": v.speed})
     return TtsCfg(engine=v.engine, voice=v.voice, rate=settings.tts.rate, volume=settings.tts.volume, speed=v.speed,
                   lang=code)
 

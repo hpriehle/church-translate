@@ -35,10 +35,17 @@ PIPER_VOICES = {
     "fr": ("French voices", ("fr_FR-tom-medium", "fr_FR-siwis-medium")),
     "es": ("Spanish voices", ("es_MX-ald-medium", "es_MX-claude-high")),
     "ru": ("Russian voices", ("ru_RU-denis-medium", "ru_RU-dmitri-medium")),
+    "pt": ("Portuguese voices", ("pt_BR-cadu-medium", "pt_BR-faber-medium")),
+    "uk": ("Ukrainian voices", ("uk_UA-tetiana-high", "uk_UA-oleksa-high")),
+    "fa": ("Persian voices", ("fa_IR-amir-medium", "fa_IR-ganji-medium")),
+    "ne": ("Nepali voice", ("ne_NP-chitwan-medium",)),
+    "vi": ("Vietnamese voice", ("vi_VN-vais1000-medium",)),
+    "zh": ("Chinese voice", ("zh_CN-chaowen-medium",)),
+    "en": ("English voices", ("en_US-joe-medium", "en_US-kristin-medium")),  # when the speaker isn't speaking English
 }
 WOLOF_REPOS = ("bilalfaye/speecht5_tts-wolof", "microsoft/speecht5_hifigan")
 # Download sizes in MB (measured), shown before a download starts and used for its progress.
-SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127}
+SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127, "pt": 126, "uk": 228, "fa": 127, "ne": 63, "vi": 63, "zh": 63, "en": 127}
 LIBS_MANIFEST = ROOT / "wolof_libs.json"
 LIBS_DIR = HOME / "packages"
 
@@ -180,6 +187,30 @@ class Packages:
                     if f.exists():
                         n += f.stat().st_size
         return n
+
+    async def remove(self, code: str) -> None:
+        """Delete one language's downloaded voice. Speech recognition is needed for every language, so it stays."""
+        p = self.items.get(code) or package_for(code, self.stt_model)
+        if p is None or code == "speech":
+            raise ValueError(f"{code} can't be removed")
+        if p.state == "downloading":
+            raise ValueError(f"{p.name} is still downloading: wait for it to finish, then remove it.")
+        self.items[code] = p
+        await asyncio.to_thread(self._delete, p)
+        p.state, p.error, p.done_bytes = "missing", "", 0
+        log.info("removed %s", p.name)
+
+    @staticmethod
+    def _delete(p: Package) -> None:
+        for repo in p.hf_repos:
+            shutil.rmtree(_hf_dir(repo), ignore_errors=True)
+        if p.libs:
+            shutil.rmtree(LIBS_DIR / p.libs["id"], ignore_errors=True)
+            (LIBS_DIR / f'{p.libs["id"]}.tar.gz').unlink(missing_ok=True)
+        for v in p.piper_voices:
+            for _, dest in _piper_files(v):
+                dest.unlink(missing_ok=True)
+                dest.with_name(dest.name + ".part").unlink(missing_ok=True)
 
     def download_missing(self, languages: list[str]) -> None:
         for p in self.wanted(languages):

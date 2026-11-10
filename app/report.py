@@ -15,7 +15,8 @@ from typing import Any
 
 from .metrics import languages_in, summarize
 
-NAMES = {"fr": "French", "wo": "Wolof", "en": "English", "es": "Spanish", "ru": "Russian"}
+NAMES = {"fr": "French", "wo": "Wolof", "en": "English", "es": "Spanish", "ru": "Russian", "pt": "Portuguese", "uk": "Ukrainian",
+         "fa": "Persian", "ne": "Nepali", "vi": "Vietnamese", "zh": "Chinese"}
 
 
 def _row(label: str, p: dict | None, unit: str = "s") -> str:

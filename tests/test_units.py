@@ -496,11 +496,3 @@ def test_whisper_prompt_has_no_english_words_before_another_language():
     assert build_prompt(["Kouassi"], "Mes frères", "fr") == "Kouassi. Mes frères"
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS voices")
-def test_english_voices_skip_the_novelty_ones():
-    from app.tts.engines import say_voices
-
-    names = [v["name"] for v in say_voices("en")]
-    assert names and not {"Bad News", "Bubbles", "Zarvox", "Albert"} & set(names)
-    assert all(v["lang"].startswith("en") for v in say_voices("en"))
-    assert all(v["lang"].startswith("fr") for v in say_voices("fr"))

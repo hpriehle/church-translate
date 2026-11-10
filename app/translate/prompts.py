@@ -98,7 +98,7 @@ HOW TO TRANSLATE
 - {style}
 - Be concise. The {lang} must not take longer to say than the {src} did. Leave out filler words, false starts and repetitions.
 - {naming}
-- Scripture references: use the {lang} book names below and keep the numbers exact, written like {refs}. When the speaker quotes a verse, use the wording of the Church's {lang} scriptures if you know it with confidence; otherwise translate faithfully.
+- Scripture references: use the Church's {lang} book names and keep the numbers exact, written like {refs}. When the speaker quotes a verse, use the wording of the Church's {lang} scriptures if you know it with confidence; otherwise translate faithfully.
 - Hymns: use the title from the {lang} hymnbook if you know it; otherwise translate the title.
 - If a message starts with {condense}, the {lang} audio is falling behind: give a shorter version that keeps the essential meaning (about 60% of the length).
 - Translate everything the microphone picks up, whatever the topic: talks, prayers, announcements, stories, jokes, small talk, a video being played. Never decide that something is off-topic or not part of the meeting; that is not your job, and listeners rely on hearing all of it.
@@ -106,25 +106,41 @@ HOW TO TRANSLATE
 - Only when a fragment has no understandable words at all (just noise, a cough, music), reply exactly: {skip}
 - Reply with the {lang} text only: no quotation marks, no notes, no explanations, no {src}.
 
-GLOSSARY (English → official Church {lang}){gloss_note}
-{terms}
-
-NAMES (English → {lang})
-{names}
-
-SCRIPTURE BOOKS (English → {lang})
-{books}
-{local}"""
+{glossary}{local}"""
 
 _OTHER = {
     "es": {"lang": "Spanish",
            "style": 'Natural spoken Spanish: clear, neutral Latin American Spanish that speakers from any country understand easily. Avoid slang and regional idioms. Address the congregation with "ustedes".',
-           "naming": "Use the Church's official Spanish terminology from the glossary below. Keep people's surnames unchanged. Use the Spanish spelling of scriptural names (Nefi, Isaías, Moisés).",
+           "naming": "Use the Church's official Spanish terminology. Keep people's surnames unchanged. Use the Spanish spelling of scriptural names (Nefi, Isaías, Moisés).",
            "refs": '"Juan 3:16", "Doctrina y Convenios 88:118", "1 Nefi 3:7"'},
     "ru": {"lang": "Russian",
            "style": 'Natural spoken Russian: clear, standard, respectful Russian. Avoid slang. Address the congregation with "вы". Write everything in Cyrillic, because the voice cannot read Latin letters.',
-           "naming": "Use the Church's official Russian terminology from the glossary below. Write people's names in Cyrillic (Smith → Смит). Use the Russian forms of scriptural names (Нефий, Исаия, Моисей).",
+           "naming": "Use the Church's official Russian terminology. Write people's names in Cyrillic (Smith → Смит). Use the Russian forms of scriptural names (Нефий, Исаия, Моисей).",
            "refs": '"От Иоанна 3:16", "Учение и Заветы 88:118", "1 Нефий 3:7"'},
+    "pt": {"lang": "Portuguese",
+           "style": 'Natural spoken Brazilian Portuguese: clear and simple. Avoid slang. Address the congregation as "vocês".',
+           "naming": "Use the Church's official Portuguese terminology. Keep people's surnames unchanged. Use the Portuguese spelling of scriptural names (Néfi, Isaías, Moisés).",
+           "refs": '"João 3:16", "Doutrina e Convênios 88:118", "1 Néfi 3:7"'},
+    "uk": {"lang": "Ukrainian",
+           "style": 'Natural spoken Ukrainian: clear, standard Ukrainian, not Russian or Surzhyk. Address the congregation with "ви". Write everything in Cyrillic, because the voice cannot read Latin letters.',
+           "naming": "Use the Church's official Ukrainian terminology. Write people's names in Cyrillic (Smith → Сміт). Use the Ukrainian forms of scriptural names (Нефій, Ісая, Мойсей).",
+           "refs": '"Від Івана 3:16", "Учення і Завіти 88:118", "1 Нефій 3:7"'},
+    "fa": {"lang": "Persian",
+           "style": 'Natural spoken Persian (Farsi): clear and respectful. Address the congregation with "شما". Write everything in Persian script, because the voice cannot read Latin letters.',
+           "naming": "Use the Church's official Persian terminology if you know it. Write people's names in Persian script. Use the Persian forms of biblical names (اشعیا, موسی).",
+           "refs": '"یوحنا 3:16"'},
+    "ne": {"lang": "Nepali",
+           "style": 'Natural spoken Nepali in Devanagari script: clear and respectful, using "तपाईं". Write everything in Devanagari, because the voice cannot read Latin letters.',
+           "naming": "Use the Church's official Nepali terminology if you know it. Write people's names in Devanagari. Use the Nepali forms of biblical names (यशैया, मोशा).",
+           "refs": '"यूहन्ना 3:16"'},
+    "vi": {"lang": "Vietnamese",
+           "style": 'Natural spoken Vietnamese: clear and respectful. Address the congregation as "các anh chị em".',
+           "naming": "Use the Church's official Vietnamese terminology. Keep people's surnames unchanged. Use the Vietnamese forms of scriptural names (Nê Phi, Ê Sai, Môi Se).",
+           "refs": '"Giăng 3:16", "Giáo Lý và Giao Ước 88:118", "1 Nê Phi 3:7"'},
+    "zh": {"lang": "Chinese",
+           "style": "Natural spoken Mandarin, written in Simplified Chinese characters: clear and respectful. Write everything in Chinese characters, because the voice cannot read Latin letters.",
+           "naming": "Use the Church's official Chinese terminology. Write people's names in Chinese characters (Smith → 斯密). Use the official Chinese forms of scriptural names (尼腓, 以赛亚, 摩西).",
+           "refs": '"约翰福音3:16", "教义和圣约88:118", "尼腓一书3:7"'},
 }
 
 
@@ -160,14 +176,13 @@ def build_system_prompt(glossary: dict[str, Any], audience: str, lang: str = "fr
         )
     if lang in _OTHER:
         target = _OTHER[lang]
-        return _TEMPLATE_OTHER.format(
-            **target, src=src_name, condense=CONDENSE_TAG, skip=SKIP,
-            gloss_note="" if src == "en" else f"\n(Use these official {target['lang']} terms whenever the speaker says them in {src_name}.)",
-            terms=_lines(glossary.get("terms", [])),
-            names=_lines(glossary.get("names", [])),
-            books=_lines(glossary.get("books", [])),
-            local=local_txt,
-        )
+        name = target["lang"]
+        note = "" if src == "en" else f"\n(Use these official {name} terms whenever the speaker says them in {src_name}.)"
+        parts = [(f"GLOSSARY (English → official Church {name}){note}", glossary.get("terms", [])),
+                 (f"NAMES (English → {name})", glossary.get("names", [])),
+                 (f"SCRIPTURE BOOKS (English → {name})", glossary.get("books", []))]
+        gloss = "".join(f"\n{title}\n{_lines(items)}\n" for title, items in parts if _lines(items))
+        return _TEMPLATE_OTHER.format(**target, src=src_name, condense=CONDENSE_TAG, skip=SKIP, glossary=gloss, local=local_txt)
     note = "" if src == "en" else f"\n(Use these official French terms whenever the speaker says them in {src_name}.)"
     return _TEMPLATE.format(
         src=src_name, gloss_note=note,

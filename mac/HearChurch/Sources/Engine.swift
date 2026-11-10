@@ -202,8 +202,9 @@ final class Engine: ObservableObject {
 
     /// Start downloading whatever these languages still need (speech recognition included).
     func download(_ languages: [String]) async {
-        let (data, ok) = await send("api/packages/download", ["languages": languages])
-        if ok, let list = try? JSONDecoder().decode(PackageList.self, from: data) { packages = list.packages }
+        // The reply covers only these languages, while `packages` lists them all: ask again for the whole list.
+        let (_, ok) = await send("api/packages/download", ["languages": languages])
+        if ok { await refreshPackages() }
     }
 
     func loadSettings() async {
@@ -444,7 +445,8 @@ struct EngineSettings: Decodable, Equatable {
 
     let settings: Settings
     let devices: [Device]
-    let voices: [String: [VoiceOption]]
+    let voices: [String: [VoiceOption]]         // downloaded, so they can be chosen
+    let voice_catalog: [String: [VoiceOption]]  // every voice, downloaded or not, so they can be heard
     let all_languages: [Language]
 }
 

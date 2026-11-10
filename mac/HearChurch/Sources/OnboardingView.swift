@@ -473,15 +473,17 @@ struct LanguageToggle: View {
         let pkg = model.engine.packages.first { $0.id == language.id }
         Toggle(isOn: Binding(get: { on }, set: { model.setLanguage(language.id, on: $0) })) {
             HStack {
+                Text(language.flag)
                 Text(language.name)
                 Spacer()
                 if !language.available {
                     Text("coming soon").foregroundStyle(.secondary)
                 } else {
-                    PackageBadge(package: pkg, sizeMB: language.sizeMB, selected: on)
+                    PackageBadge(package: pkg, sizeMB: language.sizeMB)
                 }
             }
         }
+        .toggleStyle(.checkbox)
         .disabled(!language.available || (on && model.profile.languages.count == 1 && model.profile.setupDone))
     }
 }
@@ -489,11 +491,10 @@ struct LanguageToggle: View {
 struct PackageBadge: View {
     let package: PackageStatus?
     let sizeMB: Double
-    let selected: Bool
 
     var body: some View {
         switch package?.state {
-        case "ready" where selected: Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
+        case "ready": Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.callout)
         case "downloading":
             HStack(spacing: 6) {
                 ProgressView(value: min(1, (package?.done_mb ?? 0) / max(1, package?.size_mb ?? 1))).frame(width: 70)
@@ -517,7 +518,7 @@ private struct LanguagesStep: View {
             Text("Speech recognition").foregroundStyle(.secondary)
             Text("needed for every language").font(.callout).foregroundStyle(.tertiary)
             Spacer()
-            PackageBadge(package: model.engine.packages.first { $0.id == "speech" }, sizeMB: 1615, selected: model.profile.languagesPicked)
+            PackageBadge(package: model.engine.packages.first { $0.id == "speech" }, sizeMB: 1615)
         }
     }
 }

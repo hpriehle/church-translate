@@ -77,18 +77,28 @@ enum Churches {
 }
 
 /// Output languages listeners can choose.
-struct OutputLanguage: Identifiable {
+struct OutputLanguage: Identifiable, Equatable {
     let id: String
     let name: String
+    let native: String        // how its speakers write it, so they can search for it
+    let flag: String
     let available: Bool
     let sizeMB: Double        // its voice download (app/packages.py SIZES_MB)
     static let all = [
-        OutputLanguage(id: "fr", name: "French", available: true, sizeMB: 127),
-        OutputLanguage(id: "wo", name: "Wolof", available: true, sizeMB: 634),
-        OutputLanguage(id: "es", name: "Spanish", available: true, sizeMB: 127),
-        OutputLanguage(id: "ru", name: "Russian", available: true, sizeMB: 127),
+        OutputLanguage(id: "fr", name: "French", native: "Français", flag: "🇫🇷", available: true, sizeMB: 127),
+        OutputLanguage(id: "wo", name: "Wolof", native: "Wolof", flag: "🇸🇳", available: true, sizeMB: 634),
+        OutputLanguage(id: "es", name: "Spanish", native: "Español", flag: "🇪🇸", available: true, sizeMB: 127),
+        OutputLanguage(id: "ru", name: "Russian", native: "Русский", flag: "🇷🇺", available: true, sizeMB: 127),
+        OutputLanguage(id: "pt", name: "Portuguese", native: "Português", flag: "🇧🇷", available: true, sizeMB: 126),
+        OutputLanguage(id: "uk", name: "Ukrainian", native: "Українська", flag: "🇺🇦", available: true, sizeMB: 228),
+        OutputLanguage(id: "fa", name: "Persian", native: "فارسی", flag: "🇮🇷", available: true, sizeMB: 127),
+        OutputLanguage(id: "ne", name: "Nepali", native: "नेपाली", flag: "🇳🇵", available: true, sizeMB: 63),
+        OutputLanguage(id: "vi", name: "Vietnamese", native: "Tiếng Việt", flag: "🇻🇳", available: true, sizeMB: 63),
+        OutputLanguage(id: "zh", name: "Chinese", native: "中文", flag: "🇨🇳", available: true, sizeMB: 63),
     ]
-    static func name(_ code: String) -> String { all.first { $0.id == code }?.name ?? code.uppercased() }
+    /// Not one of the choices: English is translated by itself whenever the speaker isn't speaking it.
+    static let english = OutputLanguage(id: "en", name: "English", native: "English", flag: "🇺🇸", available: true, sizeMB: 127)
+    static func name(_ code: String) -> String { (all + [english]).first { $0.id == code }?.name ?? code.uppercased() }
 }
 
 enum AppPaths {
