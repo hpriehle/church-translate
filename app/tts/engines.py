@@ -129,7 +129,11 @@ class PiperTts:
         self.voice = voice
         path = str(PIPER_DIR / f"{voice}.onnx")
         if path not in _PIPER_LOADED:
-            _PIPER_LOADED[path] = PiperVoice.load(path)
+            if voice.startswith("zh_"):   # its tokenizer needs transformers, which the Mac app downloads
+                from ..packages import activate_libs
+
+                activate_libs()
+            _PIPER_LOADED[path] = PiperVoice.load(path, download_dir=PIPER_DIR)
         self._pv = _PIPER_LOADED[path]
         self._lock = threading.Lock()
 

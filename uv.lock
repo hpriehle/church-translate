@@ -197,11 +197,13 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-multipart" },
     { name = "segno" },
+    { name = "sentence-stream" },
     { name = "sentencepiece", marker = "sys_platform == 'darwin'" },
     { name = "sounddevice" },
     { name = "soxr" },
     { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "transformers", marker = "sys_platform == 'darwin'" },
+    { name = "unicode-rbnf" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -238,6 +240,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.8" },
     { name = "python-multipart", specifier = ">=0.0.12" },
     { name = "segno", specifier = ">=1.6" },
+    { name = "sentence-stream", specifier = ">=1.2.1,<2" },
     { name = "sentencepiece", marker = "sys_platform == 'darwin'", specifier = ">=0.2" },
     { name = "sentencepiece", marker = "extra == 'wolof'", specifier = ">=0.2" },
     { name = "sounddevice", specifier = ">=0.5" },
@@ -247,6 +250,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform != 'linux' and extra == 'wolof'", specifier = ">=2.4" },
     { name = "transformers", marker = "sys_platform == 'darwin'", specifier = ">=4.45" },
     { name = "transformers", marker = "extra == 'wolof'", specifier = ">=4.45" },
+    { name = "unicode-rbnf", specifier = ">=2.4,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 provides-extras = ["linux", "wolof"]
@@ -1438,6 +1442,18 @@ wheels = [
 ]
 
 [[package]]
+name = "sentence-stream"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "regex" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/8b/e4b4cf9df7b9f3ceb1d0fe066243e32fb74990f2d71c668465b5e27e0001/sentence_stream-1.4.0.tar.gz", hash = "sha256:b7c3b9c8d96090d84f07d719317e29298ad897fca666455a12160e0780890e54", size = 24634, upload-time = "2026-10-28T19:39:23.027Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8b/1f/46f243a1d9dfd3c4021a7d38de894babd8c96572dc035d1872a258427a8f/sentence_stream-1.4.0-py3-none-any.whl", hash = "sha256:489f008cbcaa12858088f7f83033c07a85d57b3c6a8ee7838bbfd17dd7058b4e", size = 14370, upload-time = "2026-10-28T19:39:21.836Z" },
+]
+
+[[package]]
 name = "sentencepiece"
 version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1740,6 +1756,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a3/26/b09b8010994eccc3c09092e6b34058f36a460eea2d4c3e8b910c695975a0/typing_inspection-0.4.4.tar.gz", hash = "sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47", size = 76928, upload-time = "2026-08-12T12:37:25.997Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl", hash = "sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147", size = 14750, upload-time = "2026-08-12T12:37:24.648Z" },
+]
+
+[[package]]
+name = "unicode-rbnf"
+version = "2.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/97/ee2a969ddfd3988a11b5e026060dffb60f59e99c9906cff0ffe3384b9345/unicode_rbnf-2.4.1.tar.gz", hash = "sha256:17621d76cb9dd22eac493f667317b8563820b3d674374af130017ab281ca8648", size = 98405, upload-time = "2026-10-06T21:02:08.138Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/f7/a19bcc91afc3155023c906c85321e456f67936feab151ef808cc5b8ebfe2/unicode_rbnf-2.4.1-py3-none-any.whl", hash = "sha256:545a10c40316b49a6f14a1470e51a217c75438569c352abdbc5da11fef273498", size = 150370, upload-time = "2026-10-06T21:02:06.807Z" },
 ]
 
 [[package]]

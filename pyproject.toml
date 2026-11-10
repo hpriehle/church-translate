@@ -25,6 +25,8 @@ dependencies = [
     "transformers>=4.45; sys_platform == 'darwin'",
     "sentencepiece>=0.2; sys_platform == 'darwin'",
     "anthropic>=1.0",
+    "unicode-rbnf>=2.4,<3",
+    "sentence-stream>=1.2.1,<2",
 ]
 
 [project.optional-dependencies]

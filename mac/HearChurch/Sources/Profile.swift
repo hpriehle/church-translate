@@ -94,7 +94,7 @@ struct OutputLanguage: Identifiable, Equatable {
         OutputLanguage(id: "fa", name: "Persian", native: "فارسی", flag: "🇮🇷", available: true, sizeMB: 127),
         OutputLanguage(id: "ne", name: "Nepali", native: "नेपाली", flag: "🇳🇵", available: true, sizeMB: 63),
         OutputLanguage(id: "vi", name: "Vietnamese", native: "Tiếng Việt", flag: "🇻🇳", available: true, sizeMB: 63),
-        OutputLanguage(id: "zh", name: "Chinese", native: "中文", flag: "🇨🇳", available: true, sizeMB: 63),
+        OutputLanguage(id: "zh", name: "Chinese", native: "中文", flag: "🇨🇳", available: true, sizeMB: 377),  // voice and pronunciation model 176 + shared libraries 201
     ]
     /// Not one of the choices: English is translated by itself whenever the speaker isn't speaking it.
     static let english = OutputLanguage(id: "en", name: "English", native: "English", flag: "🇺🇸", available: true, sizeMB: 127)

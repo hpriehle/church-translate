@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from app import packages
 from app.config import Settings, tts_for
 from app.languages import LANGUAGES
 from app.packages import PIPER_VOICES, SIZES_MB, _piper_files, package_for
@@ -58,7 +59,7 @@ async def _downloaded(monkeypatch, tmp_path):
     from app import packages
 
     monkeypatch.setattr(packages, "PIPER_DIR", tmp_path)
-    monkeypatch.setattr(packages, "_hf_cached", lambda repo: True)
+    monkeypatch.setattr(packages, "_hf_cached", lambda repo, only=(): True)
 
     async def fake_fetch(url, dest):
         dest.write_text("x")
@@ -235,3 +236,27 @@ def test_the_paid_mac_app_never_offers_the_non_commercial_wolof_voice(monkeypatc
     monkeypatch.setattr("app.config.sys.platform", "darwin")
     cfg = tts_for(Settings(voices={"wo": VoiceCfg(engine="mms", voice="default", speed=1.25)}), "wo")
     assert (cfg.engine, cfg.speed) == ("speecht5", 1.25)
+
+
+def test_chinese_tables_ship_with_the_app():
+    from piper.g2pw_onnx import DATA_FILES
+
+    assert all((packages.G2PW_TABLES / f).is_file() for f in DATA_FILES)
+
+
+def test_chinese_model_with_a_bad_checksum_is_not_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr(packages, "G2PW_DIR", tmp_path / "g2pW")
+    archive = tmp_path / "g2pw.tar.gz"
+    archive.write_bytes(b"not the model")
+    with pytest.raises(RuntimeError):
+        packages._unpack_g2pw(archive)
+    assert not archive.exists() and not (tmp_path / "g2pW").exists()
+
+
+def test_removing_one_language_keeps_libraries_the_other_needs(monkeypatch):
+    monkeypatch.setattr(packages, "_libs", lambda: {"id": "x", "size": 1, "url": "", "sha256": ""})
+    zh = packages.package_for("zh", "")
+    monkeypatch.setattr(packages.Packages, "_present", staticmethod(lambda p: p.id == "wo"))
+    assert packages._libs_used_by_another(zh)
+    monkeypatch.setattr(packages.Packages, "_present", staticmethod(lambda p: False))
+    assert not packages._libs_used_by_another(zh)

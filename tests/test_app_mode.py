@@ -145,7 +145,7 @@ async def test_packages_follow_the_languages(monkeypatch, tmp_path):
     from app import packages
 
     monkeypatch.setattr(packages, "PIPER_DIR", tmp_path)
-    monkeypatch.setattr(packages, "_hf_cached", lambda repo: repo != "bilalfaye/speecht5_tts-wolof")
+    monkeypatch.setattr(packages, "_hf_cached", lambda repo, only=(): repo != "bilalfaye/speecht5_tts-wolof")
     fetched = []
 
     async def fake_fetch(url, dest):
