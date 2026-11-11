@@ -1,0 +1,68 @@
+---
+// The download button, on every page that has one. It downloads the Apple silicon build, or the
+// Intel build when the page can tell it's on an Intel Mac, and always offers the other one underneath.
+// `second` is an optional { href, label } link beside the button; `id` lets other pages link here.
+const { second, id } = Astro.props;
+---
+<div class="getmac" id={id} data-getmac>
+  <div class="ctas">
+    <a class="get" href="/download/HearChurch.dmg" data-cta="download" data-get>Download for Mac</a>
+    {second && <a class="second" href={second.href}>{second.label}</a>}
+  </div>
+  <p class="other" data-other="arm">Have an Intel Mac? <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Download the Intel version</a></p>
+  <p class="other" data-other="intel" hidden>Have a Mac with Apple silicon? <a href="/download/HearChurch.dmg" data-cta="download">Download that version</a></p>
+  <p class="other" data-unsure hidden>Not sure which you have? Open the Apple menu and choose About This Mac.
+    If it lists a Chip, your Mac has Apple silicon. If it lists a Processor, it's an Intel Mac.</p>
+  <p class="other" data-phone hidden>Hear Church runs on a Mac. Open this page on the Mac you'll use at church to download it.</p>
+</div>
+
+<script>
+  // Apple silicon or Intel? Every Mac browser says "Intel Mac OS X", so look at the graphics chip
+  // (Chrome, Edge, Firefox), then Chrome's architecture hint. Safari hides both: there we offer the
+  // Apple silicon build, which every Mac sold since 2023 needs, and say how to check.
+  async function whichMac() {
+    try {
+      const gl = document.createElement("canvas").getContext("webgl");
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const gpu = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      if (/Apple M\d/.test(gpu)) return "arm";
+      if (/Intel|AMD|Radeon|NVIDIA/i.test(gpu)) return "intel";
+    } catch {}
+    try {
+      const { architecture } = await (navigator as any).userAgentData.getHighEntropyValues(["architecture"]);
+      if (architecture === "arm") return "arm";
+      if (architecture === "x86") return "intel";
+    } catch {}
+    return "";
+  }
+
+  const ua = navigator.userAgent;
+  const phone = /iPhone|iPod|iPad|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const show = (box: Element, sel: string, on: boolean) => box.querySelectorAll<HTMLElement>(sel).forEach((el) => { el.hidden = !on; });
+
+  if (phone) {
+    document.querySelectorAll("[data-getmac]").forEach((box) => { show(box, "[data-other]", false); show(box, "[data-phone]", true); });
+  } else if (/Macintosh/.test(ua)) {
+    whichMac().then((chip) => {
+      document.documentElement.dataset.mac = chip || "unknown";
+      document.querySelectorAll("[data-getmac]").forEach((box) => {
+        if (chip === "intel") {
+          const get = box.querySelector<HTMLAnchorElement>("[data-get]")!;
+          get.href = "/download/HearChurch-Intel.dmg";
+          get.dataset.cta = "download-intel";
+          get.textContent = "Download for Intel Mac";
+          show(box, '[data-other="arm"]', false);
+          show(box, '[data-other="intel"]', true);
+        } else if (!chip) {
+          show(box, "[data-unsure]", true);
+        }
+      });
+    });
+  }
+</script>
+
+<style>
+.other { color: var(--quiet); font-size: 1rem; margin: .8rem 0 0; max-width: 34rem; text-wrap: pretty; }
+.getmac .other[hidden] { display: none; }
+</style>

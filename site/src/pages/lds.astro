@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import GetMac from "../components/GetMac.astro";
 import { LANGUAGE_LIST } from "../languages.js";
 
 const faq = [
@@ -28,10 +29,7 @@ const schema = {
     <header class="head prose">
       <h1>Sacrament meeting translation for your ward</h1>
       <p class="lede">When members of your ward or branch speak another language, Hear Church lets them follow sacrament meeting as it happens. A Mac at the pulpit translates each talk, prayer and announcement, and they listen on their own phones.</p>
-      <div class="ctas">
-        <a class="get" href="/download">Download for Mac</a>
-        <a class="second" href="/how-it-works">How it works</a>
-      </div>
+      <GetMac second={{ href: "/how-it-works", label: "How it works" }} />
     </header>
 
     <div class="prose">

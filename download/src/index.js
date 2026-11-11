@@ -1,19 +1,18 @@
-// Download page and Sparkle files for the Hear Church Mac app.
+// hearchurch.com's marketing site (built from site/), the Mac app's downloads and Sparkle files.
 //
-//   /download                  the page (version and size from latest.json)
+//   /download                  301 to the home page's download button (the old download page is gone)
 //   /download/HearChurch.dmg   always the newest DMG (the link to share); counted, anonymously, in D1
 //   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
 //   /download/HearChurch-Intel.dmg, /appcast-intel.xml   the same for Intel Macs (separate build and feed)
 //   /privacy, /terms, /credits  the legal pages
-//   /download/icon.png, *.woff2  the page's icon and fonts
+//   /download/icon.png, *.woff2  the site's icon and fonts
 //   /sitemap.xml               the pages we want in search
 //   /<key>.txt                 IndexNow's key file, so search engines accept our URL submissions
-//   /rr.js, /rrweb.min.js      Siteboard's tracker; only the /download page loads it
+//   /rr.js, /rrweb.min.js      Siteboard's tracker, loaded by every marketing page
 //   /api/collect               forwards the tracker's batches to the hub
 //
 // R2 holds what mac/release.sh uploads: HearChurch-<version>.dmg, *.delta, wolof-libs-*.tar.gz, appcast.xml, latest.json.
-import PAGE from "./page.html";
 import { onRequestPost as collectPost, onRequest as collectOther } from "./collect.js";
 import TRACKER from "./tracker/rr.min.js.txt";
 import RECORDER from "./tracker/rrweb.min.js.txt";
@@ -46,7 +45,6 @@ const SITE_PATHS = ["/", "/how-it-works", "/lds", "/blog", "/blog/sacrament-meet
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${SITE_PATHS.map((p) => `<url><loc>https://hearchurch.com${p}</loc></url>`).join("\n")}
-<url><loc>https://hearchurch.com/download</loc></url>
 <url><loc>https://hearchurch.com/listen</loc></url>
 </urlset>
 `;
@@ -80,7 +78,8 @@ const site = {
     }
     if (SITE_PAGE.test(path)) return sitePage(request, env, url);
 
-    if (path === "/download") return page(env);
+    // The old download page is gone; its downloads are on every page of the site now.
+    if (path === "/download") return Response.redirect(`${url.origin}/#get`, 301);
     if (ASSETS[path]) {
       const [body, type] = ASSETS[path];
       return new Response(body, { headers: { "content-type": type, "cache-control": "public, max-age=86400" } });
@@ -157,27 +156,6 @@ async function latestRelease(env, key = "latest.json") {
   return obj ? obj.json() : null;
 }
 
-async function page(env) {
-  const [latest, intel] = await Promise.all([latestRelease(env), latestRelease(env, "latest-intel.json")]);
-  const size = (r) => (r ? `${(r.size / 1e9).toFixed(1)} GB` : "");
-  const day = (r) => (r ? new Date(r.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "");
-  const fill = {
-    VERSION: latest ? latest.version : "",
-    SIZE: size(latest),
-    DATE: day(latest),
-    RELEASED: latest ? "" : "hidden",
-    UNRELEASED: latest ? "hidden" : "",
-    INTEL_VERSION: intel ? intel.version : "",
-    INTEL_SIZE: size(intel),
-    INTEL_DATE: day(intel),
-    INTEL_RELEASED: intel ? "" : "hidden",
-  };
-  const html = PAGE.replace(/\{\{(\w+)\}\}/g, (_, k) => escapeHtml(fill[k] ?? ""));
-  return new Response(html, {
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "max-age=60" },
-  });
-}
-
 // An R2 object, with Range support so big downloads can resume.
 async function file(request, env, key, type, cache, downloadName) {
   const obj = request.method === "HEAD"
@@ -200,10 +178,6 @@ async function file(request, env, key, type, cache, downloadName) {
   }
   headers.set("content-length", String(obj.size));
   return new Response(obj.body, { headers });
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 }
 
 // Every HTML page this Worker answers is logged into rr_pageviews (people,

@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import IconWave from "../components/IconWave.astro";
 import Languages from "../components/Languages.astro";
 import Demo from "../components/Demo.astro";
+import GetMac from "../components/GetMac.astro";
 
 const faq = [
   ["Do listeners need to install an app?",
@@ -48,10 +49,7 @@ const schema = [
   <section class="hero wrap">
     <h1><span class="call">Every Nation, Kindred, Tongue and People</span><span class="what">Live translation for your church meeting</span></h1>
     <p class="lede">Speak once. Everyone hears it in their own language, live on their phone.</p>
-    <div class="ctas">
-      <a class="get" href="/download">Download for Mac</a>
-      <a class="second" href="#sample">Hear a sample</a>
-    </div>
+    <GetMac id="get" second={{ href: "#sample", label: "Hear a sample" }} />
   </section>
 
   <section class="wrap band" id="sample">
@@ -96,10 +94,7 @@ const schema = [
     <dl class="faq">
       {faq.map(([q, a]) => <><dt>{q}</dt><dd>{a}</dd></>)}
     </dl>
-    <div class="ctas">
-      <a class="get" href="/download">Download for Mac</a>
-      <a class="second" href="/how-it-works">See how it works</a>
-    </div>
+    <GetMac second={{ href: "/how-it-works", label: "See how it works" }} />
   </section>
 </Base>
 
@@ -109,7 +104,8 @@ const schema = [
 .call { display: block; font-size: clamp(2.4rem, 6vw, 4.6rem); line-height: 1.04; max-width: 14em; margin: 0 auto; }
 .what { display: block; margin-top: .9rem; font: 600 clamp(1.3rem, 2.4vw, 1.75rem)/1.25 var(--sans); color: var(--gold); letter-spacing: 0; }
 .hero .lede { max-width: 30rem; margin: 0 auto; font-size: clamp(1.3rem, 2.2vw, 1.6rem); }
-.hero .ctas { justify-content: center; }
+.hero :global(.ctas) { justify-content: center; }
+.hero :global(.other) { margin-inline: auto; }
 .more { margin: 2rem 0 0; }
 .intro { max-width: 40rem; margin: 0 0 1.75rem; }
 .split { display: grid; gap: 2.5rem clamp(2rem, 5vw, 4rem); }
