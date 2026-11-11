@@ -56,6 +56,8 @@ BERT_TOKENIZER = "bert-base-chinese"
 BERT_TOKENIZER_FILES = ("vocab.txt", "tokenizer_config.json", "config.json", "tokenizer.json")
 LIBS_USERS = ("wo", "zh")       # these two share the downloaded libraries (the tokenizer needs transformers)
 # Download sizes in MB (measured), shown before a download starts and used for its progress.
+# The speech figure is the mlx model; Intel Macs use the smaller CPU model (FASTER_WHISPER_MB).
+FASTER_WHISPER_MB = 486
 SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127, "pt": 126, "uk": 228, "fa": 127, "ne": 63, "vi": 63, "zh": 176, "en": 127}
 LIBS_MANIFEST = ROOT / "wolof_libs.json"
 LIBS_DIR = HOME / "packages"
@@ -139,7 +141,8 @@ def _piper_files(voice: str) -> list[tuple[str, Path]]:
 
 def package_for(code: str, stt_model: str) -> Package | None:
     if code == "speech":
-        return Package("speech", "Speech recognition", SIZES_MB["speech"], hf_repos=(stt_model,))
+        size = FASTER_WHISPER_MB if "faster-whisper" in stt_model else SIZES_MB["speech"]
+        return Package("speech", "Speech recognition", size, hf_repos=(stt_model,))
     if code == "zh":
         name, voices = PIPER_VOICES[code]
         libs = _libs()

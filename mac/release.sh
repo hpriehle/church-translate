@@ -4,6 +4,8 @@
 #
 #   mac/release.sh 0.2.0             build and notarize mac/dist/HearChurch-0.2.0.dmg; nothing public
 #   mac/release.sh 0.2.0 --publish   put that DMG on hearchurch.com
+#   mac/release.sh 0.2.0 --intel [--publish]   the same for Intel Macs, after the Apple Silicon build of
+#     that version: mac/dist-intel/HearChurch-Intel-0.2.0.dmg, feed /appcast-intel.xml, full-DMG updates
 #
 # The first bumps the version in project.yml, builds with the Developer ID identity, makes a DMG,
 # notarizes and staples it. The second writes Sparkle's appcast (signed with the "hearchurch" EdDSA key
@@ -20,8 +22,17 @@
 #
 # Every released DMG stays in mac/dist/: generate_appcast needs the old ones to make deltas.
 set -euo pipefail
-VERSION="${1:?usage: mac/release.sh <version, e.g. 0.2.0> [--publish]}"
-PUBLISH="${2:-}"
+VERSION="${1:?usage: mac/release.sh <version, e.g. 0.2.0> [--intel] [--publish]}"
+shift
+PUBLISH=""
+INTEL=""
+for arg in "$@"; do
+  case "$arg" in
+    --publish) PUBLISH="$arg" ;;
+    --intel) INTEL=1 ;;
+    *) echo "release: unknown option $arg" >&2; exit 1 ;;
+  esac
+done
 cd "$(dirname "$0")"
 MAC="$PWD"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
@@ -32,6 +43,22 @@ URL=https://hearchurch.com/download/
 DIST="$MAC/dist"
 DMG="$DIST/HearChurch-$VERSION.dmg"
 SPARKLE="$MAC/build/dd/SourcePackages/artifacts/sparkle/Sparkle/bin"
+APP="$MAC/build/Hear Church.app"
+FEED=appcast.xml
+LATEST=latest.json
+PUBLIC_DMG=HearChurch.dmg
+DELTAS=3
+if [[ -n "$INTEL" ]]; then
+  DIST="$MAC/dist-intel"
+  DMG="$DIST/HearChurch-Intel-$VERSION.dmg"
+  SPARKLE="$MAC/build/dd-intel/SourcePackages/artifacts/sparkle/Sparkle/bin"
+  APP="$MAC/build/intel/Hear Church.app"
+  FEED=appcast-intel.xml
+  LATEST=latest-intel.json
+  PUBLIC_DMG=HearChurch-Intel.dmg
+  DELTAS=0     # generate_appcast's delta names would collide with the Apple Silicon ones in R2
+  export HC_ARCH=intel
+fi
 
 RELEASE_KC="$HOME/Library/Keychains/hearchurch-release.keychain-db"   # made by mac/release-keychain.sh
 step() { echo "== $*"; }
@@ -61,7 +88,6 @@ r2_setup() {
 }
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must look like 1.2.3"
-[[ -z "$PUBLISH" || "$PUBLISH" == "--publish" ]] || die "unknown option $PUBLISH"
 
 if [[ -z "$PUBLISH" ]]; then
   step "Checks"
@@ -71,18 +97,23 @@ if [[ -z "$PUBLISH" ]]; then
   mkdir -p "$DIST"
 
   step "Version $VERSION"
-  BUILD=$(( $(sed -n 's/^ *CURRENT_PROJECT_VERSION: "\([0-9]*\)"/\1/p' project.yml) + 1 ))
-  sed -i '' -e "s/MARKETING_VERSION: \"[^\"]*\"/MARKETING_VERSION: \"$VERSION\"/" \
-            -e "s/CURRENT_PROJECT_VERSION: \"[^\"]*\"/CURRENT_PROJECT_VERSION: \"$BUILD\"/" project.yml
-  echo "build $BUILD"
+  if [[ -n "$INTEL" ]]; then
+    grep -q "MARKETING_VERSION: \"$VERSION\"" project.yml || die "project.yml is not at $VERSION: Intel builds use the version the Apple Silicon release set"
+  else
+    BUILD=$(( $(sed -n 's/^ *CURRENT_PROJECT_VERSION: "\([0-9]*\)"/\1/p' project.yml) + 1 ))
+    sed -i '' -e "s/MARKETING_VERSION: \"[^\"]*\"/MARKETING_VERSION: \"$VERSION\"/" \
+              -e "s/CURRENT_PROJECT_VERSION: \"[^\"]*\"/CURRENT_PROJECT_VERSION: \"$BUILD\"/" project.yml
+    echo "build $BUILD"
+  fi
 
   SIGN_ID="$SIGN_ID" ./build.sh
-  APP="$MAC/build/Hear Church.app"
 
   # The app downloads these when someone picks the Wolof voice, so the DMG can't be tested without them.
   # Nothing links to them until a copy of the app that names them is out.
-  step "Uploading the Wolof libraries"
-  rclone copy --stats-one-line --stats 30s --include "*.tar.gz" "$MAC/wolof-libs" "r2:$BUCKET"
+  if [[ -z "$INTEL" ]]; then
+    step "Uploading the Wolof libraries"
+    rclone copy --stats-one-line --stats 30s --include "*.tar.gz" "$MAC/wolof-libs" "r2:$BUCKET"
+  fi
 
   step "DMG"
   STAGE="$MAC/build/dmg-stage"
@@ -105,19 +136,19 @@ if [[ -z "$PUBLISH" ]]; then
   spctl --assess --type open --context context:primary-signature "$DMG.tmp.dmg"
   mv "$DMG.tmp.dmg" "$DMG"
   du -h "$DMG" | sed 's/^/ready to test: /'
-  echo "nothing is public yet. To ship this DMG: mac/release.sh $VERSION --publish"
+  echo "nothing is public yet. To ship this DMG: mac/release.sh $VERSION ${INTEL:+--intel }--publish"
   exit 0
 fi
 
 step "Checks"
-[[ -e "$DMG" ]] || die "no $DMG: run mac/release.sh $VERSION first"
+[[ -e "$DMG" ]] || die "no $DMG: run mac/release.sh $VERSION ${INTEL:+--intel} first"
 xcrun stapler validate -q "$DMG" || die "$DMG is not notarized"
 r2_setup
 BUILD="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: "\([0-9]*\)"/\1/p' project.yml)"
 
 step "Appcast"
 APPCAST=("$SPARKLE/generate_appcast" --download-url-prefix "$URL" --link https://hearchurch.com/download
-         --maximum-deltas 3)
+         --maximum-deltas "$DELTAS")
 if [[ -n "${SIGN_KEYCHAIN:-}" ]]; then
   security find-generic-password -s hearchurch-sparkle -w "$SIGN_KEYCHAIN" | "${APPCAST[@]}" --ed-key-file - "$DIST"
 else
@@ -125,16 +156,16 @@ else
 fi
 SIZE="$(stat -f%z "$DMG")"
 printf '{"version":"%s","build":%s,"file":"%s","size":%s,"date":"%s"}\n' \
-  "$VERSION" "$BUILD" "$(basename "$DMG")" "$SIZE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DIST/latest.json"
+  "$VERSION" "$BUILD" "$(basename "$DMG")" "$SIZE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DIST/$LATEST"
 
 step "Uploading to R2"
 # Files first, the feed last: the appcast never points at something not uploaded yet.
 rclone copy --stats-one-line --stats 30s --include "*.dmg" --include "*.delta" "$DIST" "r2:$BUCKET"
-rclone copyto "$DIST/appcast.xml" "r2:$BUCKET/appcast.xml"
-rclone copyto "$DIST/latest.json" "r2:$BUCKET/latest.json"
+rclone copyto "$DIST/$FEED" "r2:$BUCKET/$FEED"     # generate_appcast names it after the app's SUFeedURL
+rclone copyto "$DIST/$LATEST" "r2:$BUCKET/$LATEST"
 
 step "Live"
-curl -fsS https://hearchurch.com/appcast.xml | grep -q "<sparkle:shortVersionString>$VERSION<" \
-  && echo "appcast: $VERSION" || die "appcast on hearchurch.com does not show $VERSION yet"
-curl -fsSI https://hearchurch.com/download/HearChurch.dmg | grep -i -E "^(content-length|content-disposition)"
+curl -fsS "https://hearchurch.com/$FEED" | grep -q "<sparkle:shortVersionString>$VERSION<" \
+  && echo "appcast: $VERSION" || die "$FEED on hearchurch.com does not show $VERSION yet"
+curl -fsSI "https://hearchurch.com/download/$PUBLIC_DMG" | grep -i -E "^(content-length|content-disposition)"
 echo "released $VERSION (build $BUILD). Commit mac/project.yml and tag it: git tag mac-v$VERSION"

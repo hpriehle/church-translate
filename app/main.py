@@ -265,7 +265,7 @@ async def lifespan(app: FastAPI):
     hear_api.setup(S.settings)
     from .packages import PACKAGES
 
-    PACKAGES.stt_model, PACKAGES.on_ready = S.settings.stt.model, _package_ready
+    PACKAGES.stt_model, PACKAGES.on_ready = _stt_repo(S.settings.stt), _package_ready
     S.version = await asyncio.to_thread(_code_version)
     S.local_addrs = netinfo.local_addresses()
     new_listen_key()
@@ -357,6 +357,15 @@ async def _parent_watchdog() -> None:
             log.warning("parent process %s is gone: shutting down", parent)
             _shutdown()
             return
+
+
+def _stt_repo(stt) -> str:
+    """The Hugging Face repo of the speech model this Mac will load (Intel Macs can't run the mlx one)."""
+    from .stt import resolve_engine
+
+    if sys.platform == "darwin" and resolve_engine(stt.engine) == "faster-whisper":
+        return f"Systran/faster-whisper-{stt.faster_whisper_model}"
+    return stt.model
 
 
 async def _stt_downloaded() -> bool:
