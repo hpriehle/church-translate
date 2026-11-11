@@ -43,6 +43,13 @@ const schema = [
   description="Hear Church translates your church service live. Speak once, and everyone hears it in their own language on their phone, with captions and a spoken voice."
   schema={schema}>
 
+  <script is:inline>
+    // On 2026-11-11 /download briefly answered with a 301 to /#get, and browsers keep a 301 for good,
+    // so anyone who saw it still lands here from Download. Fetch the real page past the cache, which
+    // replaces the remembered redirect, then go there. Nothing links to /#get any more.
+    if (location.hash === "#get") fetch("/download", { cache: "reload" }).finally(() => location.replace("/download"));
+  </script>
+
   <IconWave />
 
   <section class="hero wrap">
