@@ -4,6 +4,7 @@
 //   /download/HearChurch.dmg   always the newest DMG (the link to share); counted, anonymously, in D1
 //   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
+//   /download/HearChurch-Intel.dmg, /appcast-intel.xml   the same for Intel Macs (separate build and feed)
 //   /privacy, /terms, /credits  the legal pages
 //   /download/icon.png, *.woff2  the page's icon and fonts
 //   /sitemap.xml               the pages we want in search
@@ -23,6 +24,7 @@ import ICON from "../../mac/HearChurch/Resources/Assets.xcassets/AppIcon.appicon
 import ALEGREYA from "./fonts/alegreya.woff2";
 import ALEGREYA_SANS_400 from "./fonts/alegreya-sans-400.woff2";
 import ALEGREYA_SANS_700 from "./fonts/alegreya-sans-700.woff2";
+import { isPageView, point } from "./edge-log.js";
 
 // The page's own files, served from here so a visit sends nothing to a font or image host.
 const ASSETS = {
@@ -38,7 +40,7 @@ const INDEXNOW_KEY = "b8a8b0718483acd04cef33be1f6d395c";
 // here, has a route in wrangler.toml and is in the sitemap; site/src/site.js lists the same pages.
 const SITE_PAGE = /^(\/(how-it-works|lds|blog)(\/[a-z0-9-]+)?)?$/;
 // Everything else this Worker answers itself.
-const OWN = /^\/(download(\/.*)?|appcast\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
+const OWN = /^\/(download(\/.*)?|appcast(?:-intel)?\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
 const SITE_PATHS = ["/", "/how-it-works", "/lds", "/blog", "/blog/sacrament-meeting-translation"];
 
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
@@ -57,7 +59,7 @@ async function sitePage(request, env, url) {
   return new Response(missing.body, { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
-export default {
+const site = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname.startsWith("www.")) {
@@ -95,6 +97,14 @@ export default {
     if (path === "/terms") return html(TERMS);
     if (path === "/credits") return html(CREDITS);
     if (path === "/appcast.xml") return file(request, env, "appcast.xml", "application/xml", "max-age=300");
+    if (path === "/appcast-intel.xml") return file(request, env, "appcast-intel.xml", "application/xml", "max-age=300");
+    if (path === "/download/HearChurch-Intel.dmg") {
+      const latest = await latestRelease(env, "latest-intel.json");
+      if (!latest) return new Response("Not released yet", { status: 404 });
+      const response = await file(request, env, latest.file, "application/x-apple-diskimage", "no-store", latest.file);
+      if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, `${latest.version}-intel`));
+      return response;
+    }
     if (path === "/download/HearChurch.dmg") {
       const latest = await latestRelease(env);
       if (!latest) return new Response("Not released yet", { status: 404 });
@@ -142,8 +152,8 @@ async function countDownload(env, version) {
   }
 }
 
-async function latestRelease(env) {
-  const obj = await env.FILES.get("latest.json");
+async function latestRelease(env, key = "latest.json") {
+  const obj = await env.FILES.get(key);
   return obj ? obj.json() : null;
 }
 
@@ -189,3 +199,28 @@ async function file(request, env, key, type, cache, downloadName) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 }
+
+// Every HTML page this Worker answers is logged into rr_pageviews (people,
+// search bots, AI crawlers) for the hub's AI search panel; see
+// local-website-engine ops/edge-log/README.md. Crawlers don't run JavaScript,
+// so the tracker can't see them. Logging never changes the response.
+export default {
+  async fetch(request, env, ctx) {
+    const res = await site.fetch(request, env, ctx);
+    if (isPageView(request.method, res.status, res.headers.get("content-type"))) {
+      try {
+        const url = new URL(request.url);
+        env.PAGEVIEWS?.writeDataPoint(point({
+          slug: "hearchurch",
+          path: url.pathname,
+          referer: request.headers.get("referer"),
+          host: url.hostname,
+          ua: request.headers.get("user-agent") ?? "",
+          utmSource: url.searchParams.get("utm_source") ?? "",
+          country: request.cf?.country ?? "",
+        }));
+      } catch (err) { console.error("[edge-log]", err.message); }
+    }
+    return res;
+  },
+};
