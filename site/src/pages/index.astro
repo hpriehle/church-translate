@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import IconWave from "../components/IconWave.astro";
-import Flags from "../components/Flags.astro";
+import Languages from "../components/Languages.astro";
 import Demo from "../components/Demo.astro";
 
 const faq = [
@@ -73,11 +73,10 @@ const schema = [
     <p class="more"><a href="/how-it-works">See how it works</a></p>
   </section>
 
-  <section class="wrap band">
+  <Languages>
     <h2>Languages</h2>
-    <p class="quiet intro">Listeners can choose any of these. The speaker can talk in English, French, Spanish or Russian, and the person running the Mac switches the speaker's language when it changes.</p>
-    <Flags />
-  </section>
+    <p class="quiet intro">Listeners choose any of these on their own phone. The speaker can talk in English, French, Spanish or Russian.</p>
+  </Languages>
 
   <section class="wrap band split">
     <div>

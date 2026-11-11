@@ -1,0 +1,148 @@
+---
+// Every listener language, drifting slowly past. Scroll or drag it, or search it. The heading comes in through the slot.
+import { LANGUAGES } from "../languages.js";
+---
+<section class="langs" data-langs>
+  <div class="wrap band head">
+    <slot />
+    <div class="tools" data-tools hidden>
+      <label class="search">
+        <span class="hide">Search languages</span>
+        <input type="search" placeholder="Search languages" autocomplete="off" spellcheck="false" data-search>
+      </label>
+    </div>
+    <p class="none" data-none hidden>We don't have that one yet. <a href="mailto:support@hearchurch.com">Tell us which language your church needs.</a></p>
+    <p class="hide" aria-live="polite" data-count></p>
+  </div>
+  <div class="reel" data-reel tabindex="0" role="region" aria-label="Languages. Scroll to see them all.">
+    <ul class="row" data-row>
+      {LANGUAGES.map((l) => (
+        <li data-words={`${l.name} ${l.native} ${l.also ?? ""}`}>
+          <img src={`/download/media/flags/${l.flag}.svg`} width="72" height="54" alt="" loading="lazy" decoding="async">
+          <span class="native" lang={l.code} dir={l.rtl ? "rtl" : undefined}>{l.native}</span>
+          <span class="english">{l.name}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>
+
+<script is:inline>
+  (() => {
+    const root = document.querySelector("[data-langs]");
+    if (!root) return;
+    const $ = (s) => root.querySelector(s);
+    const reel = $("[data-reel]"), row = $("[data-row]"), search = $("[data-search]");
+    const none = $("[data-none]"), count = $("[data-count]");
+    const SPEED = 26;   // pixels a second
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const plain = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+
+    // Two more copies after the real list, so it can run on for ever. Screen readers only get the real one.
+    const items = [...row.children];
+    items.forEach((li) => { li.dataset.plain = plain(li.dataset.words); });
+    const copies = [...items, ...items].map((li) => { const c = li.cloneNode(true); c.setAttribute("aria-hidden", "true"); return c; });
+    row.append(...copies);
+    $("[data-tools]").hidden = false;
+
+    let width = 0, pos = 0, last = 0, busy = false, searching = false, drag = null, timer = 0;
+    const moving = () => !still && !busy && !searching && !drag && !document.hidden;
+    const inRange = (p) => (p >= width * 2 ? p - width : p < 1 ? p + width : p);
+    const measure = () => {
+      if (searching) return;
+      const first = !width;
+      width = copies[0].offsetLeft - items[0].offsetLeft;
+      if (first && width) { pos = width; reel.scrollLeft = pos; }
+    };
+    new ResizeObserver(measure).observe(row);
+    measure();
+
+    const frame = (t) => {
+      if (moving() && width) {
+        pos = inRange(pos + SPEED * Math.min((t - last) / 1000, .1));
+        reel.scrollLeft = pos;
+      }
+      last = t;
+      requestAnimationFrame(frame);
+    };
+    if (!still) requestAnimationFrame(frame);
+
+    // Whoever is reading it or scrolling it stops it; it carries on a moment after they leave.
+    const stop = () => { busy = true; clearTimeout(timer); };
+    const rest = (ms) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (document.activeElement !== reel) { busy = false; pos = reel.scrollLeft; } }, ms);
+    };
+    reel.addEventListener("mouseenter", stop);
+    reel.addEventListener("mouseleave", () => rest(500));
+    reel.addEventListener("focus", stop);
+    reel.addEventListener("blur", () => rest(500));
+    reel.addEventListener("touchstart", stop, { passive: true });
+    reel.addEventListener("touchend", () => rest(2500), { passive: true });
+
+    reel.addEventListener("scroll", () => {
+      if (searching || moving() || !width) return;
+      const now = reel.scrollLeft, p = inRange(now);
+      if (p !== now) { reel.scrollLeft = p; if (drag) drag.left += p - now; }
+      pos = p;
+    }, { passive: true });
+
+    reel.addEventListener("pointerdown", (e) => {
+      const onScrollbar = e.clientY > reel.getBoundingClientRect().top + reel.clientHeight;
+      if (e.pointerType !== "mouse" || e.button || searching || onScrollbar) return;
+      drag = { x: e.clientX, left: reel.scrollLeft };
+      reel.setPointerCapture(e.pointerId);
+      reel.classList.add("drag");
+    });
+    reel.addEventListener("pointermove", (e) => { if (drag) reel.scrollLeft = drag.left - (e.clientX - drag.x); });
+    const drop = () => { drag = null; reel.classList.remove("drag"); };
+    reel.addEventListener("pointerup", drop);
+    reel.addEventListener("pointercancel", drop);
+
+    search.addEventListener("input", () => {
+      const q = plain(search.value);
+      searching = !!q;
+      let found = 0;
+      items.forEach((li) => { li.hidden = !li.dataset.plain.includes(q); found += li.hidden ? 0 : 1; });
+      copies.forEach((c) => { c.hidden = searching; });
+      reel.classList.toggle("found", searching);
+      reel.hidden = searching && !found;
+      none.hidden = !searching || !!found;
+      count.textContent = searching ? `${found} ${found === 1 ? "language" : "languages"} found` : "";
+      reel.scrollLeft = searching ? 0 : pos;
+    });
+  })();
+</script>
+
+<style>
+.langs { padding-bottom: clamp(2.75rem, 7vh, 4.5rem); }
+.head { padding-bottom: 0; }
+.hide { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.tools[hidden] { display: none; }
+.search { flex: 1 1 10rem; max-width: 20rem; }
+.search input {
+  width: 100%; font: 400 1.1rem var(--sans); color: var(--paper); background: var(--cloth-deep);
+  border: 1px solid var(--line); border-radius: 99px; padding: .6rem 1.15rem;
+}
+.search input::placeholder { color: var(--quiet); opacity: 1; }
+.none { margin: 1.5rem 0 0; }
+
+.reel {
+  overflow-x: auto; padding: 2.25rem 0 1rem; cursor: grab; scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+.reel[hidden] { display: none; }
+.reel:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.reel.drag { cursor: grabbing; user-select: none; }
+.row { list-style: none; margin: 0; padding: 0; display: flex; width: max-content; }
+.row li { display: grid; justify-items: center; align-content: start; gap: .3rem; padding: 0 clamp(1.5rem, 3vw, 2.75rem); white-space: nowrap; text-align: center; }
+.row li[hidden] { display: none; }
+.row img { display: block; width: 4.5rem; height: 3.375rem; border-radius: .35rem; margin-bottom: .45rem; box-shadow: 0 0 0 1px rgb(255 255 255 / .14); pointer-events: none; }
+.native { font: 600 clamp(1.7rem, 3vw, 2.4rem)/1.25 var(--serif); }
+.english { color: var(--quiet); font-size: 1.05rem; }
+
+.reel.found { overflow: visible; cursor: auto; max-width: 60rem; margin-inline: auto; -webkit-mask-image: none; mask-image: none; }
+.found .row { width: auto; flex-wrap: wrap; justify-content: center; row-gap: 1.75rem; }
+</style>

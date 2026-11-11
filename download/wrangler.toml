@@ -8,6 +8,7 @@ workers_dev = false
 routes = [
   { pattern = "hearchurch.com/download*", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/appcast.xml", zone_name = "hearchurch.com" },
+  { pattern = "hearchurch.com/appcast-intel.xml", zone_name = "hearchurch.com" },
   { pattern = "www.hearchurch.com/download*", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/privacy", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/terms", zone_name = "hearchurch.com" },
