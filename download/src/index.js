@@ -23,6 +23,7 @@ import ICON from "../../mac/HearChurch/Resources/Assets.xcassets/AppIcon.appicon
 import ALEGREYA from "./fonts/alegreya.woff2";
 import ALEGREYA_SANS_400 from "./fonts/alegreya-sans-400.woff2";
 import ALEGREYA_SANS_700 from "./fonts/alegreya-sans-700.woff2";
+import { isPageView, point } from "./edge-log.js";
 
 // The page's own files, served from here so a visit sends nothing to a font or image host.
 const ASSETS = {
@@ -57,7 +58,7 @@ async function sitePage(request, env, url) {
   return new Response(missing.body, { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
-export default {
+const site = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname.startsWith("www.")) {
@@ -189,3 +190,28 @@ async function file(request, env, key, type, cache, downloadName) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 }
+
+// Every HTML page this Worker answers is logged into rr_pageviews (people,
+// search bots, AI crawlers) for the hub's AI search panel; see
+// local-website-engine ops/edge-log/README.md. Crawlers don't run JavaScript,
+// so the tracker can't see them. Logging never changes the response.
+export default {
+  async fetch(request, env, ctx) {
+    const res = await site.fetch(request, env, ctx);
+    if (isPageView(request.method, res.status, res.headers.get("content-type"))) {
+      try {
+        const url = new URL(request.url);
+        env.PAGEVIEWS?.writeDataPoint(point({
+          slug: "hearchurch",
+          path: url.pathname,
+          referer: request.headers.get("referer"),
+          host: url.hostname,
+          ua: request.headers.get("user-agent") ?? "",
+          utmSource: url.searchParams.get("utm_source") ?? "",
+          country: request.cf?.country ?? "",
+        }));
+      } catch (err) { console.error("[edge-log]", err.message); }
+    }
+    return res;
+  },
+};

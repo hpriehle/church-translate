@@ -35,6 +35,8 @@ rules = [
   { type = "Data", globs = ["**/*.png", "**/*.woff2"], fallthrough = false },
 ]
 
+analytics_engine_datasets = [{ binding = "PAGEVIEWS", dataset = "rr_pageviews" }]
+
 [[r2_buckets]]
 binding = "FILES"
 bucket_name = "hearchurch-downloads"
