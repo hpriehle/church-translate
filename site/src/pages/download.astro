@@ -1,26 +1,117 @@
 ---
-// The download page: one button for the Mac this browser is on, the other build underneath.
+// The download page. It checks which chip this Mac has, offers that build, and the other one below.
 import Base from "../layouts/Base.astro";
-import IconWave from "../components/IconWave.astro";
-import GetMac from "../components/GetMac.astro";
 ---
 <Base
   title="Download Hear Church for Mac | Hear Church"
   description="Download Hear Church, the free Mac app that translates your church meeting live. For Macs with Apple silicon or Intel.">
 
-  <IconWave />
+  <section class="dl wrap" data-dl>
+    <div class="chip" aria-hidden="true">
+      <div class="die"><span data-chip-name>Mac</span></div>
+    </div>
 
-  <section class="dl wrap">
-    <h1>Download Hear Church</h1>
-    <p class="lede">The free Mac app that translates your church meeting live.</p>
-    <GetMac id="get" named />
+    <div class="copy">
+      <h1>Download Hear Church</h1>
+      <p class="found" data-found aria-live="polite">The free Mac app that translates your church meeting live.</p>
+      <a class="get" href="/download/HearChurch.dmg" data-cta="download" data-get>Download for Mac with Apple silicon</a>
+      <p class="other" data-other="arm">Have an Intel Mac? <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Download the Intel version</a></p>
+      <p class="other" data-other="intel" hidden>Have a Mac with Apple silicon? <a href="/download/HearChurch.dmg" data-cta="download">Download that version</a></p>
+      <p class="other" data-unsure hidden>Not sure which you have? Open the Apple menu and choose About This Mac.
+        If it lists a Chip, your Mac has Apple silicon. If it lists a Processor, it's an Intel Mac.</p>
+    </div>
   </section>
 </Base>
 
+<script>
+  // Apple silicon or Intel? Every Mac browser says "Intel Mac OS X", so look at the graphics chip
+  // (Chrome, Edge, Firefox), then Chrome's architecture hint. Safari hides both: there we offer the
+  // Apple silicon build, which every Mac sold since 2023 needs, and say how to check.
+  async function whichMac() {
+    try {
+      const gl = document.createElement("canvas").getContext("webgl")!;
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const gpu = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      if (/Apple M\d/.test(gpu)) return "arm";
+      if (/Intel|AMD|Radeon|NVIDIA/i.test(gpu)) return "intel";
+    } catch {}
+    try {
+      const { architecture } = await (navigator as any).userAgentData.getHighEntropyValues(["architecture"]);
+      if (architecture === "arm") return "arm";
+      if (architecture === "x86") return "intel";
+    } catch {}
+    return "";
+  }
+
+  const box = document.querySelector<HTMLElement>("[data-dl]")!;
+  const $ = <T extends HTMLElement>(sel: string) => box.querySelector<T>(sel)!;
+  const found = $("[data-found]"), name = $("[data-chip-name]"), get = $<HTMLAnchorElement>("[data-get]");
+  const ua = navigator.userAgent;
+  const phone = /iPhone|iPod|iPad|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+
+  if (phone) {
+    found.textContent = "Hear Church runs on a Mac. Open this page on the Mac you'll use at church to download it.";
+  } else {
+    whichMac().then((chip) => {
+      document.documentElement.dataset.mac = chip || "unknown";
+      if (chip === "intel") {
+        name.textContent = "Intel";
+        found.textContent = "This is an Intel Mac, so this is the version you need.";
+        get.href = "/download/HearChurch-Intel.dmg";
+        get.dataset.cta = "download-intel";
+        get.textContent = "Download for Intel Mac";
+        $('[data-other="arm"]').hidden = true;
+        $('[data-other="intel"]').hidden = false;
+      } else if (chip === "arm") {
+        name.textContent = "Apple silicon";
+        found.textContent = "This Mac has Apple silicon, so this is the version you need.";
+      } else {
+        name.textContent = "Mac";
+        found.textContent = "Your browser doesn't say which chip this Mac has. Most Macs need the Apple silicon version.";
+        $("[data-unsure]").hidden = false;
+      }
+      box.classList.add("scanned");
+    });
+  }
+</script>
+
 <style>
-.dl { text-align: center; padding-top: clamp(1rem, 3vh, 2rem); padding-bottom: clamp(4rem, 12vh, 7rem); }
-.dl h1 { margin: 0 auto .8rem; }
-.dl .lede { margin: 0 auto; }
-.dl :global(.ctas) { justify-content: center; }
-.dl :global(.other) { margin-inline: auto; }
+/* A chip on the left, the button on the right: the page is about which chip you have. */
+.dl {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center;
+  gap: 2.5rem clamp(3rem, 7vw, 6rem); max-width: 56rem;
+  padding-top: clamp(3rem, 10vh, 6.5rem); padding-bottom: clamp(4rem, 14vh, 8rem);
+}
+.copy h1 { margin-bottom: .9rem; }
+.copy .get { text-wrap: balance; }
+.found { font-size: 1.25rem; margin: 0 0 1.75rem; max-width: 30rem; text-wrap: pretty; }
+.other { color: var(--quiet); font-size: 1rem; margin: 1rem 0 0; max-width: 30rem; text-wrap: pretty; }
+.other[hidden] { display: none; }
+
+/* The chip: gold pins on all four sides of a dark die, with what we found printed on it. */
+.chip { --s: clamp(10rem, 22vw, 14rem); position: relative; width: var(--s); height: var(--s); margin: 1.2rem; }
+.chip::before, .chip::after { content: ""; position: absolute; --pin: repeating-linear-gradient(var(--dir), var(--gold-deep) 0 .45rem, transparent .45rem 1.15rem); }
+.chip::before { --dir: 90deg; inset: -1.1rem 16%; background: var(--pin) top / 100% 1rem no-repeat, var(--pin) bottom / 100% 1rem no-repeat; }
+.chip::after { --dir: 0deg; inset: 16% -1.1rem; background: var(--pin) left / 1rem 100% no-repeat, var(--pin) right / 1rem 100% no-repeat; }
+.die {
+  position: relative; z-index: 1; height: 100%; display: grid; place-items: center; overflow: hidden;
+  border-radius: 1.3rem; border: 2px solid var(--gold-deep);
+  background: linear-gradient(150deg, #1d4337, var(--cloth-deep) 70%);
+  box-shadow: inset 0 0 0 .55rem rgb(0 0 0 / .18), 0 1.4rem 3rem rgb(0 0 0 / .35);
+}
+.die span { font: 600 clamp(1.5rem, 3vw, 2rem)/1.1 var(--serif); color: var(--gold); text-align: center; padding: 0 1rem; }
+/* One pass of light down the die when the check finishes. */
+.die::after {
+  content: ""; position: absolute; inset: 0; translate: 0 -100%;
+  background: linear-gradient(transparent, rgb(244 208 131 / .28) 45%, rgb(244 208 131 / .5) 50%, transparent 55%);
+}
+.scanned .die::after { animation: scan 1.2s ease-out 1; }
+@keyframes scan { to { translate: 0 100%; } }
+@media (prefers-reduced-motion: reduce) { .scanned .die::after { animation: none; } }
+
+@media (max-width: 44rem) {
+  .dl { grid-template-columns: 1fr; padding-top: 2.5rem; }
+  .chip { --s: 8.5rem; }
+}
 </style>

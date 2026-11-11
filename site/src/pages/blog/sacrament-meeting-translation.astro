@@ -1,7 +1,6 @@
 ---
 import { LANGUAGE_LIST } from "../../languages.js";
 import Base from "../../layouts/Base.astro";
-import GetMac from "../../components/GetMac.astro";
 
 const published = "2026-11-09";
 const schema = {
@@ -83,7 +82,10 @@ const schema = {
         <dd>{LANGUAGE_LIST} today.</dd>
       </dl>
 
-      <GetMac second={{ href: "/lds", label: "Hear Church for Latter-day Saint wards" }} />
+      <div class="ctas">
+        <a class="get" href="/download">Download for Mac</a>
+        <a class="second" href="/lds">Hear Church for Latter-day Saint wards</a>
+      </div>
 
       <p class="quiet indep-note">Hear Church is an independent tool, not affiliated with or endorsed by The Church of Jesus Christ of Latter-day Saints.</p>
     </div>

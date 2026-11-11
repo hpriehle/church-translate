@@ -1,6 +1,5 @@
 ---
 import Base from "../layouts/Base.astro";
-import GetMac from "../components/GetMac.astro";
 import Demo from "../components/Demo.astro";
 
 const schema = {
@@ -82,7 +81,9 @@ const schema = {
     <div>
       <h2>Ready for your first Sunday?</h2>
       <p class="quiet">Download the app, set it up this week and try it at your next service.</p>
-      <GetMac />
+      <div class="ctas">
+        <a class="get" href="/download">Download for Mac</a>
+      </div>
       <p class="quiet next">Latter-day Saint ward? Read <a href="/blog/sacrament-meeting-translation">how to translate sacrament meeting live</a>.</p>
     </div>
   </section>
