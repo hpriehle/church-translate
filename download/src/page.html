@@ -72,6 +72,7 @@ a.get:hover { filter: brightness(1.06); }
 a.get:focus-visible { outline: 3px solid var(--paper); outline-offset: 3px; border-radius: 1.2rem; }
 .get.soon { background: none; box-shadow: none; color: var(--gold); border: 2px solid var(--gold-deep); }
 .meta { color: var(--quiet); font-size: 1rem; margin: .7rem 0 0; }
+.unsure { max-width: 30rem; margin-inline: auto; text-wrap: pretty; }
 .cost { max-width: 30rem; margin: .9rem auto 0; color: var(--quiet); font-size: 1.0625rem; text-wrap: pretty; }
 
 .more { max-width: 66rem; margin: 0 auto; padding: 0 clamp(1.25rem, 4vw, 2.5rem); }
@@ -132,9 +133,18 @@ footer a { color: inherit; margin: 0 .6rem; }
       Listening to a meeting? <a href="/listen">Find your congregation</a>.</p>
 
     <div {{RELEASED}}>
-      <a class="get" href="/download/HearChurch.dmg" data-cta="download">Download free for Mac</a>
-      <p class="meta">Version {{VERSION}}, {{SIZE}}, released {{DATE}}</p>
-      <p class="meta">Have an Intel Mac? <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Download the Intel version</a></p>
+      <div data-build="arm">
+        <a class="get" href="/download/HearChurch.dmg" data-cta="download">Download free for Mac</a>
+        <p class="meta">For Macs with Apple silicon. Version {{VERSION}}, {{SIZE}}, released {{DATE}}</p>
+      </div>
+      <div data-build="intel" hidden>
+        <a class="get" href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Download free for Intel Mac</a>
+        <p class="meta">For Intel Macs. Version {{INTEL_VERSION}}, {{INTEL_SIZE}}, released {{INTEL_DATE}}</p>
+      </div>
+      <p class="meta" data-alt="arm" {{INTEL_RELEASED}}>Have an Intel Mac? <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Download the Intel version</a></p>
+      <p class="meta" data-alt="intel" hidden>Have a Mac with Apple silicon? <a href="/download/HearChurch.dmg" data-cta="download">Download that version</a></p>
+      <p class="meta unsure" data-unsure hidden>Not sure which you have? Open the Apple menu and choose About This Mac.
+        If it lists a Chip, your Mac has Apple silicon. If it lists a Processor, it's an Intel Mac.</p>
     </div>
     <div {{UNRELEASED}}>
       <span class="get soon">Coming soon</span>
@@ -200,6 +210,39 @@ footer a { color: inherit; margin: 0 .6rem; }
 
 <script>
   if (/iPhone|iPod|Android/i.test(navigator.userAgent)) document.getElementById("phone").hidden = false;
+
+  // Apple silicon or Intel? Every Mac browser says "Intel Mac OS X", so look at the graphics chip
+  // (Chrome, Edge, Firefox), then Chrome's architecture hint. Safari hides both: there we offer the
+  // Apple silicon build, which every Mac sold since 2023 needs, and say how to check.
+  async function whichMac() {
+    if (!/Macintosh/.test(navigator.userAgent) || navigator.maxTouchPoints > 1) return "";  // an iPad asks as a Mac
+    try {
+      const gl = document.createElement("canvas").getContext("webgl");
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const gpu = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      if (/Apple M\d/.test(gpu)) return "arm";
+      if (/Intel|AMD|Radeon|NVIDIA/i.test(gpu)) return "intel";
+    } catch {}
+    try {
+      const { architecture } = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
+      if (architecture === "arm") return "arm";
+      if (architecture === "x86") return "intel";
+    } catch {}
+    return "";
+  }
+  whichMac().then((chip) => {
+    const intelOut = !document.querySelector('[data-alt="arm"]').hidden;
+    if (chip === "intel" && intelOut) {
+      document.querySelector('[data-build="arm"]').hidden = true;
+      document.querySelector('[data-build="intel"]').hidden = false;
+      document.querySelector('[data-alt="arm"]').hidden = true;
+      document.querySelector('[data-alt="intel"]').hidden = false;
+    } else if (!chip && intelOut && /Macintosh/.test(navigator.userAgent)) {
+      document.querySelector("[data-unsure]").hidden = false;
+    }
+    document.documentElement.dataset.mac = chip || "unknown";
+  });
 
   // The sound wave: mirrored either side of the icon, like the bars on it, fading with distance.
   const rhythm = [.62, .95, .42, .74, 1, .5, .3, .82, .58, .92, .36, .68, .86, .46, .28, .76, .54, .9, .4, .64];

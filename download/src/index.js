@@ -158,13 +158,19 @@ async function latestRelease(env, key = "latest.json") {
 }
 
 async function page(env) {
-  const latest = await latestRelease(env);
+  const [latest, intel] = await Promise.all([latestRelease(env), latestRelease(env, "latest-intel.json")]);
+  const size = (r) => (r ? `${(r.size / 1e9).toFixed(1)} GB` : "");
+  const day = (r) => (r ? new Date(r.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "");
   const fill = {
     VERSION: latest ? latest.version : "",
-    SIZE: latest ? `${(latest.size / 1e9).toFixed(1)} GB` : "",
-    DATE: latest ? new Date(latest.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "",
+    SIZE: size(latest),
+    DATE: day(latest),
     RELEASED: latest ? "" : "hidden",
     UNRELEASED: latest ? "hidden" : "",
+    INTEL_VERSION: intel ? intel.version : "",
+    INTEL_SIZE: size(intel),
+    INTEL_DATE: day(intel),
+    INTEL_RELEASED: intel ? "" : "hidden",
   };
   const html = PAGE.replace(/\{\{(\w+)\}\}/g, (_, k) => escapeHtml(fill[k] ?? ""));
   return new Response(html, {
