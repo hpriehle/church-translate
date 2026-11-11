@@ -1,12 +1,12 @@
 ---
 // The download button, on every page that has one. It downloads the Apple silicon build, or the
 // Intel build when the page can tell it's on an Intel Mac, and always offers the other one underneath.
-// `second` is an optional { href, label } link beside the button; `id` lets other pages link here.
-const { second, id } = Astro.props;
+// `second` is an optional { href, label } link beside the button; `named` puts the chip in the button's label.
+const { second, id, named } = Astro.props;
 ---
 <div class="getmac" id={id} data-getmac>
   <div class="ctas">
-    <a class="get" href="/download/HearChurch.dmg" data-cta="download" data-get>Download for Mac</a>
+    <a class="get" href="/download/HearChurch.dmg" data-cta="download" data-get>{named ? "Download for Mac with Apple silicon" : "Download for Mac"}</a>
     {second && <a class="second" href={second.href}>{second.label}</a>}
   </div>
   <p class="other" data-other="arm">Have an Intel Mac? <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Download the Intel version</a></p>

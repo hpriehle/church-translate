@@ -1,0 +1,26 @@
+---
+// The download page: one button for the Mac this browser is on, the other build underneath.
+import Base from "../layouts/Base.astro";
+import IconWave from "../components/IconWave.astro";
+import GetMac from "../components/GetMac.astro";
+---
+<Base
+  title="Download Hear Church for Mac | Hear Church"
+  description="Download Hear Church, the free Mac app that translates your church meeting live. For Macs with Apple silicon or Intel.">
+
+  <IconWave />
+
+  <section class="dl wrap">
+    <h1>Download Hear Church</h1>
+    <p class="lede">The free Mac app that translates your church meeting live.</p>
+    <GetMac id="get" named />
+  </section>
+</Base>
+
+<style>
+.dl { text-align: center; padding-top: clamp(1rem, 3vh, 2rem); padding-bottom: clamp(4rem, 12vh, 7rem); }
+.dl h1 { margin: 0 auto .8rem; }
+.dl .lede { margin: 0 auto; }
+.dl :global(.ctas) { justify-content: center; }
+.dl :global(.other) { margin-inline: auto; }
+</style>

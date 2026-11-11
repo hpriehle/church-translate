@@ -10,6 +10,6 @@ export const FOOTER = [
   { href: "/how-it-works", label: "How it works" },
   { href: "/blog", label: "Blog" },
   { href: "/lds", label: "For Latter-day Saint wards" },
-  { href: "/#get", label: "Download for Mac" },
+  { href: "/download", label: "Download for Mac" },
   { href: "/listen", label: "Find your congregation" },
 ];

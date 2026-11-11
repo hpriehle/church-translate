@@ -1,6 +1,6 @@
 // hearchurch.com's marketing site (built from site/), the Mac app's downloads and Sparkle files.
 //
-//   /download                  301 to the home page's download button (the old download page is gone)
+//   /download                  the download page (site/src/pages/download.astro), served like the other site pages
 //   /download/HearChurch.dmg   always the newest DMG (the link to share); counted, anonymously, in D1
 //   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
@@ -40,7 +40,7 @@ const INDEXNOW_KEY = "b8a8b0718483acd04cef33be1f6d395c";
 const SITE_PAGE = /^(\/(how-it-works|lds|blog)(\/[a-z0-9-]+)?)?$/;
 // Everything else this Worker answers itself.
 const OWN = /^\/(download(\/.*)?|appcast(?:-intel)?\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
-const SITE_PATHS = ["/", "/how-it-works", "/lds", "/blog", "/blog/sacrament-meeting-translation"];
+const SITE_PATHS = ["/", "/how-it-works", "/lds", "/blog", "/blog/sacrament-meeting-translation", "/download"];
 
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -78,8 +78,7 @@ const site = {
     }
     if (SITE_PAGE.test(path)) return sitePage(request, env, url);
 
-    // The old download page is gone; its downloads are on every page of the site now.
-    if (path === "/download") return Response.redirect(`${url.origin}/#get`, 301);
+    if (path === "/download") return sitePage(request, env, url);
     if (ASSETS[path]) {
       const [body, type] = ASSETS[path];
       return new Response(body, { headers: { "content-type": type, "cache-control": "public, max-age=86400" } });

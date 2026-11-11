@@ -39,7 +39,7 @@ const canonical = new URL(path, "https://hearchurch.com").href.replace(/\/$/, pa
   <a class="brand" href="/"><img src="/download/icon.png" width="32" height="32" alt=""> Hear Church</a>
   <nav aria-label="Main">
     {NAV.map((n) => <a href={n.href} aria-current={path === n.href ? "page" : undefined}>{n.label}</a>)}
-    <a class="nav-get" href="/#get">Download</a>
+    <a class="nav-get" href="/download">Download</a>
   </nav>
 </header>
 <main id="main">
