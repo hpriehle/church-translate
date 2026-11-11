@@ -44,7 +44,7 @@ async def test_channel_stages_keep_going_after_an_exception():
                                publish_rec=lambda r: None)
 
     class Tr:
-        async def translate(self, english, condensed):
+        async def translate(self, english, condensed, scripture=""):
             return SimpleNamespace(text="Bonjour.", ms=1.0, engine="claude", note="")
 
     mixer = SimpleNamespace(sr=16000, on_air=None, on_skip=None, max_age_s=0, backlog_s=0.0)

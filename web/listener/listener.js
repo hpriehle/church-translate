@@ -79,6 +79,12 @@
     const p = document.createElement("p");
     p.dataset.seq = String(c.seq);
     p.textContent = c.text || c.fr || "";
+    if (c.credit && c.credit.notice) {   // quotes published scripture: credit its source
+      const s = document.createElement("small");
+      s.className = "credit";
+      s.textContent = c.credit.notice;
+      p.appendChild(s);
+    }
     captionsEl.appendChild(p);
     while (captionsEl.children.length > KEEP_LINES) captionsEl.removeChild(captionsEl.firstChild);
     const all = captionsEl.querySelectorAll("p");

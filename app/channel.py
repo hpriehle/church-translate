@@ -21,6 +21,7 @@ from .metrics import ChunkRecord
 from .translate.router import Translator
 from .tts.engines import TtsRunner
 from .profanity import unspoken
+from .scripture import ScriptureFeed
 from .tts.normalize import speechify
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -50,6 +51,7 @@ class Channel:
         self.recording = None
         self._last_stage_log: dict[str, float] = {}
         self.on = True           # translating into this language (switched live on the operator page)
+        self.scripture = ScriptureFeed(None, None)   # set up by the pipeline
         self._started = False
         self._tasks: list[asyncio.Task] = []
         mixer.on_air = self._on_air
@@ -134,8 +136,11 @@ class Channel:
                 mr.status, mr.note = "merged", f"merged into #{rec.seq}"
                 self.p.lang_done(m)
         res.condensed = self.backlog.update_condense(self.total_backlog())
+        # A verse named in this chunk is usually fetched within half a second: worth waiting for.
+        await self.scripture.settle(0.8)
+        verse_note = self.scripture.note()
         try:
-            tr = await self.translator.translate(english, res.condensed)
+            tr = await self.translator.translate(english, res.condensed, scripture=verse_note)
         except Exception as e:  # pragma: no cover
             log.exception("[%s] translate crashed", self.code)
             res.status, res.note = "failed", f"translate: {e}"
@@ -153,8 +158,13 @@ class Channel:
         res.status = "captioned"
         self.caption_no += 1
         res.caption_no = self.caption_no
-        self.hub.publish({"type": "caption", "seq": res.caption_no, "session": self.p.session_id,
-                          "lang": self.code, "text": tr.text, "ts": time.time()}, remember=True)
+        caption = {"type": "caption", "seq": res.caption_no, "session": self.p.session_id,
+                   "lang": self.code, "text": tr.text, "ts": time.time()}
+        credit = self.scripture.credit_for(tr.text) if verse_note else None
+        if credit:   # the caption reproduces a published verse: its Bible's attribution goes with it
+            caption["credit"] = credit
+            res.note = (res.note + f" scripture: {credit['reference']} ({credit['source']})").strip()
+        self.hub.publish(caption, remember=True)
         self.p.publish_rec(rec)
         await self.tts_q.put(rec)
 

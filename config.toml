@@ -90,3 +90,14 @@ bitrate_kbps = 64
 sample_rate = 44100
 # Seconds of recent audio sent to a phone when it (re)connects, so playback starts at once.
 burst_s = 1.0
+
+[scripture]
+# When the speaker names a verse ("John 3:16", "Alma 32:21"), look it up in each language's scripture so a
+# quoted verse is translated with the published wording. Each language's Bible (eBible.org, about 1.5 MB)
+# downloads by itself the first time; `uv run python -m app.scripture` lists them.
+enabled = true
+window_s = 120.0
+max_verses = 5
+
+[scripture.bibles]
+# Change a language's Bible, or "" to switch it off. Optional ones: pt = "porbrbsl", uk = "ukr1871", ne = "npiulb".

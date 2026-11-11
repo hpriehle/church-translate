@@ -193,7 +193,7 @@ def make_translator(claude_delay=0.1, ollama_delay=0.2, claude_fail=False, timeo
     t.has_claude = True
     t.active = FakeSession(claude_delay, claude_fail)
 
-    async def fake_ollama(system, history, english, condense=False, timeout_s=None):
+    async def fake_ollama(system, history, english, condense=False, timeout_s=None, scripture=""):
         await asyncio.sleep(ollama_delay)
         return "ollama: " + english
     t.ollama.translate = fake_ollama

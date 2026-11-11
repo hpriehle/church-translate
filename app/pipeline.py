@@ -13,11 +13,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .profanity import censor
+from .scripture import SOURCES, Library, RefDetector, ScriptureFeed, bible_for, install
 from .audio_in import CaptureWorker, FileSource, MicSource, Source
 from .backlog import BacklogPolicy
 from .channel import Channel
 from .chunker import Chunk, Chunker, SileroVad
-from .config import LOG_DIR, Settings, tts_for
+from .config import HOME, LOG_DIR, Settings, tts_for
 from .metrics import ChunkRecord, LangResult, MetricsLog
 from .stt import Transcriber, build_prompt, resolve_engine
 from .translate.prompts import whisper_hints
@@ -58,9 +59,42 @@ class Pipeline:
         self._caff = None
         self._usage_at_start: dict[str, dict[str, float]] = {}
         self.on_drained: Callable[[], None] | None = None
+        self.library = Library(HOME / "scripture")   # published scripture wording (see scripture.py)
+        self.refs = RefDetector(settings.scripture.max_verses)
+        self._installing: dict[str, asyncio.Task] = {}
 
     def add_channel(self, ch: Channel) -> None:
         self.channels[ch.code] = ch
+        self._setup_scripture()
+
+    def _setup_scripture(self) -> None:
+        """Give each language its scripture files, downloading its Bible (about 1.5 MB) the first time."""
+        cfg = self.settings.scripture
+        self.refs.max_verses = cfg.max_verses
+        self.library.forget()
+        for code, ch in self.channels.items():
+            ch.scripture.clear()
+            bible = bible_for(code, cfg.bibles)
+            on = cfg.enabled and bool(self.library.files(code, bible))
+            ch.scripture = ScriptureFeed(self.library if on else None, code, bible, cfg.window_s)
+            if cfg.enabled and bible and not (self.library.folder / f"{code}.{bible}.txt.gz").exists():
+                self._install_bible(code, bible)
+
+    def _install_bible(self, code: str, bible: str) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return   # not running yet (tests, setup): the next settings change tries again
+        if code in self._installing and not self._installing[code].done():
+            return
+
+        async def run() -> None:
+            try:
+                await install(code, bible, self.library.folder)
+                self._setup_scripture()
+            except Exception as e:
+                log.warning("couldn't download %s for %s: %s", SOURCES[bible].title, code, e)
+        self._installing[code] = asyncio.create_task(run())
 
     @property
     def on_channels(self) -> dict[str, Channel]:
@@ -131,6 +165,7 @@ class Pipeline:
         else:
             raise ValueError(f"unknown source {kind!r}")
         self.vad.reset()
+        self.refs.reset()
         chunker = Chunker(self.settings.vad, self.vad)
         if self.metrics:
             self.metrics.close()
@@ -265,6 +300,12 @@ class Pipeline:
                 self._finalize(rec)
                 continue
             self.publish_rec(rec)
+            if self.speaker == "en" and any(ch.scripture.enabled for ch in chans.values()):
+                refs = self.refs.feed(rec.en)
+                if refs:
+                    log.info("scripture #%d: %s", rec.seq, ", ".join(r.usfm for r in refs))
+                    for ch in chans.values():
+                        ch.scripture.prefetch(refs)
             for ch in chans.values():
                 ch.mt_q.put_nowait(rec)
 
@@ -336,6 +377,7 @@ class Pipeline:
             if new_tts.model_dump() != ch.tts.cfg.model_dump():
                 ch.tts.reload(new_tts)
             ch.translator.reload(settings.translate, glossaries.get(code, {}), self.speaker)
+        self._setup_scripture()
 
     def status(self) -> dict[str, Any]:
         chans = {code: {**ch.status(), "paused": code == self.speaker} for code, ch in self.on_channels.items()}

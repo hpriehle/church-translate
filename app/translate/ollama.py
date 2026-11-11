@@ -41,20 +41,21 @@ class OllamaClient:
             self.last_error = f"Ollama not reachable at {self.url} ({type(e).__name__})"
         return self.available and self.model_present
 
-    def _messages(self, system: str, history: list[tuple[str, str]], english: str, condense: bool) -> list[dict]:
+    def _messages(self, system: str, history: list[tuple[str, str]], english: str, condense: bool,
+                  scripture: str = "") -> list[dict]:
         msgs = [{"role": "system", "content": system}]
         for en, fr in history[-3:]:
             msgs.append({"role": "user", "content": en})
             msgs.append({"role": "assistant", "content": fr})
-        msgs.append({"role": "user", "content": user_message(english, condense)})
+        msgs.append({"role": "user", "content": user_message(english, condense, scripture)})
         return msgs
 
     async def translate(self, system: str, history: list[tuple[str, str]], english: str,
-                        condense: bool = False, timeout_s: float | None = None) -> str:
+                        condense: bool = False, timeout_s: float | None = None, scripture: str = "") -> str:
         t0 = time.monotonic()
         body = {
             "model": self.model,
-            "messages": self._messages(system, history, english, condense),
+            "messages": self._messages(system, history, english, condense, scripture),
             "stream": False,
             "keep_alive": "3h",
             "options": {"temperature": 0.2, "num_predict": 300, "num_ctx": 8192},

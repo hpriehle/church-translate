@@ -21,7 +21,7 @@ from .api_session import ApiSession
 from .claude_session import ClaudeSession, Usage, claude_binary
 from .ollama import OllamaClient
 from ..profanity import censor
-from .prompts import build_system_prompt, clean_output, seed_message, user_message
+from .prompts import SCRIPTURE_RULE, build_system_prompt, clean_output, seed_message, user_message
 
 log = logging.getLogger("translate")
 
@@ -58,7 +58,7 @@ class Translator:
         self.lang = lang or LANGUAGES["fr"]
         self.src = src            # the speaker's language
         self.workdir = workdir
-        self.system_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code, src)
+        self.system_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code, src) + SCRIPTURE_RULE
         self.active: ClaudeSession | None = None
         self.standby: ClaudeSession | None = None
         self._standby_task: asyncio.Task | None = None
@@ -145,7 +145,7 @@ class Translator:
         if src and src != self.src:
             self.src = src
             self.history.clear()   # the earlier pairs were in another language
-        new_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code, self.src)
+        new_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code, self.src) + SCRIPTURE_RULE
         restart = (new_prompt != self.system_prompt or cfg.claude_model != self.cfg.claude_model
                    or cfg.claude_effort != self.cfg.claude_effort or cfg.backend != self.cfg.backend)
         self.cfg = cfg
@@ -235,7 +235,8 @@ class Translator:
         self.retired_usage.add(s.usage)
 
     # ------------------------------------------------------------ translate
-    async def translate(self, english: str, condense: bool = False) -> TranslationResult:
+    async def translate(self, english: str, condense: bool = False, scripture: str = "") -> TranslationResult:
+        """`scripture`: a SCRIPTURE NOTE with published verse wording, appended to this message only."""
         t0 = time.monotonic()
         self.last_activity = t0
         self._maintain()
@@ -253,7 +254,7 @@ class Translator:
             if time.monotonic() < self._paused_until:
                 note = "claude paused after errors"
             elif s and s.alive and s.ready and not s.busy:
-                claude_task = asyncio.create_task(s.ask(user_message(english, condense)))
+                claude_task = asyncio.create_task(s.ask(user_message(english, condense, scripture)))
                 claude_task.add_done_callback(_swallow)
             elif s and s.busy:
                 note = "claude still busy"
@@ -278,7 +279,7 @@ class Translator:
 
         # Fallback. A late Claude reply still wins if it arrives before Ollama's.
         ollama_task = asyncio.create_task(
-            self.ollama.translate(self.system_prompt, list(self.history), english, condense))
+            self.ollama.translate(self.system_prompt, list(self.history), english, condense, scripture=scripture))
         ollama_task.add_done_callback(_swallow)
         waiting: set[asyncio.Task] = {ollama_task}
         if claude_task and not claude_task.done():

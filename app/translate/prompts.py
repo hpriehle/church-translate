@@ -206,8 +206,20 @@ def whisper_hints(glossary: dict[str, Any]) -> list[str]:
     return hints
 
 
-def user_message(english: str, condense: bool) -> str:
-    return f"{CONDENSE_TAG} {english}" if condense else english
+SCRIPTURE_RULE = """
+
+PUBLISHED SCRIPTURE
+A message may end with a block that starts "SCRIPTURE NOTE". It is not speech: it gives the published wording,
+in the language you translate into, of a scripture verse the speaker has just named. Never translate it, read it
+out or mention it. When the speaker's words quote that verse, use the published wording for the quoted part,
+word for word, instead of your own translation (in the output language's own number style). When the
+speaker is not quoting it, or the note's text says something different from what the speaker quotes (verse
+numbers sometimes differ between editions), ignore the note."""
+
+
+def user_message(english: str, condense: bool, scripture: str = "") -> str:
+    msg = f"{CONDENSE_TAG} {english}" if condense else english
+    return f"{msg}\n\n{scripture}" if scripture else msg
 
 
 def seed_message(history: list[tuple[str, str]]) -> str:

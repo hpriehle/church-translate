@@ -169,6 +169,16 @@ class StreamCfg(BaseModel):
     burst_s: float = 1.0
 
 
+class ScriptureCfg(BaseModel):
+    """Published scripture wording for quoted verses (see scripture.py)."""
+    enabled: bool = True
+    # Output language → eBible.org Bible id, to change a language's Bible (scripture.SOURCES lists those
+    # allowed) or "" to switch it off. Languages left out use scripture.DEFAULT_BIBLES.
+    bibles: dict[str, str] = {}
+    window_s: float = 120.0    # how long after a reference its verse is offered to the translator
+    max_verses: int = 5        # longest range fetched ("John 3:16-40" → 16–20)
+
+
 class Settings(BaseModel):
     # Output languages, in the order listeners see them; the first is the default.
     languages: list[str] = ["fr", "wo"]
@@ -183,6 +193,7 @@ class Settings(BaseModel):
     stream: StreamCfg = StreamCfg()
     engine: EngineCfg = EngineCfg()
     hearchurch: HearCfg = HearCfg()
+    scripture: ScriptureCfg = ScriptureCfg()
 
 
 def tts_for(settings: "Settings", code: str) -> TtsCfg:
