@@ -7,9 +7,7 @@ import Base from "../layouts/Base.astro";
   description="Download Hear Church, the free Mac app that translates your church meeting live. For Macs with Apple silicon or Intel.">
 
   <section class="dl wrap" data-dl>
-    <div class="chip" aria-hidden="true">
-      <div class="die"><span data-chip-name>Mac</span></div>
-    </div>
+    <img class="icon" src="/download/icon.png" width="1024" height="1024" alt="The Hear Church app icon: a pulpit with a microphone and a sound wave on it">
 
     <div class="copy">
       <h1>Download Hear Church</h1>
@@ -46,7 +44,7 @@ import Base from "../layouts/Base.astro";
 
   const box = document.querySelector<HTMLElement>("[data-dl]")!;
   const $ = <T extends HTMLElement>(sel: string) => box.querySelector<T>(sel)!;
-  const found = $("[data-found]"), name = $("[data-chip-name]"), get = $<HTMLAnchorElement>("[data-get]");
+  const found = $("[data-found]"), get = $<HTMLAnchorElement>("[data-get]");
   const ua = navigator.userAgent;
   const phone = /iPhone|iPod|iPad|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 
@@ -56,7 +54,6 @@ import Base from "../layouts/Base.astro";
     whichMac().then((chip) => {
       document.documentElement.dataset.mac = chip || "unknown";
       if (chip === "intel") {
-        name.textContent = "Intel";
         found.textContent = "This is an Intel Mac, so this is the version you need.";
         get.href = "/download/HearChurch-Intel.dmg";
         get.dataset.cta = "download-intel";
@@ -64,20 +61,17 @@ import Base from "../layouts/Base.astro";
         $('[data-other="arm"]').hidden = true;
         $('[data-other="intel"]').hidden = false;
       } else if (chip === "arm") {
-        name.textContent = "Apple silicon";
         found.textContent = "This Mac has Apple silicon, so this is the version you need.";
       } else {
-        name.textContent = "Mac";
         found.textContent = "Your browser doesn't say which chip this Mac has. Most Macs need the Apple silicon version.";
         $("[data-unsure]").hidden = false;
       }
-      box.classList.add("scanned");
     });
   }
 </script>
 
 <style>
-/* A chip on the left, the button on the right: the page is about which chip you have. */
+/* The app icon on the left, the button for this Mac on the right. */
 .dl {
   display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center;
   gap: 2.5rem clamp(3rem, 7vw, 6rem); max-width: 56rem;
@@ -89,29 +83,11 @@ import Base from "../layouts/Base.astro";
 .other { color: var(--quiet); font-size: 1rem; margin: 1rem 0 0; max-width: 30rem; text-wrap: pretty; }
 .other[hidden] { display: none; }
 
-/* The chip: gold pins on all four sides of a dark die, with what we found printed on it. */
-.chip { --s: clamp(10rem, 22vw, 14rem); position: relative; width: var(--s); height: var(--s); margin: 1.2rem; }
-.chip::before, .chip::after { content: ""; position: absolute; --pin: repeating-linear-gradient(var(--dir), var(--gold-deep) 0 .45rem, transparent .45rem 1.15rem); }
-.chip::before { --dir: 90deg; inset: -1.1rem 16%; background: var(--pin) top / 100% 1rem no-repeat, var(--pin) bottom / 100% 1rem no-repeat; }
-.chip::after { --dir: 0deg; inset: 16% -1.1rem; background: var(--pin) left / 1rem 100% no-repeat, var(--pin) right / 1rem 100% no-repeat; }
-.die {
-  position: relative; z-index: 1; height: 100%; display: grid; place-items: center; overflow: hidden;
-  border-radius: 1.3rem; border: 2px solid var(--gold-deep);
-  background: linear-gradient(150deg, #1d4337, var(--cloth-deep) 70%);
-  box-shadow: inset 0 0 0 .55rem rgb(0 0 0 / .18), 0 1.4rem 3rem rgb(0 0 0 / .35);
-}
-.die span { font: 600 clamp(1.5rem, 3vw, 2rem)/1.1 var(--serif); color: var(--gold); text-align: center; padding: 0 1rem; }
-/* One pass of light down the die when the check finishes. */
-.die::after {
-  content: ""; position: absolute; inset: 0; translate: 0 -100%;
-  background: linear-gradient(transparent, rgb(244 208 131 / .28) 45%, rgb(244 208 131 / .5) 50%, transparent 55%);
-}
-.scanned .die::after { animation: scan 1.2s ease-out 1; }
-@keyframes scan { to { translate: 0 100%; } }
-@media (prefers-reduced-motion: reduce) { .scanned .die::after { animation: none; } }
+/* The app icon, the way it sits in the Dock. */
+.icon { width: clamp(11rem, 24vw, 16rem); height: auto; margin: 0 -.5rem; filter: drop-shadow(0 1.1rem 1.6rem rgb(0 0 0 / .32)); }
 
 @media (max-width: 44rem) {
   .dl { grid-template-columns: 1fr; padding-top: 2.5rem; }
-  .chip { --s: 8.5rem; }
+  .icon { width: 8.5rem; }
 }
 </style>
