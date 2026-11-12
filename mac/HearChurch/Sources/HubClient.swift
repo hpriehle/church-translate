@@ -10,7 +10,8 @@ enum HubClient {
     /// With e-mail verification off (for now) the device token comes back at once; otherwise a claim to poll.
     struct SignUpResult { let slug: String; let deviceToken: String?; let claim: String; let located: Bool; let connectCode: String? }
     struct Match: Identifiable, Hashable { let slug: String; let title: String; let city: String; var id: String { slug } }
-    struct Joined { let token: String; let slug: String; let name: String; let church: String }
+    /// billing: how the congregation pays, "credits" or "own_key" (its own Anthropic key, through a one-time code).
+    struct Joined { let token: String; let slug: String; let name: String; let church: String; let billing: String }
     enum ClaimResult { case pending; case token(String, slug: String, name: String) }
 
     static func signUp(_ p: Profile, deviceName: String) async throws -> SignUpResult {
@@ -67,14 +68,40 @@ enum HubClient {
             let token = json["device_token"] as? String ?? ""
             guard !token.isEmpty else { throw Failure(message: "The server did not send a device token. Try again.") }
             return Joined(token: token, slug: json["slug"] as? String ?? slug, name: cong["name"] as? String ?? "",
-                          church: cong["church"] as? String ?? "")
+                          church: cong["church"] as? String ?? "", billing: json["billing"] as? String ?? "credits")
         case 404: throw Failure(message: "We couldn't find that congregation. Check the name or link.")
         case 403 where json["error"] as? String == "bad_code":
             throw Failure(message: "That code doesn't match. Ask whoever set up Hear Church for the current code.")
-        case 429:
-            let secs = (json["retry_after"] as? Double) ?? (json["retry_after"] as? Int).map(Double.init) ?? 60
-            let mins = max(1, Int((secs / 60).rounded(.up)))
-            throw Failure(message: "Too many tries. Try again in \(mins) minute\(mins == 1 ? "" : "s").")
+        case 429: throw tooManyTries(json)
+        default: throw Failure(message: detail(json) ?? "Server error \(status).")
+        }
+    }
+
+    private static func tooManyTries(_ json: [String: Any]) -> Failure {
+        let secs = (json["retry_after"] as? Double) ?? (json["retry_after"] as? Int).map(Double.init) ?? 60
+        let mins = max(1, Int((secs / 60).rounded(.up)))
+        return Failure(message: "Too many tries. Try again in \(mins) minute\(mins == 1 ? "" : "s").")
+    }
+
+    /// Is this an unused one-time own-key code (from Harrison, for one church)? Nothing is used up: the
+    /// congregation doesn't exist yet. Throws with a message to show when it isn't.
+    static func checkOwnKeyCode(_ code: String) async throws {
+        let (json, status) = try await send("/api/hc/own-key-code/check", ["code": code])
+        try ownKeyAnswer(json, status)
+    }
+
+    /// Use the code up for this Mac's congregation: it pays with its own Anthropic key from now on.
+    static func redeemOwnKeyCode(_ code: String, token: String) async throws {
+        let (json, status) = try await send("/api/hc/own-key-code", ["code": code], token: token)
+        try ownKeyAnswer(json, status)
+    }
+
+    private static func ownKeyAnswer(_ json: [String: Any], _ status: Int) throws {
+        switch status {
+        case 200..<300: return
+        case 403 where json["error"] as? String == "bad_code":
+            throw Failure(message: "That code doesn't work. Check it, or write to support@hearchurch.com. Each code works once.")
+        case 429: throw tooManyTries(json)
         default: throw Failure(message: detail(json) ?? "Server error \(status).")
         }
     }

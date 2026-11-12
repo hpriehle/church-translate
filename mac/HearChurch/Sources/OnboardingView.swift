@@ -5,6 +5,8 @@ import SwiftUI
 
 /// First launch: describe the congregation, pick languages (they start downloading), allow the microphone,
 /// add a Claude key, sign up with hearchurch.com and get this Mac's device token.
+/// Billing: a congregation pays with credits, unless Harrison gave it a one-time own-key code. Until credits can be
+/// bought, the Claude step needs that code (or a congregation that already uses its own key) before it takes a key.
 struct OnboardingView: View {
     @EnvironmentObject var model: AppModel
     @State private var step: Step
@@ -16,6 +18,7 @@ struct OnboardingView: View {
     @State private var joinTitle = ""
     @State private var joinCode = ""
     @State private var connectCode = Keychain.get(.connectCode) ?? ""
+    @State private var ownKey = OnboardingProgress.ownKey   // this congregation may use its own Anthropic key
 
     enum Step: String { case welcome, church, name, place, times, languages, microphone, claude, approval, email, connect, join, finish }
 
@@ -67,6 +70,7 @@ struct OnboardingView: View {
         }
         .onChange(of: step) { _, s in OnboardingProgress.step = s }
         .onChange(of: joined) { _, j in OnboardingProgress.joined = j }
+        .onChange(of: ownKey) { _, o in OnboardingProgress.ownKey = o }
     }
 
     private var buttonTitle: String {
@@ -90,7 +94,7 @@ struct OnboardingView: View {
         case .times: TimesStep(profile: $model.profile)
         case .languages: LanguagesStep()
         case .microphone: MicrophoneStep()
-        case .claude: ClaudeStep()
+        case .claude: ClaudeStep(ownKey: $ownKey)
         case .approval: ApprovalStep(profile: $model.profile)
         case .email: EmailStep(profile: $model.profile)
         case .connect: ConnectCodeStep(code: connectCode, congregation: model.profile.name)
@@ -106,7 +110,7 @@ struct OnboardingView: View {
         case .name: return p.name.trimmingCharacters(in: .whitespaces).count >= 2
         case .place: return p.lat != nil
         case .languages: return !p.languages.isEmpty
-        case .claude: return model.keyState == .ok
+        case .claude: return ownKey && model.keyState == .ok
         case .approval: return p.approved
         case .email: return p.email.contains("@") && p.email.contains(".")
         case .join: return !joinSlug.isEmpty && joinCode.filter(\.isNumber).count == 6
@@ -120,7 +124,10 @@ struct OnboardingView: View {
         error = nil
         guard let i = order.firstIndex(of: step) else { return }
         step = order[max(0, min(order.count - 1, i + by))]
-        if step == .welcome { joined = false }
+        if step == .welcome {
+            joined = false
+            if (Keychain.get(.ownKeyCode) ?? "").isEmpty { ownKey = false }   // it came from the congregation joined
+        }
         model.profile.save()
     }
 
@@ -149,6 +156,7 @@ struct OnboardingView: View {
                     connectCode = ""
                     step = .finish
                 }
+                if let e = await redeemOwnKeyCode() { error = e }   // tried again on the last step
             } catch {
                 self.error = error.localizedDescription
             }
@@ -163,6 +171,7 @@ struct OnboardingView: View {
                 if !j.name.isEmpty { model.profile.name = j.name }
                 if !j.church.isEmpty { model.profile.church = j.church }
                 model.profile.approved = true   // whoever set the congregation up already confirmed it
+                if j.billing == "own_key" { ownKey = true }
                 model.profile.claim = ""
                 model.profile.save()
                 joinCode = ""
@@ -173,10 +182,27 @@ struct OnboardingView: View {
         case .connect:
             move(1)
         case .finish:
+            busy = true
+            defer { busy = false }
+            if let e = await redeemOwnKeyCode() { error = e; return }
             OnboardingProgress.clear()
             model.finishSetup()
         default:
             move(1)
+        }
+    }
+
+    /// Use up the own-key code checked on the Claude step, now that the congregation exists. nil when done (or
+    /// there was none); otherwise the message to show.
+    private func redeemOwnKeyCode() async -> String? {
+        guard let code = Keychain.get(.ownKeyCode), !code.isEmpty,
+              let token = Keychain.get(.deviceToken), !token.isEmpty else { return nil }
+        do {
+            try await HubClient.redeemOwnKeyCode(code, token: token)
+            Keychain.delete(.ownKeyCode)
+            return nil
+        } catch {
+            return "Your congregation is set up, but its own-key code wasn't accepted: \(error.localizedDescription)"
         }
     }
 }
@@ -571,29 +597,68 @@ struct ClaudeKeyGuide: View {
 
 private struct ClaudeStep: View {
     @EnvironmentObject var model: AppModel
+    @Binding var ownKey: Bool
     @State private var key = ""
+    @State private var code = ""
+    @State private var checking = false
     @State private var error: String?
 
     var body: some View {
-        StepTitle(title: "Claude translates",
-                  subtitle: "Hear Church uses Claude, from Anthropic, to translate. You bring your own API key, and Anthropic bills you directly for what you use. The key is kept in this Mac's Keychain.")
-        ClaudeKeyGuide()
-        HStack {
-            SecureField("sk-ant-…", text: $key).onSubmit { Task { await save() } }
-            Button("Test and save") { Task { await save() } }.disabled(key.isEmpty || model.keyState == .checking)
-        }
-        switch model.keyState {
-        case .ok: Label("The key works.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-        case .checking: ProgressView().controlSize(.small)
-        default: EmptyView()
+        if ownKey {
+            StepTitle(title: "Claude translates",
+                      subtitle: "Hear Church uses Claude, from Anthropic, to translate. Your congregation uses its own API key, and Anthropic bills you directly for what you use. The key is kept in this Mac's Keychain.")
+            ClaudeKeyGuide()
+            HStack {
+                SecureField("sk-ant-…", text: $key).onSubmit { Task { await save() } }
+                Button("Test and save") { Task { await save() } }.disabled(key.isEmpty || model.keyState == .checking)
+            }
+            switch model.keyState {
+            case .ok: Label("The key works.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            case .checking: ProgressView().controlSize(.small)
+            default: EmptyView()
+            }
+        } else {
+            StepTitle(title: "Claude translates",
+                      subtitle: "Hear Church uses Claude, from Anthropic, to translate. You pay with prepaid credit: $5 per language for each hour of speech, and the first hour is free.")
+            Button("Start with your free first hour") {}
+                .disabled(true)
+                .help("Coming soon")
+            Text("Credits are almost ready. Until then, write to support@hearchurch.com and we'll help you get set up.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 4)
+            Text("Did we give you a setup code for your own Anthropic key? Enter it here. Each code works once.")
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                TextField("HC-XXXX-XXXX-XXXX", text: $code).onSubmit { Task { await useCode() } }
+                Button("Use code") { Task { await useCode() } }
+                    .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || checking)
+                if checking { ProgressView().controlSize(.small) }
+            }
         }
         if let error { Text(error).foregroundStyle(.red) }
-        Button("Start with a free first Sunday instead") {}
-            .disabled(true)
-            .help("Coming soon")
     }
 
     private func save() async { error = await model.saveKey(key) }
+
+    /// Check the code with hearchurch.com; it is used up after sign-up, once the congregation exists.
+    private func useCode() async {
+        let c = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !c.isEmpty else { return }
+        checking = true
+        defer { checking = false }
+        error = nil
+        do {
+            try await HubClient.checkOwnKeyCode(c)
+            guard Keychain.set(.ownKeyCode, c) else {
+                error = "Could not save to this Mac's Keychain. Unlock the Keychain (or allow access) and try again."
+                return
+            }
+            code = ""
+            ownKey = true
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
 }
 
 private struct ApprovalStep: View {
@@ -645,7 +710,7 @@ enum Format {
 
 /// Where setup stopped, so quitting in the middle resumes there.
 enum OnboardingProgress {
-    private static let stepKey = "OnboardingStep", joinedKey = "OnboardingJoined"
+    private static let stepKey = "OnboardingStep", joinedKey = "OnboardingJoined", ownKeyKey = "OnboardingOwnKey"
     fileprivate static var step: OnboardingView.Step? {
         get { UserDefaults.standard.string(forKey: stepKey).flatMap(OnboardingView.Step.init(rawValue:)) }
         set { UserDefaults.standard.set(newValue?.rawValue, forKey: stepKey) }
@@ -654,8 +719,16 @@ enum OnboardingProgress {
         get { UserDefaults.standard.bool(forKey: joinedKey) }
         set { UserDefaults.standard.set(newValue, forKey: joinedKey) }
     }
+    /// The congregation may use its own Anthropic key: a one-time code was accepted, or the congregation this Mac
+    /// joined already uses its own key.
+    static var ownKey: Bool {
+        get { UserDefaults.standard.bool(forKey: ownKeyKey) }
+        set { UserDefaults.standard.set(newValue, forKey: ownKeyKey) }
+    }
     static func clear() {
         UserDefaults.standard.removeObject(forKey: stepKey)
         UserDefaults.standard.removeObject(forKey: joinedKey)
+        UserDefaults.standard.removeObject(forKey: ownKeyKey)
+        Keychain.delete(.ownKeyCode)
     }
 }

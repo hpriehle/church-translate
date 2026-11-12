@@ -9,6 +9,7 @@ enum Keychain {
         case apiKey = "anthropic-api-key"
         case deviceToken = "device-token"
         case connectCode = "connect-code"
+        case ownKeyCode = "own-key-code"   // checked during setup, used up once the congregation exists
     }
 
     static func get(_ item: Item) -> String? {
