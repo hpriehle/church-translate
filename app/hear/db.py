@@ -1,7 +1,11 @@
 """SQLite storage for congregations, their devices (Macs) and their live sessions.
 
-Plain stdlib sqlite3: one connection guarded by a lock (every query is tiny). Device tokens and
-e-mail link tokens are stored only as SHA-256 hashes.
+Plain stdlib sqlite3: one connection guarded by a lock (every query is tiny). Device tokens, e-mail link
+tokens and one-time own-key codes are stored only as SHA-256 hashes.
+
+Billing: a congregation pays with prepaid credits ("credits"), or with its own Anthropic key ("own_key"). Own key
+is only reached with a one-time code Harrison makes for that church (`python -m app.hear.codes mint "Dakar Ward"`).
+Congregations that existed before billing are grandfathered as "own_key": they were set up with their own keys.
 """
 from __future__ import annotations
 
@@ -36,7 +40,8 @@ CREATE TABLE IF NOT EXISTS congregations (
     hidden INTEGER NOT NULL DEFAULT 0,
     city TEXT NOT NULL DEFAULT '',
     connect_code_hash TEXT,
-    connect_code_at REAL
+    connect_code_at REAL,
+    billing TEXT NOT NULL DEFAULT 'credits'
 );
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,12 +71,20 @@ CREATE TABLE IF NOT EXISTS email_tokens (
     approved_at REAL,
     claimed_at REAL
 );
+CREATE TABLE IF NOT EXISTS own_key_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_hash TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    used_at REAL,
+    congregation_id INTEGER REFERENCES congregations(id)
+);
 CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
 CREATE INDEX IF NOT EXISTS devices_cong ON devices(congregation_id);
 """
 
 CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", "city", "lat", "lng", "meeting_times",
-               "timezone", "email", "email_verified", "created_at", "hidden")
+               "timezone", "email", "email_verified", "created_at", "hidden", "billing")
 
 # hearchurch.com paths served by the download Worker and the marketing site, not by this app
 # (docs/seo-site-structure.md). Add a new top-level page here before it goes live, after checking that no
@@ -112,6 +125,24 @@ def new_token(prefix: str) -> str:
     return f"{prefix}_{secrets.token_urlsafe(32)}"
 
 
+# One-time own-key codes: "HC-7KQM-X2PA-9TDW". No 0/O, 1/I/L or U, so a code read aloud or retyped survives.
+CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"
+CODE_LEN = 12   # 30^12, about 59 bits: unguessable behind the hub's failure limits
+
+
+def new_own_key_code() -> str:
+    c = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LEN))
+    return f"HC-{c[:4]}-{c[4:8]}-{c[8:]}"
+
+
+def normalize_own_key_code(code: str) -> str | None:
+    """As typed ("hc-7kqm x2pa 9tdw", "7KQMX2PA9TDW") → "7KQMX2PA9TDW", or None if it can't be a code."""
+    c = re.sub(r"[\s-]", "", code or "").upper()
+    if c.startswith("HC") and len(c) == CODE_LEN + 2:
+        c = c[2:]
+    return c if len(c) == CODE_LEN and all(ch in CODE_ALPHABET for ch in c) else None
+
+
 def slugify(text: str) -> str:
     """"Dakar Ward" → "dakar-ward" (ASCII, lowercase, dashes)."""
     t = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
@@ -128,7 +159,9 @@ def _cong(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 class Database:
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, close_stale: bool = True):
+        """close_stale: end sessions left open (a server restart). Tools that open the live database beside the
+        running server (app.hear.codes) pass False, so a meeting in progress isn't marked ended."""
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
@@ -146,7 +179,11 @@ class Database:
                 self._db.execute("ALTER TABLE congregations ADD COLUMN connect_code_hash TEXT")
             if "connect_code_at" not in cols:
                 self._db.execute("ALTER TABLE congregations ADD COLUMN connect_code_at REAL")
-        self.close_stale_sessions()
+            if "billing" not in cols:   # databases made before credits: every congregation there brought its own key
+                self._db.execute("ALTER TABLE congregations ADD COLUMN billing TEXT NOT NULL DEFAULT 'credits'")
+                self._db.execute("UPDATE congregations SET billing = 'own_key'")
+        if close_stale:
+            self.close_stale_sessions()
 
     def _q(self, sql: str, args: tuple = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -248,6 +285,55 @@ class Database:
         if not stored or not re.fullmatch(r"\d{6}", digits):
             return False
         return hmac.compare_digest(stored, hash_token(digits))
+
+    # ------------------------------------------------------------ own-key codes
+    def mint_own_key_code(self, label: str) -> str:
+        """A new one-time code for a church (label: who it's for, e.g. "Dakar Ward"). Only its hash is kept, so
+        this is the one time the code can be seen."""
+        label = " ".join((label or "").split())[:120]
+        if not label:
+            raise ValueError("say who the code is for")
+        code = new_own_key_code()
+        self._x("INSERT INTO own_key_codes (code_hash, label, created_at) VALUES (?,?,?)",
+                (hash_token(normalize_own_key_code(code)), label, time.time()))
+        return code
+
+    def own_key_code_ok(self, code: str) -> bool:
+        """True for a code that exists and hasn't been used. Doesn't use it up."""
+        c = normalize_own_key_code(code)
+        return bool(c and self._q("SELECT 1 FROM own_key_codes WHERE code_hash = ? AND used_at IS NULL", (hash_token(c),)))
+
+    def redeem_own_key_code(self, code: str, cid: int) -> bool:
+        """Use the code up and switch the congregation to its own key, in one transaction. Asking again for the
+        congregation that already used it is True (a retried request); any other used or unknown code is False."""
+        c = normalize_own_key_code(code)
+        if not c:
+            return False
+        h = hash_token(c)
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._db.execute("SELECT used_at, congregation_id FROM own_key_codes WHERE code_hash = ?",
+                                       (h,)).fetchone()
+                if row is None or (row["used_at"] is not None and row["congregation_id"] != cid):
+                    self._db.execute("ROLLBACK")
+                    return False
+                if row["used_at"] is None:
+                    self._db.execute("UPDATE own_key_codes SET used_at = ?, congregation_id = ? WHERE code_hash = ?",
+                                     (time.time(), cid, h))
+                self._db.execute("UPDATE congregations SET billing = 'own_key' WHERE id = ?", (cid,))
+                self._db.execute("COMMIT")
+                return True
+            except Exception:
+                self._db.execute("ROLLBACK")
+                raise
+
+    def own_key_codes(self) -> list[dict[str, Any]]:
+        """Every code made, newest first, with who used it (never the code itself: only its hash is kept)."""
+        rows = self._q("SELECT k.id, k.label, k.created_at, k.used_at, c.slug FROM own_key_codes k"
+                       " LEFT JOIN congregations c ON c.id = k.congregation_id ORDER BY k.id DESC")
+        return [{"id": r["id"], "label": r["label"], "created_at": r["created_at"], "used_at": r["used_at"],
+                 "used_by": r["slug"]} for r in rows]
 
     # ------------------------------------------------------------ devices
     def add_device(self, cid: int, name: str) -> str:

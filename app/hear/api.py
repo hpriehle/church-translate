@@ -13,6 +13,15 @@ Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
   POST /api/hc/connect-code (device token) → {connect_code}: a new 6-digit code for the congregation (old one dies)
   POST /api/hc/connect      {slug, code, device_name} → like claim's answer; 404 not_found, 403 bad_code,
                             429 {error: locked, retry_after}. Signup (verify_email off) also returns connect_code.
+                            The answer carries the congregation's billing ("credits" or "own_key").
+Billing (prepaid credits, or the congregation's own Anthropic key through a one-time code Harrison makes):
+  POST /api/hc/own-key-code/check {code} → {ok} or 403 bad_code / 429 locked. Doesn't use the code up: onboarding
+                            asks for the code before the key, and the congregation only exists after sign-up.
+  POST /api/hc/own-key-code (device token) {code} → {ok, billing: "own_key"}; uses the code up for this
+                            congregation (asking again is fine). 403 bad_code (unknown, or used by another), 429 locked.
+  GET  /api/hc/billing      (device token) → {billing}
+  POST /api/admin/own-key-codes {label} (operator) → {code, label}: the only time the code is shown.
+  GET  /api/admin/own-key-codes (operator) → {codes: [{label, created_at, used_at, used_by}]}
 The claim secret stays with the app that asked, so a link opened by a mail scanner yields no token.
 Sign-up geocodes an address that came without lat/lng (Nominatim, or Mapbox with HEARCHURCH_MAPBOX_TOKEN). The
 answer says whether it worked ("located"); if not, lat/lng stay empty and the app should ask for a map pin and
@@ -65,6 +74,7 @@ class Hear:
         self.geocoder = geocoder or Geocoder()
         self.connect_ip = FailureLimiter(5, 15 * 60)     # wrong codes per IP
         self.connect_cong = FailureLimiter(10, 3600)     # wrong codes per congregation, then it is locked
+        self.own_key_ip = FailureLimiter(10, 3600)       # wrong own-key codes per IP
         self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
                        "signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
                        "email_addr": RateLimiter(3, 3600), "claim": RateLimiter(1200, 3600),
@@ -372,7 +382,48 @@ async def connect(request: Request, body: Connect):
         h.connect_cong.fail(cong["slug"])
         return JSONResponse({"error": "bad_code"}, status_code=403)
     return {"ok": True, "device_token": h.db.add_device(cong["id"], body.device_name or "Mac"), "slug": cong["slug"],
-            "congregation": _public(cong)}
+            "congregation": _public(cong), "billing": cong["billing"]}
+
+
+# ------------------------------------------------------------------ billing: one-time own-key codes
+
+class OwnKeyCode(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    code: str = Field(max_length=40)
+
+
+@router.post("/api/hc/own-key-code/check")
+async def own_key_code_check(request: Request, body: OwnKeyCode):
+    """Is this an unused own-key code? Onboarding checks it before asking for the key; nothing is used up."""
+    h = _hear()
+    ip = _ip(request)
+    if wait := h.own_key_ip.locked(ip):
+        return _locked(wait)
+    if not h.db.own_key_code_ok(body.code):
+        h.own_key_ip.fail(ip)
+        return JSONResponse({"error": "bad_code"}, status_code=403)
+    return {"ok": True}
+
+
+@router.post("/api/hc/own-key-code")
+async def own_key_code_redeem(request: Request, body: OwnKeyCode):
+    """(device token) Use the code up: this congregation pays with its own Anthropic key from now on."""
+    cong = _device_congregation(request)
+    h = _hear()
+    ip = _ip(request)
+    if wait := h.own_key_ip.locked(ip):
+        return _locked(wait)
+    if not h.db.redeem_own_key_code(body.code, cong["id"]):
+        h.own_key_ip.fail(ip)
+        return JSONResponse({"error": "bad_code"}, status_code=403)
+    log.info("own-key code used by %s", cong["slug"])
+    return {"ok": True, "billing": "own_key"}
+
+
+@router.get("/api/hc/billing")
+async def billing(request: Request):
+    """(device token) How this congregation pays: "credits" or "own_key"."""
+    return {"billing": _device_congregation(request)["billing"]}
 
 
 # ------------------------------------------------------------------ listener side
@@ -571,11 +622,35 @@ async def admin_list(request: Request):
     for c in h.db.list_congregations():
         s = h.live.get(c["id"])
         out.append({**{k: c[k] for k in ("id", "slug", "church", "name", "unit_type", "stake", "address", "email",
-                                         "email_verified", "hidden", "created_at")},
+                                         "email_verified", "hidden", "created_at", "billing")},
                     "devices": len(h.db.devices(c["id"])), "live": s is not None,
                     "listeners": s.listeners() if s else 0,
                     "last_session": (h.db.sessions(c["id"]) or [{}])[-1].get("started_at")})
     return {"congregations": out}
+
+
+class NewOwnKeyCode(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    label: str = Field(min_length=1, max_length=120)
+
+
+@router.post("/api/admin/own-key-codes")
+async def admin_mint_own_key_code(request: Request, body: NewOwnKeyCode):
+    """A one-time own-key code for one church. Shown only in this answer: the hub keeps just its hash."""
+    from .. import main
+
+    main.require_operator(request)
+    code = _hear().db.mint_own_key_code(body.label)
+    log.info("own-key code made for %r", body.label)
+    return {"code": code, "label": body.label}
+
+
+@router.get("/api/admin/own-key-codes")
+async def admin_own_key_codes(request: Request):
+    from .. import main
+
+    main.require_operator(request)
+    return {"codes": _hear().db.own_key_codes()}
 
 
 @router.post("/api/admin/congregations/{cid}/hidden")
