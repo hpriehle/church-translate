@@ -23,7 +23,8 @@ An engine (the congregation's Mac) connects to /ws/engine with "Authorization: B
 A second device starting while the congregation is live is refused. If the engine's link drops the
 session stays open for hearchurch.grace_s (60 s) so a reconnect can resume it, then it ends.
 Credits: a new meeting of a credit-billed congregation with nothing left is refused here (`_start`, through
-Database.can_start); a running meeting, or one resuming after a drop or a hub restart, never is.
+Database.can_start); a running meeting, or one resuming after a drop or a hub restart, never is. Resuming after
+the grace counts only from the Mac (device token) that started that meeting, within 6 hours.
 """
 from __future__ import annotations
 
@@ -200,14 +201,17 @@ class Live:
                 who = old.link.name if old.link else "another Mac"
                 return refuse(f"{cong['name']} is already live (started on {who})."
                               + (" It may be reconnecting: try again in a minute." if old.link is None else ""))
-        # a meeting already under way (its link dropped past the grace, or this server restarted) is never refused
-        resuming = bool(m.get("resume")) and self.db.recent_session(cong["id"], str(m["resume"])[:40])
+        # a meeting already under way (its link dropped past the grace, or this server restarted) is never refused,
+        # but only the Mac that started it may carry it on
+        resuming = bool(m.get("resume")) and self.db.recent_session(cong["id"], str(m["resume"])[:40],
+                                                                    link.device["id"])
         if not resuming and not self.db.can_start(cong):
             b = self.db.balance(cong["id"])
             owed = f"-${-b['balance_usd']:.2f}" if b["balance_usd"] < 0 else f"${b['balance_usd']:.2f}"
             return refuse(f"{cong['name']} is out of credit (balance {owed}). Buy credit to start the next meeting.")
         code = time.strftime("%Y%m%d-%H%M%S")
-        db_id = self.db.start_session(cong["id"], offered, bool(m.get("trial")), code=code, billing=cong["billing"])
+        db_id = self.db.start_session(cong["id"], offered, bool(m.get("trial")), code=code, billing=cong["billing"],
+                                     device_id=link.device["id"])
         s = LiveSession(cong, link, db_id, code, offered, link.languages, self.stream)
         s.speaker = str(m.get("speaker") or "en")[:8]
         self.sessions[cong["id"]] = s

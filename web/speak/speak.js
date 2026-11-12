@@ -150,7 +150,65 @@
       : `${n} listener${n === 1 ? "" : "s"} connected`;
     const url = shownUrl(st.listener_url);
     if (url) $("listenUrl").textContent = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const notice = ((st.engine || {}).client || {}).notice || "";
+    if (notice !== lastNotice) {   // the hub refused or ended the meeting (e.g. out of credit): say so, refresh credit
+      lastNotice = notice;
+      if (notice) $("err").textContent = notice;
+      loadBilling();
+    }
   }
+
+  // ------------------------------------------------------------------ credit (Hear Church prepaid credits)
+  let lastNotice = "", fastUntil = 0;
+  const money = (usd) => (usd < 0 ? "-$" : "$") + Math.abs(usd).toFixed(2);
+  async function loadBilling() {
+    let b;
+    try {
+      const r = await fetch("/api/billing" + q, { cache: "no-store" });
+      if (!r.ok) return;
+      b = await r.json();
+    } catch { return; }
+    if (!b || !b.billing) { $("credit").hidden = true; return; }
+    $("credit").hidden = false;
+    const out = !!b.out_of_credit;
+    $("credit").classList.toggle("out", out);
+    if (b.billing !== "credits") {
+      $("creditLine").textContent = "Own Anthropic key";
+      $("creditSmall").textContent = b.message || "";
+      $("buyRow").hidden = true;
+      return;
+    }
+    $("creditLine").textContent = out ? "Out of credit: buy credit to start the next meeting"
+      : `${money(b.balance_usd)} credit · ${b.language_hours_left.toFixed(1)} language-hours left`;
+    $("creditSmall").textContent = (out ? `Balance ${money(b.balance_usd)}. ` : "")
+      + (b.balance.free_left_min > 0 ? `Includes ${(b.balance.free_left_min / 60).toFixed(1)} free language-hours. ` : "")
+      + `$${b.usd_per_language_hour} per language-hour of speech. A meeting that's running is never cut off.`
+      + (b.can_buy ? "" : " Buying credit isn't available yet.");
+    $("buyRow").hidden = !b.can_buy;
+    if (b.can_buy && !$("buyUsd").options.length)
+      for (const usd of b.buy_usd) $("buyUsd").add(new Option(`$${usd} · ${usd / b.usd_per_language_hour} h`, usd));
+  }
+
+  $("buyBtn").onclick = async () => {
+    $("buyBtn").disabled = true;
+    const tab = window.open("", "_blank");   // opened now, while it's still a click: popup blockers allow it
+    try {
+      const r = await fetch("/api/buy-credit" + q, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                     body: JSON.stringify({ usd: Number($("buyUsd").value) }) });
+      const a = await r.json().catch(() => ({}));
+      if (!r.ok || !a.url) throw new Error(a.message || a.detail || "Couldn't open the payment page.");
+      if (tab) tab.location = a.url; else location.href = a.url;
+      fastUntil = Date.now() + 10 * 60 * 1000;   // the credit arrives a few seconds after paying
+    } catch (e) {
+      if (tab) tab.close();
+      $("err").textContent = e.message || String(e);
+    } finally {
+      $("buyBtn").disabled = false;
+    }
+  };
+  setInterval(() => { if (Date.now() < fastUntil) loadBilling(); }, 10000);
+  setInterval(() => { if (Date.now() >= fastUntil) loadBilling(); }, 60000);
+  loadBilling();
 
   let feedDelay = 1000, f = null;
   setInterval(() => { if (f && f.readyState === 1) f.send(JSON.stringify({ type: "ping" })); }, 20000);

@@ -35,6 +35,15 @@
   .card .lc { font-size:.7rem; font-weight:700; color:#8b93a1; border:1px solid #3a414b; border-radius:4px; padding:0 .3rem; margin-right:.3rem; vertical-align:2px; }
   .card .meta { color:var(--mute); font-size:.75rem; margin-top:.15rem; }
   .card.skipped, .card.merged { opacity:.5; }
+  .credit { background:#161a1f; border:1px solid #262b33; border-radius:.8rem; padding:.7rem .85rem; margin:0 0 1rem; }
+  .credit.out { border-color:#7a2a2a; background:#2a1414; }
+  .credit .big-line { font-weight:650; }
+  .credit.out .big-line { color:#ff9a9a; }
+  .credit .small { color:var(--mute); font-size:.85rem; margin-top:.2rem; }
+  .credit .buy { display:flex; gap:.5rem; margin-top:.6rem; }
+  .credit select, .credit button { font:inherit; border-radius:.6rem; border:1px solid #3a414b; background:#1d2229; color:var(--fg); padding:.45rem .7rem; }
+  .credit button { flex:1; background:#1d5a33; border:0; color:#fff; font-weight:650; }
+  .credit button:disabled { opacity:.5; }
   .tip { color:var(--mute); font-size:.9rem; text-align:center; margin-top:1rem; }
   .tip a { color:#7fb2ff; }
 </style>
@@ -52,6 +61,15 @@
     <div id="status" class="status"></div>
     <div id="err" class="err"></div>
   </main>
+
+  <section id="credit" class="credit" hidden>
+    <div id="creditLine" class="big-line"></div>
+    <div id="creditSmall" class="small"></div>
+    <div id="buyRow" class="buy" hidden>
+      <select id="buyUsd" aria-label="Amount"></select>
+      <button id="buyBtn">Buy credit</button>
+    </div>
+  </section>
 
   <h2>Live translation</h2>
   <div id="feed"></div>

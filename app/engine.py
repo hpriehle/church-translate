@@ -443,6 +443,21 @@ class PublishClient(EngineClient):
         return {**super().info(), "mode": "publish", "live": self.running, "notice": self.notice,
                 "listeners": self.listeners if self.running else {"stream": 0, "captions": 0}}
 
+    async def hub_api(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict[str, Any]]:
+        """Call the hub's HTTP API with this Mac's device token (the operator page's balance and "Buy credit"):
+        wss://host/ws/engine → https://host<path>. Returns (status, JSON answer); raises httpx errors."""
+        import httpx
+
+        u = urlparse(self.url)
+        base = f"{'https' if u.scheme == 'wss' else 'http'}://{u.netloc}"
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.request(method, base + path, json=body, headers={"Authorization": f"Bearer {self.token}"})
+        try:
+            data = r.json()
+        except ValueError:
+            data = {}
+        return r.status_code, data if isinstance(data, dict) else {}
+
     async def _session(self, ws) -> None:
         M = _m()
         self._out = asyncio.Queue(maxsize=3000)

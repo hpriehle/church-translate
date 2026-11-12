@@ -27,6 +27,7 @@ dependencies = [
     "anthropic>=1.0",
     "unicode-rbnf>=2.4,<3",
     "sentence-stream>=1.2.1,<2",
+    "stripe>=11",
 ]
 
 [project.optional-dependencies]

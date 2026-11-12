@@ -1056,6 +1056,38 @@ async def api_speaker_password(request: Request):
             "message": "Speaker password saved. Earlier speaker sign-ins no longer work." if pw else "Speaker password removed."}
 
 
+async def _hub_billing_call(method: str, path: str, body: dict | None = None) -> JSONResponse:
+    from .engine import PublishClient
+
+    client = S.engine_client
+    if not isinstance(client, PublishClient):   # not a Hear Church congregation's Mac: nothing to show
+        return JSONResponse({"billing": None})
+    try:
+        status, data = await client.hub_api(method, path, body)
+    except Exception as e:
+        log.warning("hub billing call %s failed: %s", path, e)
+        return JSONResponse({"error": "unreachable", "message": "Can't reach Hear Church right now."}, status_code=502)
+    return JSONResponse(data, status_code=status)
+
+
+@app.get("/api/billing")
+async def api_billing(request: Request):
+    """The congregation's credit, from the hub (GET /api/hc/billing): for the speak page and the Mac app."""
+    require_speaker(request)
+    return await _hub_billing_call("GET", "/api/hc/billing")
+
+
+@app.post("/api/buy-credit")
+async def api_buy_credit(request: Request):
+    """{usd} → {url}: the hub's Stripe Checkout page for that much credit (POST /api/hc/checkout)."""
+    require_speaker(request)
+    try:
+        usd = int((await request.json()).get("usd"))
+    except (AttributeError, TypeError, ValueError):
+        raise HTTPException(400, "Say how many dollars.")
+    return await _hub_billing_call("POST", "/api/hc/checkout", {"usd": usd})
+
+
 CLAUDE_CREDENTIALS = {  # kind → (variable in data/secrets.env, how it starts, name for messages)
     "token": ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat", "subscription token"),
     "api_key": ("ANTHROPIC_API_KEY", "sk-ant-api", "API key"),

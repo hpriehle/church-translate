@@ -19,7 +19,12 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
                             asks for the code before the key, and the congregation only exists after sign-up.
   POST /api/hc/own-key-code (device token) {code} → {ok, billing: "own_key"}; uses the code up for this
                             congregation (asking again is fine). 403 bad_code (unknown, or used by another), 429 locked.
-  GET  /api/hc/billing      (device token) → {billing, balance: {left_min, free_left_min, balance_usd, can_start, …}}
+  GET  /api/hc/billing      (device token) → {billing, balance: {left_min, free_left_min, balance_usd, can_start, …},
+                            balance_usd, language_hours_left, out_of_credit, can_buy, buy_usd, message}
+  POST /api/hc/checkout     (device token) {usd} → {url}: a Stripe Checkout page (card only) for that much credit;
+                            503 not_configured without STRIPE_SECRET_KEY. Back to /api/hc/checkout/done or /cancelled.
+  POST /api/stripe/webhook  Stripe → hub, signed with STRIPE_WEBHOOK_SECRET: checkout.session.completed (paid) calls
+                            credit_top_up with its payment_intent and amount_total, once per payment.
   POST /api/admin/congregations/<id>/credits {payment_id, cents} (operator) → {created, credit, balance}: credit a
                             top-up. Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
                             payment's id); 409 when that id was credited with another amount or congregation.
@@ -40,7 +45,9 @@ from __future__ import annotations
 import asyncio
 import html
 import hmac
+import json
 import logging
+import os
 import re
 import time
 from datetime import datetime, timedelta
@@ -52,7 +59,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import HOME, LOG_DIR, WEB_DIR
-from .db import RESERVED_SLUGS, Database
+from .db import CENTS_PER_LANGUAGE_HOUR, RESERVED_SLUGS, Database
 from .geo import Geocoder, bounding_box, hide_coordinates_in_access_log, in_box
 from .live import Live
 from .mail import Mailer, RateLimiter
@@ -81,7 +88,7 @@ class Hear:
         self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
                        "signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
                        "email_addr": RateLimiter(3, 3600), "claim": RateLimiter(1200, 3600),
-                       "verify": RateLimiter(60, 3600)}
+                       "verify": RateLimiter(60, 3600), "checkout": RateLimiter(20, 3600)}
 
 
 class FailureLimiter:
@@ -426,14 +433,143 @@ async def own_key_code_redeem(request: Request, body: OwnKeyCode):
 @router.get("/api/hc/billing")
 async def billing(request: Request):
     """(device token) How this congregation pays ("credits" or "own_key") and what it has left."""
+    return billing_info(_device_congregation(request))
+
+
+def billing_info(cong: dict[str, Any]) -> dict[str, Any]:
+    """What the operator page and the app show: the balance in dollars and language-hours, whether the next
+    meeting can start, and whether credit can be bought here (Stripe set up on this server)."""
+    b = _hear().db.balance(cong["id"])
+    credits = cong["billing"] == "credits"
+    hours = round(b["left_min"] / 60, 2)
+    owed = f"-${-b['balance_usd']:.2f}" if b["balance_usd"] < 0 else f"${b['balance_usd']:.2f}"
+    if not credits:
+        message = "Translation is paid with your own Anthropic key."
+    elif not b["can_start"]:
+        message = f"Out of credit (balance {owed}). Buy credit to start the next meeting."
+    else:
+        free = f", {b['free_left_min'] / 60:.1f} of them free" if b["free_left_min"] > 0 else ""
+        message = f"Credit {owed} · {hours:.1f} language-hours left{free}."
+    return {"billing": cong["billing"], "balance": b, "balance_usd": b["balance_usd"],
+            "language_hours_left": hours if credits else None, "out_of_credit": credits and not b["can_start"],
+            "usd_per_language_hour": CENTS_PER_LANGUAGE_HOUR / 100, "can_buy": credits and bool(stripe_keys()[0]),
+            "buy_usd": list(BUY_USD), "buy_min_usd": BUY_MIN_USD, "buy_max_usd": BUY_MAX_USD, "message": message}
+
+
+# ------------------------------------------------------------------ billing: buying credit (Stripe Checkout)
+# Harrison's Stripe account (Automaddie). STRIPE_SECRET_KEY (sk_test_… / sk_live_…) creates Checkout sessions;
+# STRIPE_WEBHOOK_SECRET (whsec_…) checks the signature of what Stripe posts to /api/stripe/webhook. Without the
+# secret key the buy route answers 503 not_configured; without the webhook secret the webhook does. Only cards
+# are offered: a card is paid when Checkout completes, so checkout.session.completed with payment_status "paid"
+# is the one event that credits (a delayed method such as a bank debit would complete unpaid and be missed).
+
+BUY_USD = (10, 25, 50, 100)        # the amounts the operator page offers
+BUY_MIN_USD, BUY_MAX_USD = 5, 500  # one top-up, whole dollars ($5 = one language-hour)
+
+
+def stripe_keys() -> tuple[str, str]:
+    """(secret key, webhook signing secret) from the environment; "" when not set."""
+    return os.environ.get("STRIPE_SECRET_KEY", "").strip(), os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+
+
+def _stripe_client(key: str):
+    import stripe
+
+    return stripe.StripeClient(key)
+
+
+class Buy(BaseModel):
+    usd: int = Field(ge=BUY_MIN_USD, le=BUY_MAX_USD)
+
+
+@router.post("/api/hc/checkout")
+async def checkout(request: Request, body: Buy):
+    """(device token) {usd} → {url}: a Stripe Checkout page where the church pays for that much credit. 503
+    not_configured without a Stripe key on this server, 409 for a congregation that uses its own key."""
     cong = _device_congregation(request)
-    return {"billing": cong["billing"], "balance": _hear().db.balance(cong["id"])}
+    _limit(request, "checkout", f"cong{cong['id']}")
+    key = stripe_keys()[0]
+    if not key:
+        return JSONResponse({"error": "not_configured", "message": "Buying credit isn't set up on this server yet."},
+                            status_code=503)
+    if cong["billing"] != "credits":
+        raise HTTPException(409, "This congregation pays with its own Anthropic key.")
+    cents, base = body.usd * 100, _base_url(request)
+    meta = {"congregation_id": str(cong["id"]), "slug": cong["slug"], "cents": str(cents)}
+    hours = cents / CENTS_PER_LANGUAGE_HOUR
+    params = {
+        "mode": "payment",
+        "payment_method_types": ["card"],   # paid at checkout: nothing arrives later unpaid
+        "line_items": [{"quantity": 1, "price_data": {
+            "currency": "usd", "unit_amount": cents,
+            "product_data": {"name": "Hear Church credit",
+                             "description": f"{hours:g} language-hours of live translation for {display_name(cong)}"}}}],
+        "client_reference_id": str(cong["id"]),
+        "metadata": meta,
+        "payment_intent_data": {"metadata": meta, "description": f"Hear Church credit: {display_name(cong)}"},
+        "success_url": f"{base}/api/hc/checkout/done",
+        "cancel_url": f"{base}/api/hc/checkout/cancelled",
+    }
+    try:
+        session = await asyncio.to_thread(_stripe_client(key).v1.checkout.sessions.create, params)
+    except Exception as e:
+        log.warning("stripe checkout for %s failed: %s", cong["slug"], e)
+        raise HTTPException(502, "Stripe didn't answer: try again in a minute.")
+    log.info("checkout %s: $%d for %s", session.id, body.usd, cong["slug"])
+    return {"url": session.url, "id": session.id, "usd": body.usd}
+
+
+@router.get("/api/hc/checkout/done", response_class=HTMLResponse)
+async def checkout_done():
+    return _page("Thank you", "Your payment went through. The credit shows in Hear Church within a minute; "
+                              "you can close this page.")
+
+
+@router.get("/api/hc/checkout/cancelled", response_class=HTMLResponse)
+async def checkout_cancelled():
+    return _page("No payment made", "Nothing was charged. You can close this page and buy credit later.")
+
+
+@router.post("/api/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """Stripe → hub. checkout.session.completed and paid: credit the congregation once per payment intent (Stripe
+    sends an event again until it gets a 2xx, and may send it twice). 400 for a bad or stale signature; other
+    events are acknowledged and ignored. A payment that can't be credited (unknown congregation, id reused) is
+    logged and acknowledged, since a retry wouldn't change it; a database error answers 500 so Stripe retries."""
+    import stripe
+
+    secret = stripe_keys()[1]
+    if not secret:
+        return JSONResponse({"error": "not_configured"}, status_code=503)
+    payload = await request.body()
+    try:
+        stripe.Webhook.construct_event(payload, request.headers.get("stripe-signature", ""), secret)
+    except (ValueError, stripe.SignatureVerificationError):
+        raise HTTPException(400, "Bad signature.")
+    event = json.loads(payload)
+    if event.get("type") != "checkout.session.completed":
+        return {"ok": True, "credited": False}
+    s = (event.get("data") or {}).get("object") or {}
+    meta = s.get("metadata") or {}
+    if s.get("payment_status") != "paid" or s.get("mode") != "payment" or s.get("currency") != "usd":
+        log.warning("stripe: checkout %s not credited (%s, %s, %s)", s.get("id"), s.get("payment_status"),
+                    s.get("mode"), s.get("currency"))
+        return {"ok": True, "credited": False}
+    try:
+        cid = int(meta.get("congregation_id") or s.get("client_reference_id"))
+        cents = int(s["amount_total"])
+        credit, created = credit_top_up(cid, str(s.get("payment_intent") or s.get("id") or ""), cents)
+    except (KeyError, ValueError, TypeError) as e:
+        log.error("stripe: checkout %s paid but not credited: %r", s.get("id"), e)
+        return {"ok": True, "credited": False}
+    return {"ok": True, "credited": created, "credit_id": credit["id"]}
 
 
 def credit_top_up(cid: int, payment_id: str, cents: int) -> tuple[dict[str, Any], bool]:
-    """Credit a paid top-up to a congregation, once per payment: the entry point for the Stripe webhook (to come:
-    checkout.session.completed → its payment_intent id and amount_total). Returns (credit, created). KeyError for an
-    unknown congregation, ValueError for a bad amount or a payment id already used differently."""
+    """Credit a paid top-up to a congregation, once per payment: called by the Stripe webhook
+    (checkout.session.completed → its payment_intent id and amount_total) and the operator's admin route. Returns
+    (credit, created). KeyError for an unknown congregation, ValueError for a bad amount or a payment id already
+    used differently."""
     h = _hear()
     if h.db.congregation(cid) is None:
         raise KeyError(cid)

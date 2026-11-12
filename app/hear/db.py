@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at REAL,
     trial INTEGER NOT NULL DEFAULT 0,
     code TEXT,
-    billing TEXT NOT NULL DEFAULT 'credits'
+    billing TEXT NOT NULL DEFAULT 'credits',
+    device_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS speech (
     session_id INTEGER NOT NULL REFERENCES sessions(id),
@@ -218,6 +219,8 @@ class Database:
             if "billing" not in scols:   # sessions from before credits were all paid with the church's own key
                 self._db.execute("ALTER TABLE sessions ADD COLUMN billing TEXT NOT NULL DEFAULT 'credits'")
                 self._db.execute("UPDATE sessions SET billing = 'own_key'")
+            if "device_id" not in scols:   # the Mac that started it: only that one may carry it on (recent_session)
+                self._db.execute("ALTER TABLE sessions ADD COLUMN device_id INTEGER")
             self._db.execute("CREATE INDEX IF NOT EXISTS sessions_code ON sessions(congregation_id, code)")
         if close_stale:
             self.close_stale_sessions()
@@ -427,11 +430,13 @@ class Database:
 
     # ------------------------------------------------------------ sessions
     def start_session(self, cid: int, languages: list[str], trial: bool = False, code: str | None = None,
-                      billing: str = "credits") -> int:
-        """code: the hub's session code (the Mac's meter reports name it); billing: the congregation's mode now."""
-        return self._x("INSERT INTO sessions (congregation_id, languages, started_at, trial, code, billing)"
-                       " VALUES (?,?,?,?,?,?)", (cid, json.dumps(languages), time.time(), int(trial), code,
-                                                 "own_key" if billing == "own_key" else "credits")).lastrowid
+                      billing: str = "credits", device_id: int | None = None) -> int:
+        """code: the hub's session code (the Mac's meter reports name it); billing: the congregation's mode now;
+        device_id: the Mac that started it."""
+        return self._x("INSERT INTO sessions (congregation_id, languages, started_at, trial, code, billing, device_id)"
+                       " VALUES (?,?,?,?,?,?,?)", (cid, json.dumps(languages), time.time(), int(trial), code,
+                                                   "own_key" if billing == "own_key" else "credits",
+                                                   device_id)).lastrowid
 
     def end_session(self, sid: int) -> None:
         self._x("UPDATE sessions SET ended_at = COALESCE(ended_at, ?) WHERE id = ?", (time.time(), sid))
@@ -440,10 +445,12 @@ class Database:
         """A server restart ends every session that was still open."""
         self._x("UPDATE sessions SET ended_at = ? WHERE ended_at IS NULL", (time.time(),))
 
-    def recent_session(self, cid: int, code: str, within_s: float = 6 * 3600) -> bool:
-        """Did congregation `cid` start session `code` within the last `within_s`? (a meeting being resumed)"""
-        return bool(code and self._q("SELECT 1 FROM sessions WHERE congregation_id = ? AND code = ? AND started_at > ?",
-                                     (cid, code, time.time() - within_s)))
+    def recent_session(self, cid: int, code: str, device_id: int, within_s: float = 6 * 3600) -> bool:
+        """Did Mac `device_id` of congregation `cid` start session `code` within the last `within_s`? (a meeting
+        being resumed). Another Mac of the congregation can't use the code to start a meeting without credit; a
+        session from before device ids were kept matches no Mac."""
+        return bool(code and self._q("SELECT 1 FROM sessions WHERE congregation_id = ? AND code = ? AND device_id = ?"
+                                     " AND started_at > ?", (cid, code, device_id, time.time() - within_s)))
 
     def sessions(self, cid: int) -> list[dict[str, Any]]:
         rows = self._q("SELECT * FROM sessions WHERE congregation_id = ? ORDER BY id", (cid,))
