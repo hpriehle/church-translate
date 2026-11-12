@@ -13,10 +13,17 @@ An engine (the congregation's Mac) connects to /ws/engine with "Authorization: B
                  {"type": "hub", lang, msg, remember}  (a caption etc. for that language's listeners)
                  binary: one byte = index into hello.languages, then MP3 bytes
                  {"type": "session_stop"}
+                 {"type": "meter", session, items: [{seq, s, langs}]}   seconds of speech per chunk, in the
+                     languages someone listened to; any session of this congregation, also after it ended
   hub → engine   {"type": "session_started", session, resumed}   {"type": "session_refused", message}
                  {"type": "session_ended", message}   the hub closed the session itself (congregation hidden)
+                 {"type": "listeners", stream, captions, heard}   heard = languages with a phone on them now
+                 {"type": "meter_ok", session, seqs, unknown}   the items stored (resent ones too); unknown = no
+                     such session here, so the engine drops that report
 A second device starting while the congregation is live is refused. If the engine's link drops the
 session stays open for hearchurch.grace_s (60 s) so a reconnect can resume it, then it ends.
+Credits: a new meeting of a credit-billed congregation with nothing left is refused here (`_start`, through
+Database.can_start); a running meeting, or one resuming after a drop or a hub restart, never is.
 """
 from __future__ import annotations
 
@@ -38,6 +45,7 @@ _SKIP_KINDS = {"languages", "lang_state", "session", "status", "clip"}
 
 
 LISTENERS_EVERY_S = 5.0   # how often a live session tells its engine how many phones listen
+METER_MAX_ITEMS = 500     # items taken from one meter message (the engine sends far fewer)
 
 
 class Link:
@@ -79,6 +87,10 @@ class LiveSession:
 
     def captions(self) -> int:
         return sum(h.count for h in self.hubs.values())
+
+    def heard(self) -> list[str]:
+        """Languages someone is listening to or reading right now: only these are billed."""
+        return sorted(c for c in self.hubs if self.hubs[c].count or self.streams[c].listeners)
 
 
 class Live:
@@ -130,11 +142,11 @@ class Live:
                     item = await asyncio.wait_for(link.out.get(), LISTENERS_EVERY_S)
                 except asyncio.TimeoutError:
                     s = link.session
-                    count = (s.listeners(), s.captions()) if s else None
+                    count = (s.listeners(), s.captions(), s.heard()) if s else None
                     if count is None or count == reported:
                         continue
                     reported = count
-                    item = {"type": "listeners", "stream": count[0], "captions": count[1]}
+                    item = {"type": "listeners", "stream": count[0], "captions": count[1], "heard": count[2]}
                 await link.ws.send_text(json.dumps(item, ensure_ascii=False))
         except Exception:
             pass
@@ -158,6 +170,8 @@ class Live:
             self.end(link.session, notify=False)
         elif t == "hub" and link.session:
             self._caption(link.session, m)
+        elif t == "meter":
+            self._meter(link, m)
 
     def _start(self, link: Link, m: dict[str, Any]) -> None:
         def refuse(why: str) -> None:
@@ -186,8 +200,14 @@ class Live:
                 who = old.link.name if old.link else "another Mac"
                 return refuse(f"{cong['name']} is already live (started on {who})."
                               + (" It may be reconnecting: try again in a minute." if old.link is None else ""))
+        # a meeting already under way (its link dropped past the grace, or this server restarted) is never refused
+        resuming = bool(m.get("resume")) and self.db.recent_session(cong["id"], str(m["resume"])[:40])
+        if not resuming and not self.db.can_start(cong):
+            b = self.db.balance(cong["id"])
+            owed = f"-${-b['balance_usd']:.2f}" if b["balance_usd"] < 0 else f"${b['balance_usd']:.2f}"
+            return refuse(f"{cong['name']} is out of credit (balance {owed}). Buy credit to start the next meeting.")
         code = time.strftime("%Y%m%d-%H%M%S")
-        db_id = self.db.start_session(cong["id"], offered, bool(m.get("trial")))
+        db_id = self.db.start_session(cong["id"], offered, bool(m.get("trial")), code=code, billing=cong["billing"])
         s = LiveSession(cong, link, db_id, code, offered, link.languages, self.stream)
         s.speaker = str(m.get("speaker") or "en")[:8]
         self.sessions[cong["id"]] = s
@@ -224,6 +244,17 @@ class Live:
         elif msg.get("type") == "speaker":
             s.speaker = str(msg.get("speaker") or "en")[:8]
         hub.publish(msg, remember=bool(m.get("remember")))
+
+    def _meter(self, link: Link, m: dict[str, Any]) -> None:
+        """Store a speech report and acknowledge what was taken; the engine resends the rest later."""
+        code, items = str(m.get("session") or "")[:40], m.get("items")
+        try:
+            seqs = self.db.record_speech(link.device["congregation_id"],
+                                         code, items[:METER_MAX_ITEMS] if isinstance(items, list) else [])
+        except Exception:
+            log.exception("meter report not stored")
+            return  # not acknowledged: the engine sends it again
+        link.send({"type": "meter_ok", "session": code, "seqs": seqs or [], "unknown": seqs is None})
 
     def _mp3(self, link: Link, data: bytes) -> None:
         s = link.session

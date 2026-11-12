@@ -19,7 +19,10 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
                             asks for the code before the key, and the congregation only exists after sign-up.
   POST /api/hc/own-key-code (device token) {code} → {ok, billing: "own_key"}; uses the code up for this
                             congregation (asking again is fine). 403 bad_code (unknown, or used by another), 429 locked.
-  GET  /api/hc/billing      (device token) → {billing}
+  GET  /api/hc/billing      (device token) → {billing, balance: {left_min, free_left_min, balance_usd, can_start, …}}
+  POST /api/admin/congregations/<id>/credits {payment_id, cents} (operator) → {created, credit, balance}: credit a
+                            top-up. Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
+                            payment's id); 409 when that id was credited with another amount or congregation.
   POST /api/admin/own-key-codes {label} (operator) → {code, label}: the only time the code is shown.
   GET  /api/admin/own-key-codes (operator) → {codes: [{label, created_at, used_at, used_by}]}
 The claim secret stays with the app that asked, so a link opened by a mail scanner yields no token.
@@ -422,8 +425,22 @@ async def own_key_code_redeem(request: Request, body: OwnKeyCode):
 
 @router.get("/api/hc/billing")
 async def billing(request: Request):
-    """(device token) How this congregation pays: "credits" or "own_key"."""
-    return {"billing": _device_congregation(request)["billing"]}
+    """(device token) How this congregation pays ("credits" or "own_key") and what it has left."""
+    cong = _device_congregation(request)
+    return {"billing": cong["billing"], "balance": _hear().db.balance(cong["id"])}
+
+
+def credit_top_up(cid: int, payment_id: str, cents: int) -> tuple[dict[str, Any], bool]:
+    """Credit a paid top-up to a congregation, once per payment: the entry point for the Stripe webhook (to come:
+    checkout.session.completed → its payment_intent id and amount_total). Returns (credit, created). KeyError for an
+    unknown congregation, ValueError for a bad amount or a payment id already used differently."""
+    h = _hear()
+    if h.db.congregation(cid) is None:
+        raise KeyError(cid)
+    credit, created = h.db.add_credit(cid, payment_id, cents)
+    if created:
+        log.info("credit: %s cents to congregation %d (%s)", cents, cid, payment_id)
+    return credit, created
 
 
 # ------------------------------------------------------------------ listener side
@@ -625,7 +642,8 @@ async def admin_list(request: Request):
                                          "email_verified", "hidden", "created_at", "billing")},
                     "devices": len(h.db.devices(c["id"])), "live": s is not None,
                     "listeners": s.listeners() if s else 0,
-                    "last_session": (h.db.sessions(c["id"]) or [{}])[-1].get("started_at")})
+                    "last_session": (h.db.sessions(c["id"]) or [{}])[-1].get("started_at"),
+                    "balance": h.db.balance(c["id"])})
     return {"congregations": out}
 
 
@@ -651,6 +669,27 @@ async def admin_own_key_codes(request: Request):
 
     main.require_operator(request)
     return {"codes": _hear().db.own_key_codes()}
+
+
+class TopUp(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    payment_id: str = Field(min_length=1, max_length=255)
+    cents: int = Field(gt=0, le=10_000_000)
+
+
+@router.post("/api/admin/congregations/{cid}/credits")
+async def admin_credit(request: Request, cid: int, body: TopUp):
+    """Credit a top-up by hand (or from the Stripe step), idempotent on the payment id."""
+    from .. import main
+
+    main.require_operator(request)
+    try:
+        credit, created = credit_top_up(cid, body.payment_id, body.cents)
+    except KeyError:
+        raise HTTPException(404, "No such congregation.")
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"created": created, "credit": credit, "balance": _hear().db.balance(cid)}
 
 
 @router.post("/api/admin/congregations/{cid}/hidden")

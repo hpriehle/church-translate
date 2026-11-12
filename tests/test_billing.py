@@ -38,7 +38,7 @@ def test_only_the_hash_is_kept():
 def test_a_new_congregation_pays_with_credits(client, hear):
     hear.verify_email = False
     j = client.post("/api/hc/signup", json=SIGNUP).json()
-    assert client.get("/api/hc/billing", headers=bearer(j["device_token"])).json() == {"billing": "credits"}
+    assert client.get("/api/hc/billing", headers=bearer(j["device_token"])).json()["billing"] == "credits"
 
 
 def test_a_code_switches_one_congregation_to_its_own_key_once(client, hear):
@@ -49,12 +49,12 @@ def test_a_code_switches_one_congregation_to_its_own_key_once(client, hear):
     b, tb = make_cong(hear, "Thies Branch", "b@x.org")
     r = client.post("/api/hc/own-key-code", json={"code": code.lower()}, headers=bearer(ta))
     assert r.status_code == 200 and r.json() == {"ok": True, "billing": "own_key"}
-    assert client.get("/api/hc/billing", headers=bearer(ta)).json() == {"billing": "own_key"}
+    assert client.get("/api/hc/billing", headers=bearer(ta)).json()["billing"] == "own_key"
     # a retry from the same congregation is fine; anyone else is refused, and the code no longer checks out
     assert client.post("/api/hc/own-key-code", json={"code": code}, headers=bearer(ta)).status_code == 200
     r = client.post("/api/hc/own-key-code", json={"code": code}, headers=bearer(tb))
     assert r.status_code == 403 and r.json() == {"error": "bad_code"}
-    assert client.get("/api/hc/billing", headers=bearer(tb)).json() == {"billing": "credits"}
+    assert client.get("/api/hc/billing", headers=bearer(tb)).json()["billing"] == "credits"
     assert client.post("/api/hc/own-key-code/check", json={"code": code}).status_code == 403
     used = client.get("/api/admin/own-key-codes?key=boss").json()["codes"]
     assert used[0]["label"] == "Dakar Ward" and used[0]["used_by"] == "dakar-ward" and "code" not in used[0]

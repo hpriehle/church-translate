@@ -704,9 +704,10 @@ async def test_hub_reports_listener_counts_to_the_engine(server, hear, monkeypat
     await start(eng, ["fr"])
     ws_l, _ = await listener(server, "dakar-ward")
     m = await recv(eng, "listeners")
-    assert m == {"type": "listeners", "stream": 0, "captions": 1}
+    assert m == {"type": "listeners", "stream": 0, "captions": 1, "heard": ["fr"]}   # heard: what gets billed
     await ws_l.close()
-    assert (await recv(eng, "listeners"))["captions"] == 0                 # only sent again when it changes
+    m = await recv(eng, "listeners")                                       # only sent again when it changes
+    assert m["captions"] == 0 and m["heard"] == []
 
 
 # ------------------------------------------------------------------ finding a congregation on hearchurch.com

@@ -59,6 +59,9 @@ class Pipeline:
         self._caff = None
         self._usage_at_start: dict[str, dict[str, float]] = {}
         self.on_drained: Callable[[], None] | None = None
+        # called with (seq, seconds of speech, languages it is translated into) for every chunk Whisper heard words
+        # in: the Hear Church meter (engine.PublishClient). A tap must be quick and never raise into the meeting.
+        self.speech_taps: list[Callable[[int, float, list[str]], None]] = []
         self.library = Library(HOME / "scripture")   # published scripture wording (see scripture.py)
         self.refs = RefDetector(settings.scripture.max_verses)
         self._installing: dict[str, asyncio.Task] = {}
@@ -300,6 +303,11 @@ class Pipeline:
                 self._finalize(rec)
                 continue
             self.publish_rec(rec)
+            for tap in self.speech_taps:
+                try:
+                    tap(rec.seq, rec.voiced_s, list(chans))
+                except Exception:  # pragma: no cover - metering never stops a meeting
+                    log.exception("speech tap failed")
             if self.speaker == "en" and any(ch.scripture.enabled for ch in chans.values()):
                 refs = self.refs.feed(rec.en)
                 if refs:

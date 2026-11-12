@@ -24,6 +24,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -428,6 +429,15 @@ class PublishClient(EngineClient):
         self._offered: list[str] = []
         self.notice = ""                  # the hub's last refusal / ending of our session, for the operator page
         self.listeners = {"stream": 0, "captions": 0}  # phones on the hub, as it reports them
+        self.heard: set[str] = set()      # languages with a phone on them, as the hub reports them: only these are billed
+        self.meter: dict[str, dict[int, dict]] = {}   # session code → seq → speech not yet acknowledged by the hub
+
+    # Metering (credits): seconds of speech per chunk, in the languages someone listens to, are kept here and sent
+    # every METER_EVERY_S until the hub acknowledges them (so a dropped link only delays them; the hub stores each
+    # chunk once). At most METER_KEEP are kept: a hub that never answers can't grow the Mac's memory.
+    METER_EVERY_S = 15.0
+    METER_BATCH = 200
+    METER_KEEP = 20000
 
     def info(self) -> dict[str, Any]:
         return {**super().info(), "mode": "publish", "live": self.running, "notice": self.notice,
@@ -456,6 +466,10 @@ class PublishClient(EngineClient):
                     log.warning("hub refused the meeting: %s", self.notice)
                 elif msg.get("type") == "listeners":
                     self.listeners = {"stream": int(msg.get("stream") or 0), "captions": int(msg.get("captions") or 0)}
+                    if isinstance(msg.get("heard"), list):
+                        self.heard = {c for c in msg["heard"] if isinstance(c, str)}
+                elif msg.get("type") == "meter_ok":
+                    self._metered(msg)
                 elif msg.get("type") == "session_ended":  # the hub closed it (e.g. hidden): stop sending, don't re-announce
                     self.announced, self.running, self.session_code = False, False, ""
                     self.refused_run, self.notice = _m().S.pipeline.started_at, str(msg.get("message") or "ended by the server")
@@ -478,13 +492,52 @@ class PublishClient(EngineClient):
                     self._send(bytes([i]) + data)
             self._tap(ch.hub.taps, hub_tap)
             self._tap(ch.broadcaster.taps, mp3_tap)
+        taps = getattr(M.S.pipeline, "speech_taps", None)
+        if taps is not None:
+            self._tap(taps, self._speech)
+
+    def _speech(self, seq: int, seconds: float, langs: list[str]) -> None:
+        """A chunk of speech went out in `langs`: keep it for the hub's meter if someone hears it in this session."""
+        heard = sorted(c for c in langs if c in self.heard)
+        if not (self.running and self.session_code and seconds > 0 and heard):
+            return
+        self.meter.setdefault(self.session_code, {})[seq] = {"seq": seq, "s": round(float(seconds), 2), "langs": heard}
+        extra = sum(len(v) for v in self.meter.values()) - self.METER_KEEP
+        for code in list(self.meter):
+            while extra > 0 and self.meter[code]:
+                del self.meter[code][next(iter(self.meter[code]))]
+                extra -= 1
+            if not self.meter[code]:
+                del self.meter[code]
+
+    def _send_meter(self) -> None:
+        for code, items in list(self.meter.items()):
+            pending = list(items.values())
+            for i in range(0, len(pending), self.METER_BATCH):
+                self._send({"type": "meter", "session": code, "items": pending[i:i + self.METER_BATCH]})
+
+    def _metered(self, msg: dict[str, Any]) -> None:
+        code = msg.get("session")
+        items = self.meter.get(code)
+        if items is None:
+            return
+        if msg.get("unknown"):
+            items.clear()   # the hub has no such session (another hub, a lost database): nothing can be billed for it
+        for seq in msg.get("seqs") or []:
+            items.pop(seq, None)
+        if not items:
+            del self.meter[code]
 
     async def _publish_watch(self) -> None:
         """Announce a meeting started on this computer, follow its languages, and stop it when it is over."""
         M = _m()
         p = M.S.pipeline
+        metered = time.monotonic()
         while True:
             await asyncio.sleep(0.5)
+            if self.meter and time.monotonic() - metered >= self.METER_EVERY_S:
+                metered = time.monotonic()
+                self._send_meter()
             local = M.S.app_mode and M.S.settings.server.sharing == "local"   # this Wi-Fi only: not on the hub
             if local and self.announced:
                 self._send({"type": "session_stop"})
@@ -503,8 +556,9 @@ class PublishClient(EngineClient):
                 self._send({"type": "languages", "languages": self._offered})
 
     def _finish(self, lost: bool) -> None:
-        """The link dropped: stop relaying, keep the session code so the reconnect can resume the session."""
-        self.announced, self.running = False, False
+        """The link dropped: stop relaying, keep the session code so the reconnect can resume the session. Unsent
+        meter reports stay and go out on the next link."""
+        self.announced, self.running, self.heard = False, False, set()
         self._detach()
         if not _m().S.pipeline.running:
             self.session_code = ""

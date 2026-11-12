@@ -6,6 +6,12 @@ tokens and one-time own-key codes are stored only as SHA-256 hashes.
 Billing: a congregation pays with prepaid credits ("credits"), or with its own Anthropic key ("own_key"). Own key
 is only reached with a one-time code Harrison makes for that church (`python -m app.hear.codes mint "Dakar Ward"`).
 Congregations that existed before billing are grandfathered as "own_key": they were set up with their own keys.
+
+Metering and the ledger: the Mac reports seconds of speech per heard language (`record_speech`, idempotent on the
+session and the Mac's chunk number). A congregation's balance is its top-ups (`add_credit`, idempotent on the Stripe
+payment id) minus the language-minutes of its credit-billed sessions, after the free first hour. Each session keeps
+the billing mode it started under, so own-key meetings are metered but never debited, also after a switch to
+credits. The balance may go negative (a meeting is never cut off); `can_start` then refuses the next one.
 """
 from __future__ import annotations
 
@@ -57,7 +63,24 @@ CREATE TABLE IF NOT EXISTS sessions (
     languages TEXT NOT NULL,
     started_at REAL NOT NULL,
     ended_at REAL,
-    trial INTEGER NOT NULL DEFAULT 0
+    trial INTEGER NOT NULL DEFAULT 0,
+    code TEXT,
+    billing TEXT NOT NULL DEFAULT 'credits'
+);
+CREATE TABLE IF NOT EXISTS speech (
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    seq INTEGER NOT NULL,
+    lang TEXT NOT NULL,
+    seconds REAL NOT NULL,
+    PRIMARY KEY (session_id, seq, lang)
+);
+CREATE TABLE IF NOT EXISTS credits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+    payment_id TEXT NOT NULL UNIQUE,
+    cents INTEGER NOT NULL,
+    seconds REAL NOT NULL,
+    created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS email_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +104,14 @@ CREATE TABLE IF NOT EXISTS own_key_codes (
 );
 CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
 CREATE INDEX IF NOT EXISTS devices_cong ON devices(congregation_id);
+CREATE INDEX IF NOT EXISTS credits_cong ON credits(congregation_id);
 """
+
+# Prices (decided Nov 8): $5 per language-hour of speech, the first language-hour free per congregation.
+CENTS_PER_LANGUAGE_HOUR = 500
+FREE_SECONDS = 3600
+MAX_CHUNK_S = 60.0     # one reported chunk of speech is never longer than this (the chunker cuts far sooner)
+MAX_LANGS = 20
 
 CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", "city", "lat", "lng", "meeting_times",
                "timezone", "email", "email_verified", "created_at", "hidden", "billing")
@@ -182,6 +212,13 @@ class Database:
             if "billing" not in cols:   # databases made before credits: every congregation there brought its own key
                 self._db.execute("ALTER TABLE congregations ADD COLUMN billing TEXT NOT NULL DEFAULT 'credits'")
                 self._db.execute("UPDATE congregations SET billing = 'own_key'")
+            scols = {r[1] for r in self._db.execute("PRAGMA table_info(sessions)")}
+            if "code" not in scols:
+                self._db.execute("ALTER TABLE sessions ADD COLUMN code TEXT")
+            if "billing" not in scols:   # sessions from before credits were all paid with the church's own key
+                self._db.execute("ALTER TABLE sessions ADD COLUMN billing TEXT NOT NULL DEFAULT 'credits'")
+                self._db.execute("UPDATE sessions SET billing = 'own_key'")
+            self._db.execute("CREATE INDEX IF NOT EXISTS sessions_code ON sessions(congregation_id, code)")
         if close_stale:
             self.close_stale_sessions()
 
@@ -389,9 +426,12 @@ class Database:
         return "ok", r
 
     # ------------------------------------------------------------ sessions
-    def start_session(self, cid: int, languages: list[str], trial: bool = False) -> int:
-        return self._x("INSERT INTO sessions (congregation_id, languages, started_at, trial) VALUES (?,?,?,?)",
-                       (cid, json.dumps(languages), time.time(), int(trial))).lastrowid
+    def start_session(self, cid: int, languages: list[str], trial: bool = False, code: str | None = None,
+                      billing: str = "credits") -> int:
+        """code: the hub's session code (the Mac's meter reports name it); billing: the congregation's mode now."""
+        return self._x("INSERT INTO sessions (congregation_id, languages, started_at, trial, code, billing)"
+                       " VALUES (?,?,?,?,?,?)", (cid, json.dumps(languages), time.time(), int(trial), code,
+                                                 "own_key" if billing == "own_key" else "credits")).lastrowid
 
     def end_session(self, sid: int) -> None:
         self._x("UPDATE sessions SET ended_at = COALESCE(ended_at, ?) WHERE id = ?", (time.time(), sid))
@@ -400,6 +440,111 @@ class Database:
         """A server restart ends every session that was still open."""
         self._x("UPDATE sessions SET ended_at = ? WHERE ended_at IS NULL", (time.time(),))
 
+    def recent_session(self, cid: int, code: str, within_s: float = 6 * 3600) -> bool:
+        """Did congregation `cid` start session `code` within the last `within_s`? (a meeting being resumed)"""
+        return bool(code and self._q("SELECT 1 FROM sessions WHERE congregation_id = ? AND code = ? AND started_at > ?",
+                                     (cid, code, time.time() - within_s)))
+
     def sessions(self, cid: int) -> list[dict[str, Any]]:
         rows = self._q("SELECT * FROM sessions WHERE congregation_id = ? ORDER BY id", (cid,))
         return [{**dict(r), "languages": json.loads(r["languages"]), "trial": bool(r["trial"])} for r in rows]
+
+    # ------------------------------------------------------------ metering
+    def record_speech(self, cid: int, code: str, items: list) -> list[int] | None:
+        """Store the Mac's speech report for session `code` of congregation `cid`: items [{seq, s, langs}] = seconds
+        of speech in chunk `seq`, translated into `langs` that someone was listening to. Returns the seqs taken
+        (stored now or before: a resent report counts once), or None when the session is unknown. Malformed items
+        are skipped and not acknowledged; a chunk's length is capped at MAX_CHUNK_S."""
+        rows = self._q("SELECT id FROM sessions WHERE congregation_id = ? AND code = ? ORDER BY id DESC LIMIT 1",
+                       (cid, str(code or "")))
+        if not rows or not code:
+            return None
+        sid, taken = rows[0]["id"], []
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                for it in items if isinstance(items, list) else []:
+                    if not isinstance(it, dict):
+                        continue
+                    seq, s, langs = it.get("seq"), it.get("s"), it.get("langs")
+                    if (not isinstance(seq, int) or isinstance(seq, bool) or not isinstance(s, (int, float))
+                            or isinstance(s, bool) or not s > 0 or not isinstance(langs, list)):
+                        continue
+                    langs = sorted({l for l in langs if isinstance(l, str) and 0 < len(l) <= 12})[:MAX_LANGS]
+                    if not langs:
+                        continue
+                    if not self._db.execute("SELECT 1 FROM speech WHERE session_id = ? AND seq = ?",
+                                            (sid, seq)).fetchone():
+                        self._db.executemany("INSERT INTO speech (session_id, seq, lang, seconds) VALUES (?,?,?,?)",
+                                             [(sid, seq, l, min(float(s), MAX_CHUNK_S)) for l in langs])
+                    taken.append(seq)
+                self._db.execute("COMMIT")
+            except Exception:
+                self._db.execute("ROLLBACK")
+                raise
+        return taken
+
+    def speech_by_language(self, cid: int) -> dict[str, float]:
+        """Seconds of heard speech per language, over all of a congregation's sessions."""
+        rows = self._q("SELECT p.lang, SUM(p.seconds) AS s FROM speech p JOIN sessions s ON s.id = p.session_id"
+                       " WHERE s.congregation_id = ? GROUP BY p.lang ORDER BY p.lang", (cid,))
+        return {r["lang"]: round(r["s"], 2) for r in rows}
+
+    # ------------------------------------------------------------ credits (the ledger)
+    def add_credit(self, cid: int, payment_id: str, cents: int) -> tuple[dict[str, Any], bool]:
+        """Credit a top-up paid with Stripe payment `payment_id` ($5 buys a language-hour). Idempotent: the same
+        payment again returns the stored credit and False. ValueError for a blank id, a non-positive amount, or a
+        payment id already used with another amount or congregation."""
+        pid = (payment_id or "").strip()
+        if not pid or len(pid) > 255:
+            raise ValueError("a payment id is needed")
+        if not isinstance(cents, int) or isinstance(cents, bool) or cents <= 0:
+            raise ValueError("the amount must be a positive number of cents")
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._db.execute("SELECT * FROM credits WHERE payment_id = ?", (pid,)).fetchone()
+                if row is not None:
+                    self._db.execute("ROLLBACK")
+                    if row["congregation_id"] != cid or row["cents"] != cents:
+                        raise ValueError("that payment was already credited with another amount or congregation")
+                    return dict(row), False
+                cur = self._db.execute("INSERT INTO credits (congregation_id, payment_id, cents, seconds, created_at)"
+                                       " VALUES (?,?,?,?,?)",
+                                       (cid, pid, cents, cents * 3600 / CENTS_PER_LANGUAGE_HOUR, time.time()))
+                row = self._db.execute("SELECT * FROM credits WHERE id = ?", (cur.lastrowid,)).fetchone()
+                self._db.execute("COMMIT")
+                return dict(row), True
+            except ValueError:
+                raise
+            except Exception:
+                self._db.execute("ROLLBACK")
+                raise
+
+    def credits(self, cid: int) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._q("SELECT * FROM credits WHERE congregation_id = ? ORDER BY id", (cid,))]
+
+    def balance(self, cid: int) -> dict[str, Any]:
+        """Where a congregation stands, in language-minutes (and dollars for what was bought):
+        metered_min  all heard speech, own-key meetings included (stats)
+        used_min     what its credit-billed meetings used; the free hour goes first
+        free_left_min, balance_min / balance_usd (bought minus used beyond the free hour; may be negative),
+        bought_usd, left_min (free + balance), can_start (False only for credits with nothing left)."""
+        (metered, used), = self._q(
+            "SELECT COALESCE(SUM(p.seconds), 0), COALESCE(SUM(CASE WHEN s.billing = 'credits' THEN p.seconds END), 0)"
+            " FROM speech p JOIN sessions s ON s.id = p.session_id WHERE s.congregation_id = ?", (cid,))
+        (cents, bought), = self._q("SELECT COALESCE(SUM(cents), 0), COALESCE(SUM(seconds), 0) FROM credits"
+                                   " WHERE congregation_id = ?", (cid,))
+        free_left = max(0.0, FREE_SECONDS - used)
+        bal = bought - max(0.0, used - FREE_SECONDS)
+        cong = self.congregation(cid)
+        return {"metered_min": round(metered / 60, 2), "used_min": round(used / 60, 2),
+                "free_left_min": round(free_left / 60, 2), "balance_min": round(bal / 60, 2),
+                "balance_usd": round(bal / 3600 * CENTS_PER_LANGUAGE_HOUR / 100, 2), "bought_usd": round(cents / 100, 2),
+                "left_min": round((free_left + bal) / 60, 2),
+                "can_start": (cong or {}).get("billing") == "own_key" or free_left + bal > 0}
+
+    def can_start(self, cong: dict[str, Any]) -> bool:
+        """May this congregation start a new meeting? Own key: always. Credits: while the free hour or the balance
+        has something left. A meeting already running is never stopped; only the next one waits for a top-up."""
+        return cong["billing"] == "own_key" or self.balance(cong["id"])["can_start"]
