@@ -1,0 +1,62 @@
+---
+// /pricing: prepaid credits, $5 per language-hour of speech, first hour free (decided 2026-11-08).
+// Every number here must match the billing code (docs/seo-site-structure.md, "Pricing"). Deploying site/ publishes it.
+import Base from "../layouts/Base.astro";
+
+const faq = [
+  ["What does a typical meeting cost?",
+   "A 70-minute meeting usually has about 50 minutes of speaking. Translated into two languages, that is 100 language-minutes, about $8.33. Into one language, about $4.17."],
+  ["What counts as speech?",
+   "The minutes when someone is speaking and Hear Church is translating. Hymns, music, prayers you choose not to translate and silence aren't counted."],
+  ["Do listeners pay anything?",
+   "No. Listeners open your congregation's link or scan its QR code. They have nothing to install, no account and nothing to pay."],
+  ["Is there a monthly plan or contract?",
+   "No. You buy credit in advance and use it as you go. Church use comes and goes, so you only pay for meetings you translate."],
+];
+
+const schema = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: faq.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+};
+---
+<Base
+  title="Church Translation Pricing, by the Hour | Hear Church"
+  description="Hear Church pricing: $5 per language per hour of speech, prepaid, with the first hour free. Hymns, music and silence aren't billed. No monthly plan."
+  schema={schema}>
+  <article class="wrap">
+    <header class="head prose">
+      <h1>Church translation pricing</h1>
+      <p class="lede">You pay only for the time someone is speaking, in each language your members hear. The first hour is free.</p>
+    </header>
+    <div class="prose">
+      <h2>$5 per language per hour of speech</h2>
+      <p>Buy credit in advance in the Hear Church app and use it as you go. A meeting translated into two languages uses two language-hours for each hour of speaking. Hymns, music and silence aren't counted.</p>
+      <ul>
+        <li><b>First hour free</b> for every new congregation, so you can try it on a real Sunday first.</li>
+        <li><b>Prepaid.</b> You see your balance in the app before every meeting.</li>
+        <li><b>No monthly plan.</b> You only pay for meetings you translate.</li>
+      </ul>
+
+      <h2>A meeting is never cut off</h2>
+      <p>If the balance runs out during a meeting, translation carries on to the end. The next top-up pays for that time first.</p>
+
+      <h2>Questions</h2>
+      <dl class="faq">
+        {faq.map(([q, a]) => <><dt>{q}</dt><dd>{a}</dd></>)}
+      </dl>
+
+      <div class="ctas">
+        <a class="get" href="/download">Download for Mac</a>
+        <a class="second" href="/how-it-works">How it works</a>
+      </div>
+    </div>
+  </article>
+</Base>
+
+<style>
+.head { padding: clamp(1.5rem, 5vh, 3rem) 0 1rem; }
+article { padding-bottom: clamp(3rem, 8vh, 5rem); }
+.prose ul { padding-left: 1.2rem; }
+.prose li { margin-bottom: .6rem; }
+</style>

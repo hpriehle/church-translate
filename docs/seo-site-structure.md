@@ -16,7 +16,7 @@ the site must match what Hear Church actually does (see "Product facts").
 | Blog | `/blog/<title>`. |
 | Main button | "Download for Mac" until billing ships, then "Start free" (the first hour is free). Second button: "Try the demo". |
 | Demo | `/demo`, a recorded sample talk with captions and voice in each language, laid out like the listener page. |
-| Pricing | Prepaid credits, $5 per language-hour. `/pricing` is built now but goes live **when billing ships**. |
+| Pricing | Prepaid credits, $5 per language-hour. First hour free. `/pricing` is in the nav and linked from `/download` (2026-11-12: no more "free, bring your own key" copy). |
 | Silence | Not billed. Only minutes with speech count. This changes the billing plan in `hear-church-plan.md`, which says "deducted per minute while a meeting runs". |
 | Language pages | The four supported languages, plus pages for planned ones, marked "coming soon". |
 | Features page | Current features, plus a labelled "Planned" section. |
@@ -34,7 +34,7 @@ hearchurch.com/
 
   /how-it-works  /features  /setup  /faq  /demo
   /download                 Exists. Restyle to match the site.
-  /pricing                  Built now, published when billing ships
+  /pricing                  Prepaid credits; published with the next site deploy
   /lds  /small-churches  /multilingual
   /languages
   /languages/french  /languages/wolof  /languages/spanish  /languages/russian
@@ -118,7 +118,7 @@ already uses the name. None of the paths above were taken on 2026-11-09.
 4. Build `/`, `/how-it-works`, `/lds`, `/demo`, `/blog/` and `/blog/sacrament-meeting-translation`,
    and restyle `/download`.
 5. Add `sitemap.xml` and `robots.txt`, and submit the sitemap in Search Console.
-6. Build `/pricing` but hold it back until billing ships.
+6. Build `/pricing` (done 2026-11-12; it goes live with the next deploy).
 7. Register the site with local-website-engine.
 
 **Phase 2**
@@ -149,6 +149,5 @@ The blog topic list in the v2 draft still applies, apart from claims these facts
   belongs in the nav or footer. New top-level paths also go in `SITE_PAGES` in `app/hear/db.py`.
 - Paths the Worker's routes catch but doesn't own, such as a congregation at `/lds-harlem`, are
   passed through to the VPS unchanged.
-- `/pricing` is `site/src/pages/_pricing.astro`. The underscore keeps it out of the build until
-  billing ships.
+- `/pricing` is `site/src/pages/pricing.astro`. Check every number in it against the billing code.
 - `/demo` waits for a recording we have permission to publish.

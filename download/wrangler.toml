@@ -27,6 +27,7 @@ routes = [
   { pattern = "hearchurch.com/", zone_name = "hearchurch.com" },
   { pattern = "www.hearchurch.com/", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/how-it-works*", zone_name = "hearchurch.com" },
+  { pattern = "hearchurch.com/pricing", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/lds*", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/blog*", zone_name = "hearchurch.com" },
 ]

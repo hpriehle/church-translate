@@ -16,7 +16,7 @@ const faq = [
   ["How accurate is it?",
    "It is machine translation, so it will make mistakes, most often with names. Add your congregation's names in the app so they come through correctly."],
   ["What does it cost?",
-   "The app is free to download. Today the translating is done by Claude, using your own Anthropic API key, and Anthropic bills you for what you use."],
+   "Translation is $5 per language per hour of speech, bought in advance as credit, and the first hour is free. Hymns, music and silence aren't counted, and listeners pay nothing. See hearchurch.com/pricing."],
 ];
 
 const schema = [
@@ -29,7 +29,8 @@ const schema = [
     description: "Live translation for church meetings. A Mac translates the service as it's spoken, and listeners follow along on their own phones with captions and a spoken voice.",
     url: "https://hearchurch.com/",
     downloadUrl: "https://hearchurch.com/download",
-    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    offers: { "@type": "Offer", price: "5.00", priceCurrency: "USD", url: "https://hearchurch.com/pricing",
+              description: "Prepaid credit: $5 per language per hour of speech. The first hour is free." },
   },
   {
     "@context": "https://schema.org",

@@ -38,10 +38,10 @@ const INDEXNOW_KEY = "b8a8b0718483acd04cef33be1f6d395c";
 
 // The marketing pages, built from site/ by Astro (docs/seo-site-structure.md). A page is live when its path matches
 // here, has a route in wrangler.toml and is in the sitemap; site/src/site.js lists the same pages.
-const SITE_PAGE = /^(\/(how-it-works|lds|blog)(\/[a-z0-9-]+)?)?$/;
+const SITE_PAGE = /^(\/(how-it-works|pricing|lds|blog)(\/[a-z0-9-]+)?)?$/;
 // Everything else this Worker answers itself.
 const OWN = /^\/(download(\/.*)?|appcast(?:-intel)?\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
-const SITE_PATHS = ["/", "/how-it-works", "/lds", "/blog", "/blog/sacrament-meeting-translation"];
+const SITE_PATHS = ["/", "/how-it-works", "/pricing", "/lds", "/blog", "/blog/sacrament-meeting-translation"];
 
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
