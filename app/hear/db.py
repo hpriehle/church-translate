@@ -459,6 +459,12 @@ class Database:
         return bool(code and self._q("SELECT 1 FROM sessions WHERE congregation_id = ? AND code = ? AND device_id = ?"
                                      " AND started_at > ?", (cid, code, device_id, time.time() - within_s)))
 
+    def ended_lately(self, cid: int, device_id: int, within_s: float) -> bool:
+        """Did Mac `device_id` end a meeting of congregation `cid` in the last `within_s`? (its last sentences may
+        still be on their way through the translator)"""
+        return bool(self._q("SELECT 1 FROM sessions WHERE congregation_id = ? AND device_id = ? AND ended_at > ?",
+                            (cid, device_id, time.time() - within_s)))
+
     def sessions(self, cid: int) -> list[dict[str, Any]]:
         rows = self._q("SELECT * FROM sessions WHERE congregation_id = ? ORDER BY id", (cid,))
         return [{**dict(r), "languages": json.loads(r["languages"]), "trial": bool(r["trial"])} for r in rows]

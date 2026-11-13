@@ -119,7 +119,7 @@
 
   // Claude credentials are write-only: the page only learns which kind is in use.
   const ACCESS = { token: "Subscription token (saved on this server)", api_key: "API key (saved on this server)",
-                   login: "This computer's own Claude login" };
+                   login: "This computer's own Claude login", credits: "Hear Church credits (no key needed)" };
   async function saveAccess(kind, value) {
     try {
       const r = await api("/api/claude-access", { kind, value });

@@ -319,6 +319,7 @@ class EngineClient:
         finally:
             sender.cancel()
             watcher.cancel()
+            billing.cancel()
             self._out = None
 
     async def _sender(self, ws, q: asyncio.Queue) -> None:
@@ -467,6 +468,7 @@ class PublishClient(EngineClient):
                     "stream": {"sample_rate": st.sample_rate, "bitrate_kbps": st.bitrate_kbps}, "busy": False})
         self._attach()
         watcher = asyncio.create_task(self._publish_watch())
+        billing = asyncio.create_task(self._learn_billing())
         try:
             async for m in ws:
                 if isinstance(m, bytes):
@@ -492,7 +494,19 @@ class PublishClient(EngineClient):
         finally:
             sender.cancel()
             watcher.cancel()
+            billing.cancel()
             self._out = None
+
+    async def _learn_billing(self) -> None:
+        """How the congregation pays decides how the translators reach Claude (credits: through the hub). Asked on
+        every connect; a hub that doesn't answer leaves things as they are."""
+        try:
+            status, data = await self.hub_api("GET", "/api/hc/billing")
+        except Exception as e:
+            log.info("billing not known yet: %s", e)
+            return
+        if status == 200:
+            _m().use_billing(str(data.get("billing") or ""))
 
     def _attach(self) -> None:
         """Relay everything while a session is announced; the hub ignores it otherwise."""

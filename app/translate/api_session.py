@@ -42,6 +42,21 @@ def api_key() -> str:
     return os.environ.get("ANTHROPIC_API_KEY") or load_secrets().get("ANTHROPIC_API_KEY", "")
 
 
+def request_params(model: str, system: str, messages: list, effort: str) -> dict[str, Any]:
+    """One translation turn, as sent to the API: from the Mac with the church's key, or by the hub with ours
+    (app/hear/proxy.py), so both behave the same."""
+    return dict(
+        model=model,
+        max_tokens=MAX_TOKENS,
+        system=system,
+        messages=messages,
+        cache_control={"type": "ephemeral"},   # caches the whole conversation so far
+        output_config={"effort": effort} if effort else anthropic.omit,
+        betas=[FALLBACK_BETA],
+        fallbacks="default",                   # a declined sentence is retried on another model
+    )
+
+
 def cost_usd(model: str, u: Usage) -> float:
     p_in, p_out, p_read, p_write = PRICES.get(model, PRICES["claude-opus-5-5"])
     return (u.input * p_in + u.output * p_out + u.cache_read * p_read + u.cache_write * p_write) / 1e6
@@ -98,19 +113,11 @@ class ApiSession:
         self.messages.append({"role": "user", "content": text})
         try:
             resp = await self.client.beta.messages.create(
-                model=self.model,
-                max_tokens=MAX_TOKENS,
-                system=self.system_prompt,
-                messages=self.messages,
-                cache_control={"type": "ephemeral"},   # caches the whole conversation so far
-                output_config={"effort": self.effort} if self.effort else anthropic.omit,
-                betas=[FALLBACK_BETA],
-                fallbacks="default",                   # a declined sentence is retried on another model
-            )
-        except anthropic.APIError as e:
+                **request_params(self.model, self.system_prompt, self.messages, self.effort))
+        except self.errors as e:
             self.messages.pop()                        # unanswered: keep the conversation well-formed
-            self.last_error = _describe(e)
-            if isinstance(e, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+            self.last_error = self.describe(e)
+            if self.fatal(e):
                 self.alive = False                     # a bad key won't get better by retrying this session
             raise RuntimeError(f"claude error: {self.last_error}") from e
         finally:
@@ -126,6 +133,15 @@ class ApiSession:
             # (clean_output keeps it from listeners).
             del self.messages[-2:]
         return text
+
+    # What a failed request raises, how it reads on the operator page, and whether this session is done for.
+    errors: tuple[type[BaseException], ...] = (anthropic.APIError,)
+
+    def describe(self, e: BaseException) -> str:
+        return _describe(e)
+
+    def fatal(self, e: BaseException) -> bool:
+        return isinstance(e, (anthropic.AuthenticationError, anthropic.PermissionDeniedError))
 
     def _count(self, u: Any) -> None:
         step = Usage(input=u.input_tokens or 0, cache_read=getattr(u, "cache_read_input_tokens", 0) or 0,

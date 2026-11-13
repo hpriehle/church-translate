@@ -18,6 +18,7 @@ from typing import Any
 from ..config import TranslateCfg
 from ..languages import LANGUAGES, Language
 from .api_session import ApiSession
+from .hub_session import HubSession
 from .claude_session import ClaudeSession, Usage, claude_binary
 from .ollama import OllamaClient
 from ..profanity import censor
@@ -48,6 +49,7 @@ def _swallow(task: asyncio.Task) -> None:
 # NO_FALLBACK_TIMEOUT_S for this reply. The channel merges sentences that queue up meanwhile, and a
 # session stuck for HUNG_AFTER_S is replaced.
 NO_FALLBACK_TIMEOUT_S = 30.0
+SESSION_TYPES = {"api": ApiSession, "hub": HubSession, "cli": ClaudeSession}
 NO_FALLBACK_WAIT_S = 30.0
 
 
@@ -82,7 +84,7 @@ class Translator:
         # Checked live: the Mac app may install Claude Code after the engine started (subscription token).
         if self._has_claude is not None:
             return self._has_claude
-        return self.cfg.backend == "api" or claude_binary() is not None
+        return self.cfg.backend in ("api", "hub") or claude_binary() is not None
 
     @has_claude.setter
     def has_claude(self, value: bool) -> None:
@@ -208,7 +210,7 @@ class Translator:
                 asyncio.create_task(self._retire(old))
 
     async def _prepare_standby(self) -> None:
-        session_type = ApiSession if self.cfg.backend == "api" else ClaudeSession
+        session_type = SESSION_TYPES.get(self.cfg.backend, ClaudeSession)
         s = session_type(self.system_prompt, self.cfg.claude_model, self.cfg.claude_effort, self.workdir / self.lang.code)
         try:
             await s.start()

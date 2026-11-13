@@ -26,6 +26,7 @@ from .broadcast.stream import Mp3Broadcaster
 from .channel import Channel
 from .engine import EngineClient, EngineHub, PublishClient
 from .hear import api as hear_api
+from .hear import proxy as hear_proxy
 from .config import (HOME, ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
 from .languages import AUTO, LANGUAGES, SPEAKER_LANGUAGES
@@ -210,7 +211,7 @@ def full_status() -> dict[str, Any]:
                       "captions": sum(ch.hub.count for ch in S.pipeline.channels.values())},
         "listener_url": listener_url(),
         "tunnel": S.tunnel,
-        "claude_access": claude_access(),
+        "claude_access": "credits" if S.settings.translate.backend == "hub" else claude_access(),
         "app_mode": S.app_mode,
         "sharing": S.settings.server.sharing,
         # The microphone of the running meeting: null when no microphone is in use / all is well.
@@ -238,6 +239,37 @@ async def tunnel_loop() -> None:
             await asyncio.sleep(5)
 
 
+def app_backend(billing: str = "") -> str:
+    """How the Mac app's engine reaches Claude. billing "credits" (the hub says so): through the hub, whatever key
+    may be lying around. "own_key": the church's key, straight to the API. Not known yet (the hub not reached):
+    the key if the app passed one, else the hub. Unadvertised: a Claude subscription token (sk-ant-oat…) only
+    works through Claude Code itself."""
+    if billing == "credits":
+        return "hub"
+    access = claude_access()
+    if access == "token":
+        return "cli"
+    if access == "api_key" or billing == "own_key":
+        return "api"
+    eng = S.settings.engine
+    return "hub" if eng.hub_url and eng.device_token else "api"
+
+
+def use_billing(billing: str) -> None:
+    """The hub told this Mac how its congregation pays (on every connect): switch the translators' backend if that
+    changed (e.g. a church that redeemed an own-key code, or one moved to credits)."""
+    if not S.app_mode or billing not in ("credits", "own_key"):
+        return
+    want = app_backend(billing)
+    if want == S.settings.translate.backend:
+        return
+    log.info("billing %s: translating through %s (was %s)", billing, want, S.settings.translate.backend)
+    S.settings.translate.backend = want
+    for ch in S.pipeline.channels.values():
+        ch.translator.cfg.backend = want
+        ch.translator.restart_claude()
+
+
 async def status_loop() -> None:
     while True:
         await asyncio.sleep(1.0)
@@ -252,12 +284,10 @@ async def lifespan(app: FastAPI):
         S.settings.server.port = S.port_override
     if S.mode_override:
         S.settings.translate.mode = S.mode_override
-    if S.app_mode:  # no Ollama inside the app: the congregation's own API key, straight to the API
+    if S.app_mode:  # no Ollama inside the app: Claude through the hub on credits, or the congregation's own key
         S.settings.translate.mode = "claude"
-        S.settings.translate.backend = "api"
-        # Unadvertised: a Claude subscription token (sk-ant-oat…) only works through Claude Code itself.
-        if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") and not os.environ.get("ANTHROPIC_API_KEY"):
-            S.settings.translate.backend = "cli"
+        S.settings.translate.backend = app_backend()
+        if S.settings.translate.backend == "cli":
             from .translate.claude_session import ensure_claude_cli
 
             asyncio.create_task(asyncio.to_thread(ensure_claude_cli))
@@ -401,6 +431,7 @@ def _shutdown() -> None:
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 app.include_router(hear_api.router)  # Hear Church: sign-up, /find, /ws/engine, /admin (and /<slug> at the end)
+app.include_router(hear_proxy.router)  # Hear Church: translation on credits (POST /api/hc/translate)
 
 
 _LISTEN_PATHS = re.compile(r"^/(|s/[^/]+|stream\.mp3|stream/[a-z]+\.mp3|clips/[a-z]+/\d+\.mp3|qr\.svg"

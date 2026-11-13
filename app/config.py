@@ -113,7 +113,8 @@ class SttCfg(BaseModel):
 class TranslateCfg(BaseModel):
     mode: str = "auto"
     backend: str = "cli"       # how Claude is reached: "cli" = the `claude` CLI (subscription or key),
-                               # "api" = the Anthropic API directly with ANTHROPIC_API_KEY (the Mac app)
+                               # "api" = the Anthropic API directly with ANTHROPIC_API_KEY (the Mac app, own key),
+                               # "hub" = through the Hear Church hub on the congregation's credits (no key here)
     claude_model: str = "opus"
     claude_effort: str = "low"
     claude_timeout_s: float = 6.0

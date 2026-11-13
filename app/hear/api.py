@@ -26,6 +26,7 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
   POST /api/stripe/webhook  Stripe → hub, signed with STRIPE_WEBHOOK_SECRET: checkout.session.completed (paid) calls
                             credit_top_up with its payment_intent and amount_total, once per payment;
                             charge.refunded takes amount_refunded back off the top-up with that payment_intent.
+  POST /api/hc/translate    (device token) translation on credits through the hub's Anthropic key (app/hear/proxy.py).
   POST /api/admin/congregations/<id>/credits {payment_id, cents} (operator) → {created, credit, balance}: credit a
                             top-up. Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
                             payment's id); 409 when that id was credited with another amount or congregation.
@@ -260,13 +261,18 @@ async def _town(lat: float | None, lng: float | None) -> str:
 
 
 def _device_congregation(request: Request) -> dict[str, Any]:
+    return device_and_congregation(request)[1]
+
+
+def device_and_congregation(request: Request) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The Mac (device token in "Authorization: Bearer …") and its congregation; 403 for anyone else."""
     h = _hear()
     auth = request.headers.get("authorization", "")
     device = h.db.device_by_token(auth[7:]) if auth.startswith("Bearer ") else None
     cong = h.db.congregation(device["congregation_id"]) if device else None
     if cong is None or cong["hidden"]:
         raise HTTPException(403, "Unknown device: sign in again.")
-    return cong
+    return device, cong
 
 
 class Location(BaseModel):
