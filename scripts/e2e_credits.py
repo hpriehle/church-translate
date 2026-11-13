@@ -43,7 +43,7 @@ import websockets
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ENV = Path("~/.config/hearchurch/stripe-test.env").expanduser()
-STRIPE_VARS = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET")
+STRIPE_VARS = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PAYMENT_METHOD_CONFIG")
 USD_PER_LANGUAGE_HOUR = 5.0
 FREE_MIN = 60
 

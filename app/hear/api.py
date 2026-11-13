@@ -517,6 +517,9 @@ async def checkout(request: Request, body: Buy):
         "success_url": f"{base}/api/hc/checkout/done",
         "cancel_url": f"{base}/api/hc/checkout/cancelled",
     }
+    pmc = os.environ.get("STRIPE_PAYMENT_METHOD_CONFIG", "").strip()   # Hear Church's own set: card, wallets, Link
+    if pmc:
+        params["payment_method_configuration"] = pmc
     try:
         session = await asyncio.to_thread(_stripe_client(key).v1.checkout.sessions.create, params)
     except Exception as e:

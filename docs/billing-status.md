@@ -281,3 +281,6 @@ same 5 known Linux failures.
 - Wi-Fi-only billing counts every listener connection on the Mac, including a listening page opened on the Mac
   itself (localhost), not only phones.
 - The balance in the Mac app's own window (Swift), if wanted.
+
+## Stripe payment methods (chat/hc-checkoutfix, Nov 12)
+Stripe refuses `payment_method_types` on Checkout now. The hub passes `payment_method_configuration` from env `STRIPE_PAYMENT_METHOD_CONFIG` (optional). Test mode: "Hear Church" config pmc_1UbAjMK0BHzgWcTPV0fZxOrY (card, Apple Pay, Google Pay, Link). Live mode needs its own config (and Harrison's yes). Delayed payments credit on `checkout.session.async_payment_succeeded`; the test webhook listens to checkout.session.completed, checkout.session.async_payment_succeeded, charge.refunded.
