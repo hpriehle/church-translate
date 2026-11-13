@@ -24,7 +24,8 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
   POST /api/hc/checkout     (device token) {usd} → {url}: a Stripe Checkout page (card only) for that much credit;
                             503 not_configured without STRIPE_SECRET_KEY. Back to /api/hc/checkout/done or /cancelled.
   POST /api/stripe/webhook  Stripe → hub, signed with STRIPE_WEBHOOK_SECRET: checkout.session.completed (paid) calls
-                            credit_top_up with its payment_intent and amount_total, once per payment.
+                            credit_top_up with its payment_intent and amount_total, once per payment;
+                            charge.refunded takes amount_refunded back off the top-up with that payment_intent.
   POST /api/admin/congregations/<id>/credits {payment_id, cents} (operator) → {created, credit, balance}: credit a
                             top-up. Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
                             payment's id); 409 when that id was credited with another amount or congregation.
@@ -533,7 +534,8 @@ async def checkout_cancelled():
 @router.post("/api/stripe/webhook")
 async def stripe_webhook(request: Request):
     """Stripe → hub. checkout.session.completed and paid: credit the congregation once per payment intent (Stripe
-    sends an event again until it gets a 2xx, and may send it twice). 400 for a bad or stale signature; other
+    sends an event again until it gets a 2xx, and may send it twice). charge.refunded: the refunded total comes back
+    off that top-up (`_refunded`), also once. 400 for a bad or stale signature; other
     events are acknowledged and ignored. A payment that can't be credited (unknown congregation, id reused) is
     logged and acknowledged, since a retry wouldn't change it; a database error answers 500 so Stripe retries."""
     import stripe
@@ -547,6 +549,8 @@ async def stripe_webhook(request: Request):
     except (ValueError, stripe.SignatureVerificationError):
         raise HTTPException(400, "Bad signature.")
     event = json.loads(payload)
+    if event.get("type") == "charge.refunded":
+        return _refunded((event.get("data") or {}).get("object") or {})
     if event.get("type") != "checkout.session.completed":
         return {"ok": True, "credited": False}
     s = (event.get("data") or {}).get("object") or {}
@@ -563,6 +567,25 @@ async def stripe_webhook(request: Request):
         log.error("stripe: checkout %s paid but not credited: %r", s.get("id"), e)
         return {"ok": True, "credited": False}
     return {"ok": True, "credited": created, "credit_id": credit["id"]}
+
+
+def _refunded(charge: dict[str, Any]) -> dict[str, Any]:
+    """charge.refunded: Harrison refunded (part of) a top-up in the Stripe dashboard. The charge's amount_refunded is
+    the total refunded so far, so taking that much off the top-up paid with its payment intent is idempotent (a
+    resent or late event changes nothing). A charge that isn't a top-up here is logged and acknowledged."""
+    pid = str(charge.get("payment_intent") or "")
+    try:
+        cents = int(charge["amount_refunded"])
+        if charge.get("currency") != "usd":
+            raise ValueError(charge.get("currency"))
+        credit, changed = _hear().db.refund_credit(pid, cents)
+    except (KeyError, ValueError, TypeError) as e:
+        log.error("stripe: refund of charge %s (%s) not taken off the ledger: %r", charge.get("id"), pid, e)
+        return {"ok": True, "refunded": False}
+    if changed:
+        log.info("refund: %d of %d cents of %s taken back from congregation %d", credit["refunded_cents"],
+                 credit["cents"], pid, credit["congregation_id"])
+    return {"ok": True, "refunded": changed, "credit_id": credit["id"], "refunded_cents": credit["refunded_cents"]}
 
 
 def credit_top_up(cid: int, payment_id: str, cents: int) -> tuple[dict[str, Any], bool]:

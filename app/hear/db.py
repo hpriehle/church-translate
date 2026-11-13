@@ -9,7 +9,8 @@ Congregations that existed before billing are grandfathered as "own_key": they w
 
 Metering and the ledger: the Mac reports seconds of speech per heard language (`record_speech`, idempotent on the
 session and the Mac's chunk number). A congregation's balance is its top-ups (`add_credit`, idempotent on the Stripe
-payment id) minus the language-minutes of its credit-billed sessions, after the free first hour. Each session keeps
+payment id; a Stripe refund takes its amount back off that top-up, `refund_credit`) minus the language-minutes
+of its credit-billed sessions, after the free first hour. Each session keeps
 the billing mode it started under, so own-key meetings are metered but never debited, also after a switch to
 credits. The balance may go negative (a meeting is never cut off); `can_start` then refuses the next one.
 """
@@ -81,7 +82,9 @@ CREATE TABLE IF NOT EXISTS credits (
     payment_id TEXT NOT NULL UNIQUE,
     cents INTEGER NOT NULL,
     seconds REAL NOT NULL,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    refunded_cents INTEGER NOT NULL DEFAULT 0,
+    refunded_at REAL
 );
 CREATE TABLE IF NOT EXISTS email_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -221,6 +224,10 @@ class Database:
                 self._db.execute("UPDATE sessions SET billing = 'own_key'")
             if "device_id" not in scols:   # the Mac that started it: only that one may carry it on (recent_session)
                 self._db.execute("ALTER TABLE sessions ADD COLUMN device_id INTEGER")
+            ccols = {r[1] for r in self._db.execute("PRAGMA table_info(credits)")}
+            if "refunded_cents" not in ccols:   # databases made before refunds were taken off the ledger
+                self._db.execute("ALTER TABLE credits ADD COLUMN refunded_cents INTEGER NOT NULL DEFAULT 0")
+                self._db.execute("ALTER TABLE credits ADD COLUMN refunded_at REAL")
             self._db.execute("CREATE INDEX IF NOT EXISTS sessions_code ON sessions(congregation_id, code)")
         if close_stale:
             self.close_stale_sessions()
@@ -528,6 +535,33 @@ class Database:
                 self._db.execute("ROLLBACK")
                 raise
 
+    def refund_credit(self, payment_id: str, refunded_cents: int) -> tuple[dict[str, Any], bool]:
+        """Stripe refunded `refunded_cents` in all (cumulative, as on the charge) of the top-up paid with
+        `payment_id`: that much comes back off the balance, at the rate the top-up was bought at. Idempotent and
+        order-proof: the refunded total only ever grows (a resent or late event changes nothing) and never exceeds
+        the top-up. Returns (credit, changed). KeyError for a payment that was never credited, ValueError for a bad
+        amount. The balance may go negative when credit already used is refunded."""
+        pid = (payment_id or "").strip()
+        if not isinstance(refunded_cents, int) or isinstance(refunded_cents, bool) or refunded_cents < 0:
+            raise ValueError("the refunded amount must be a whole number of cents")
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._db.execute("SELECT * FROM credits WHERE payment_id = ?", (pid,)).fetchone() if pid else None
+                if row is None:
+                    raise KeyError(pid)
+                total = min(row["cents"], refunded_cents)
+                changed = total > row["refunded_cents"]
+                if changed:
+                    self._db.execute("UPDATE credits SET refunded_cents = ?, refunded_at = ? WHERE id = ?",
+                                     (total, time.time(), row["id"]))
+                    row = self._db.execute("SELECT * FROM credits WHERE id = ?", (row["id"],)).fetchone()
+                self._db.execute("COMMIT")
+                return dict(row), changed
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+
     def credits(self, cid: int) -> list[dict[str, Any]]:
         return [dict(r) for r in self._q("SELECT * FROM credits WHERE congregation_id = ? ORDER BY id", (cid,))]
 
@@ -540,7 +574,8 @@ class Database:
         (metered, used), = self._q(
             "SELECT COALESCE(SUM(p.seconds), 0), COALESCE(SUM(CASE WHEN s.billing = 'credits' THEN p.seconds END), 0)"
             " FROM speech p JOIN sessions s ON s.id = p.session_id WHERE s.congregation_id = ?", (cid,))
-        (cents, bought), = self._q("SELECT COALESCE(SUM(cents), 0), COALESCE(SUM(seconds), 0) FROM credits"
+        (cents, bought), = self._q("SELECT COALESCE(SUM(cents - refunded_cents), 0),"
+                                   " COALESCE(SUM(seconds * (cents - refunded_cents) / cents), 0) FROM credits"
                                    " WHERE congregation_id = ?", (cid,))
         free_left = max(0.0, FREE_SECONDS - used)
         bal = bought - max(0.0, used - FREE_SECONDS)
