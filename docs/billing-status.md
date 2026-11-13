@@ -34,7 +34,7 @@ Survey of commit 24be883 (file:line there), then what branch `chat/hc-pricing` a
 | Piece | What's needed |
 |---|---|
 | Speech-minute meter (built, see below) | The engine reports speech seconds per language to the hub (session_start/heartbeat), the hub stores them per session. Chunk durations already exist (`ChunkRecord.audio_dur_s`, `pipeline.py:276`). |
-| Trial proxy | `POST /api/trial/translate` on the VPS with Harrison's key, rate-limited, capped at the free hour; the engine needs a "hub" backend beside "api"/"cli" (`config.py:115`). |
+| Trial proxy (built as the credits proxy, see below) | `POST /api/hc/translate` on the VPS with Harrison's key, rate-limited, gated by the credit rule; the engine's "hub" backend beside "api"/"cli". |
 | Credit balance (built, see below) | A ledger table (top-ups +, metered language-seconds −) and `balance(cid)`; `GET /api/hc/billing` (added on this branch) is where the app would read it; shown on `/speak` and in the app. |
 | Negative-balance rule (built, see below) | A running meeting never stops; the next `session_start` is refused once nothing is left (decided: blocked until topped up, not at −2 language-hours). |
 | Stripe top-up (test mode) | Checkout Session for a top-up, a `checkout.session.completed` webhook (signature-checked, idempotent on the event id) that credits the ledger. Needs test keys in the VPS secrets. |
@@ -150,10 +150,73 @@ the hub's) — not done.
    the test card 4242 4242 4242 4242; the hub log shows `credit: 1000 cents`; Stripe's webhook page shows 200.
 For live mode repeat 1–2 with the live key and a live-mode endpoint (each mode has its own signing secret).
 
+## Built on branch `chat/hc-proxy` (from `chat/hc-stripe`; nothing pushed or deployed, no Anthropic or Stripe call made)
+
+**Translation through the hub (`app/hear/proxy.py`).** `POST /api/hc/translate` (device token) `{model, system,
+messages, effort}` → the Messages API reply, unchanged. The hub builds the very request the Mac builds with its own
+key (`request_params` in `app/translate/api_session.py`: same model ids, effort, max tokens, cached conversation,
+server-side fallback), with `ANTHROPIC_API_KEY` from the hub's environment. Without it: 503 `not_configured`, and
+nothing else changes.
+- Who may (decided by Maddie, Nov 13: option A): a credits congregation, from the Mac whose meeting is live on the
+  hub (the reconnect grace included), or that ended one in the last 2 minutes (its last sentences). A meeting
+  under way is never cut off, whatever the balance. Otherwise: out of credit → 402 `out_of_credit` with the
+  billing message; credit left but no live meeting → 409 `not_live` ("Translation on credit works only while the
+  meeting is online on Hear Church. Set sharing to Online, or use your own Anthropic key (ask for a code)."). So
+  "this Wi-Fi only" meetings, which the meter can't see, can't translate on credits. Own key → 409 `own_key`.
+- Limits per congregation: 600 requests a minute, 40 at once, 2 MB a request, 1,000 messages; model one of
+  opus/sonnet/haiku 5.5, effort one of the API's. A bad body → 400 without quoting it.
+- Privacy (what the draft privacy page says): speech and translation only pass through memory. Nothing is
+  stored; logs carry the congregation, sizes, timing and status codes, never a body or Anthropic's error text
+  (`tests/test_proxy.py` checks the log records and the database files for the sentence).
+- Anthropic errors → 429 `anthropic_busy` (rate limit), 503 `unavailable` (the hub's key refused; logged as an
+  error), 400 `bad_request`, 502 `unreachable` (network, overloaded, 5xx).
+
+**Engine (`app/translate/hub_session.py`).** Backend `hub` beside `api`/`cli` (`TranslateCfg.backend`):
+`HubSession` is `ApiSession` with the hub in place of the Anthropic client, so model, effort, prompt, the router's
+timeouts, hung-session replacement and circuit breaker are the same. One difference: the seed message ("reply
+simply: OK") isn't sent alone; it goes with the first sentence, so an open app with no meeting costs nothing and
+needs no live session. Picking it (`main.app_backend` / `use_billing`): on every connect the engine asks the hub's
+`GET /api/hc/billing`; `credits` → `hub` (a stray key is ignored), `own_key` → the key as before. Before the hub
+has answered: the key if the app passed one, else `hub`. The operator page shows "Hear Church credits (no key
+needed)" as the Claude access.
+
+**Refunds.** `charge.refunded` in `POST /api/stripe/webhook`: the charge's `amount_refunded` (Stripe's running
+total) is taken back off the top-up whose `payment_id` is the charge's `payment_intent` (`credits.refunded_cents`,
+`refunded_at`; `Database.refund_credit`). Idempotent and order-proof (the total only grows, never past the
+top-up); the balance counts `cents − refunded_cents` at the top-up's own rate. A refund of credit already used
+leaves the balance negative (the next meeting waits for a top-up). A charge that isn't a top-up here, or not in
+USD, is logged and acknowledged. Old databases get the columns on start.
+
+**Mac (Swift, not compiled here)**: `OnboardingView.swift`: the Claude step lets a credits congregation continue
+without a key, and the disabled "Start with your free first hour / coming soon" is replaced by one line ("Nothing
+to set up here: continue, and your first hour is free. You can buy credit later on the speaker page.").
+`Engine.swift`: the engine status carries `claude_access`. `AppModel.swift`: on credits the readiness check is
+"Translation on Hear Church credit" instead of "No Claude API key" (which blocked Start); with local sharing it is
+the blocking "Credits need online sharing". `Engine.swift` already drops an inherited `ANTHROPIC_API_KEY`; the app
+still passes a Keychain key if there is one (only own-key congregations can enter one), and the engine ignores it
+on credits.
+
+**Tests**: `tests/test_proxy.py` (the request sent on matches the api backend's; strangers, own key, another Mac,
+no live meeting, the 2 trailing minutes, out of credit vs. a meeting under way, the free hour, not configured,
+bad bodies, rate and concurrency limits, Anthropic errors, nothing logged or stored; the hub session's seed,
+errors and sign-out; the backend picked from billing; end to end a keyless Mac translating a live meeting through
+a real hub), `tests/test_refunds.py` (partial then full refund, resent and late events, capped, unknown payment,
+negative balance, old databases, the signed webhook, charges that aren't top-ups). `uv run pytest -q`: 241 pass;
+the same 5 in test_app_mode/test_languages fail on this Linux box (Mac-only packages, a darwin voice default), as recorded for `chat/hc-metering` and `chat/hc-stripe`.
+
+### What Harrison sets on the hub for credits translation
+
+- `ANTHROPIC_API_KEY` (Hear Church's own key, with a spend limit at Anthropic) in the hub service's environment,
+  like the Stripe keys. Then restart the hub.
+- The Stripe webhook's events: add **`charge.refunded`** to the endpoint (step 2 above).
+
 ## Still missing
 
-- The trial proxy (meetings on credits still need the church's own key until it exists).
 - After a refusal the Mac doesn't ask again for that run: after a top-up the operator stops and restarts the meeting.
-- Refunds: done by hand in the Stripe dashboard; nothing takes the credit back off the ledger (no
-  `charge.refunded` handling).
+- Refunds are still made by hand in the Stripe dashboard (the ledger follows by itself now). A refund that fails
+  later (`charge.refund.updated` → failed) doesn't give the credit back: add it by hand with the admin route.
+- No per-congregation record of what the proxy cost us (tokens / dollars per meeting); the hub log has nothing
+  but sizes and timing at debug level.
+- If the engine can't reach the hub when a meeting starts, the Mac can't translate on credits until it can (the
+  meeting isn't live on the hub either).
 - The balance in the Mac app's own window (Swift), if wanted.
