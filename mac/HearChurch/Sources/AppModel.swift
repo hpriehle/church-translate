@@ -322,6 +322,14 @@ final class AppModel: ObservableObject {
         } else {
             out.append(Check(id: "net", title: "Internet connected", state: hubReachable == nil ? .pending : .ok))
         }
+        // Credits: no key on this Mac. Before the engine says, no key in the Keychain means credits too.
+        let onCredits = engine.status.map { $0.claude_access == "credits" } ?? (keyState == .missing)
+        if onCredits {
+            out.append(localSharing
+                       ? Check(id: "key", title: "Credits need online sharing", state: .bad,
+                               detail: "Translation on credit works only when sharing online. Switch sharing to Online, or use your own Anthropic key (ask us for a code).")
+                       : Check(id: "key", title: "Translation on Hear Church credit", state: .ok))
+        } else {
         switch keyState {
         case .ok: out.append(Check(id: "key", title: "Claude API key works", state: .ok))
         case .unknown, .checking: out.append(Check(id: "key", title: "Checking the Claude API key…", state: .pending))
@@ -329,6 +337,7 @@ final class AppModel: ObservableObject {
                                         action: ("Settings…", { self.openSettings?() })))
         case .bad(let why): out.append(Check(id: "key", title: "Claude API key problem", state: .bad, detail: why,
                                              action: ("Settings…", { self.openSettings?() })))
+        }
         }
         if profile.setupDone && profile.languages.isEmpty {
             out.append(Check(id: "languages", title: "No language chosen", state: .bad,

@@ -110,7 +110,7 @@ struct OnboardingView: View {
         case .name: return p.name.trimmingCharacters(in: .whitespaces).count >= 2
         case .place: return p.lat != nil
         case .languages: return !p.languages.isEmpty
-        case .claude: return ownKey && model.keyState == .ok
+        case .claude: return !ownKey || model.keyState == .ok   // credits need no key
         case .approval: return p.approved
         case .email: return p.email.contains("@") && p.email.contains(".")
         case .join: return !joinSlug.isEmpty && joinCode.filter(\.isNumber).count == 6
@@ -620,10 +620,7 @@ private struct ClaudeStep: View {
         } else {
             StepTitle(title: "Claude translates",
                       subtitle: "Hear Church uses Claude, from Anthropic, to translate. You pay with prepaid credit: $5 per language for each hour of speech, and the first hour is free.")
-            Button("Start with your free first hour") {}
-                .disabled(true)
-                .help("Coming soon")
-            Text("Credits are almost ready. Until then, write to support@hearchurch.com and we'll help you get set up.")
+            Text("Nothing to set up here: continue, and your first hour is free. You can buy credit later on the speaker page.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 4)
             Text("Did we give you a setup code for your own Anthropic key? Enter it here. Each code works once.")

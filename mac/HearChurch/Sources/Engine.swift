@@ -406,6 +406,7 @@ struct EngineStatus: Decodable, Equatable {
     let listener_url: String?
     let language_switches: [Switch]?
     let sharing: String?
+    let claude_access: String?   // "credits": the engine translates through hearchurch.com, no key on this Mac
     let speaker: String?
     let mic_warning: String?   // the engine's sentence when the microphone has gone quiet or away
     let mic_name: String?      // the input the meeting is using
