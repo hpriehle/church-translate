@@ -466,9 +466,10 @@ def billing_info(cong: dict[str, Any]) -> dict[str, Any]:
 # ------------------------------------------------------------------ billing: buying credit (Stripe Checkout)
 # Harrison's Stripe account (Automaddie). STRIPE_SECRET_KEY (sk_test_… / sk_live_…) creates Checkout sessions;
 # STRIPE_WEBHOOK_SECRET (whsec_…) checks the signature of what Stripe posts to /api/stripe/webhook. Without the
-# secret key the buy route answers 503 not_configured; without the webhook secret the webhook does. Only cards
-# are offered: a card is paid when Checkout completes, so checkout.session.completed with payment_status "paid"
-# is the one event that credits (a delayed method such as a bank debit would complete unpaid and be missed).
+# secret key the buy route answers 503 not_configured; without the webhook secret the webhook does. Stripe no
+# longer accepts payment_method_types on Checkout (payment methods come from the Dashboard), so a delayed method
+# can be offered: a session credits when it is paid, either at checkout.session.completed (payment_status "paid")
+# or later at checkout.session.async_payment_succeeded. Both credit once per payment intent.
 
 BUY_USD = (10, 25, 50, 100)        # the amounts the operator page offers
 BUY_MIN_USD, BUY_MAX_USD = 5, 500  # one top-up, whole dollars ($5 = one language-hour)
@@ -506,7 +507,6 @@ async def checkout(request: Request, body: Buy):
     hours = cents / CENTS_PER_LANGUAGE_HOUR
     params = {
         "mode": "payment",
-        "payment_method_types": ["card"],   # paid at checkout: nothing arrives later unpaid
         "line_items": [{"quantity": 1, "price_data": {
             "currency": "usd", "unit_amount": cents,
             "product_data": {"name": "Hear Church credit",
@@ -557,7 +557,7 @@ async def stripe_webhook(request: Request):
     event = json.loads(payload)
     if event.get("type") == "charge.refunded":
         return _refunded((event.get("data") or {}).get("object") or {})
-    if event.get("type") != "checkout.session.completed":
+    if event.get("type") not in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
         return {"ok": True, "credited": False}
     s = (event.get("data") or {}).get("object") or {}
     meta = s.get("metadata") or {}

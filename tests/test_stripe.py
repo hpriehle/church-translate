@@ -57,7 +57,7 @@ def test_checkout_makes_a_card_only_session_for_the_congregation(client, hear, k
     assert r.json() == {"url": "https://checkout.stripe.com/c/pay/cs_test_1", "id": "cs_test_1", "usd": 25}
     p, = fake_stripe.created
     assert fake_stripe.keys == ["sk_test_dummy"]
-    assert p["mode"] == "payment" and p["payment_method_types"] == ["card"]
+    assert p["mode"] == "payment" and "payment_method_types" not in p
     item, = p["line_items"]
     assert item["quantity"] == 1 and item["price_data"]["currency"] == "usd" and item["price_data"]["unit_amount"] == 2500
     assert "5 language-hours" in item["price_data"]["product_data"]["description"]
@@ -218,3 +218,18 @@ async def test_another_mac_cant_resume_a_meeting_to_skip_the_credit_check(server
     await a.close()
     await b.close()
     await asyncio.sleep(0.05)
+
+
+def test_a_delayed_payment_credits_when_it_succeeds_and_only_once(client, hear, keys):
+    """Payment methods come from the Stripe Dashboard now, so a bank debit can complete unpaid and succeed later."""
+    cong, _ = make_cong(hear)
+    unpaid = completed(cong["id"], payment_status="unpaid")
+    assert hook(client, unpaid, signed(unpaid)).json()["credited"] is False
+    assert hear.db.credits(cong["id"]) == []
+    later = json.loads(completed(cong["id"]))
+    later["id"], later["type"] = "evt_test_2", "checkout.session.async_payment_succeeded"
+    later = json.dumps(later)
+    r = hook(client, later, signed(later))
+    assert r.status_code == 200 and r.json()["credited"] is True
+    assert hook(client, later, signed(later)).json()["credited"] is False
+    assert len(hear.db.credits(cong["id"])) == 1

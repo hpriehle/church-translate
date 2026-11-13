@@ -183,9 +183,9 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report) -> None:
             s = s.to_dict()
             print(f"      session {sid}: amount_total {s.get('amount_total')} {s.get('currency')}, "
                   f"livemode={s.get('livemode')}", flush=True)
-            r.step("3 the session is test mode, card only, for the right amount and congregation",
+            r.step("3 the session is test mode, for the right amount and congregation",
                    s.get("livemode") is False and s.get("amount_total") == cents and s.get("currency") == "usd"
-                   and s.get("payment_method_types") == ["card"] and s.get("mode") == "payment"
+                   and "card" in (s.get("payment_method_types") or []) and s.get("mode") == "payment"
                    and (s.get("metadata") or {}).get("slug") == signup["slug"],
                    f"amount_total={s.get('amount_total')} metadata.slug={(s.get('metadata') or {}).get('slug')}")
             session = s
