@@ -1,6 +1,7 @@
 """End-to-end test of the paid credits chain against a real local hub, Stripe in TEST mode only.
 
     uv run python scripts/e2e_credits.py            [--env ~/.config/hearchurch/stripe-test.env] [--usd 10]
+                                                    [--real-anthropic [--hub-env ~/.config/hearchurch/hub.env]]
 
 1. starts the hub (this repo's FastAPI app, hub routes only, no pipeline) on a free port with a throwaway database
    in a temp dir, STRIPE_* loaded from the env file (never printed)
@@ -15,10 +16,20 @@
 7. charge.refunded for part of the top-up (posted twice): the balance drops by the refunded part
 8. a "this Wi-Fi only" meeting: session_start with private=true starts a billing session that the congregation's
    public page, search and listener socket don't show; its meter report (12 language-minutes) costs $1.00
-9. PASS/FAIL per step, exit 1 on any failure; the hub is stopped and the temp dir deleted.
+9. only with --real-anthropic: the credits translation proxy with the real Anthropic key. ANTHROPIC_API_KEY is read
+   from the hub env file and given to the hub child process only (never printed; this process, which plays the
+   engine, has no key at all). The engine's own `hub` backend (app/translate/hub_session.py: HubSession and
+   HubClient, the app's system prompt, glossary, model and effort from config.toml) translates one English sentence
+   to French and one to Spanish in a live meeting, and one to French in a "this Wi-Fi only" (private) meeting. Then
+   the hub log (production log levels, plus the proxy's per-request debug line) and every file of the throwaway
+   database must contain neither the English nor the translations, and a second congregation that used up its free
+   hour gets 402 out_of_credit (its meeting's end is moved back past the proxy's trailing window). Costs a few
+   cents (3 short sentences).
+10. PASS/FAIL per step, exit 1 on any failure; the hub is stopped and the temp dir deleted.
 
-No Anthropic call (the translation proxy isn't part of this; tests/test_wifi_only.py covers it with a fake), no live keys, nothing deployed. Stripe is called
-only in step 3 (create a test Checkout session, then read it back).
+Without --real-anthropic: no Anthropic call (the hub gets no key; tests/test_wifi_only.py covers the proxy with a
+fake), no live Stripe keys, nothing deployed. Stripe is called only in step 3 (create a test Checkout session, then
+read it back).
 """
 from __future__ import annotations
 
@@ -43,6 +54,9 @@ import websockets
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ENV = Path("~/.config/hearchurch/stripe-test.env").expanduser()
+DEFAULT_HUB_ENV = Path("~/.config/hearchurch/hub.env").expanduser()
+CLAUDE_VARS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
+PROD_LOG = "E2E_HUB_PROD_LOG"   # set for the hub child: log like the production hub (and the proxy's debug line)
 STRIPE_VARS = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PAYMENT_METHOD_CONFIG")
 USD_PER_LANGUAGE_HOUR = 5.0
 FREE_MIN = 60
@@ -54,6 +68,15 @@ def serve(port: int, home: Path) -> None:
     """Run the hub in this process: the real app and routes with lifespan off (no Whisper, voices or tunnel),
     the Hear registry opened on a database in `home`, like the tests' `server` fixture."""
     sys.path.insert(0, str(ROOT))
+    if os.environ.get(PROD_LOG):
+        import logging
+        # As app/__main__.py sets it up, plus the proxy's per-request debug line, so step 9 can check what a
+        # translation leaves in the log.
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)-9s %(message)s",
+                            stream=sys.stdout)
+        for noisy in ("httpx", "httpcore", "uvicorn.access"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
+        logging.getLogger("hear").setLevel(logging.DEBUG)
     import uvicorn
 
     from app import main
@@ -84,7 +107,7 @@ def serve(port: int, home: Path) -> None:
 
 # ------------------------------------------------------------------ helpers
 
-def load_env(path: Path) -> dict[str, str]:
+def load_env(path: Path, names: tuple[str, ...] = STRIPE_VARS) -> dict[str, str]:
     out: dict[str, str] = {}
     if not path.exists():
         return out
@@ -94,7 +117,7 @@ def load_env(path: Path) -> dict[str, str]:
             continue
         k, v = line.removeprefix("export ").split("=", 1)
         k, v = k.strip(), v.strip().strip('"').strip("'")
-        if k in STRIPE_VARS and v:
+        if k in names and v:
             out[k] = v
     return out
 
@@ -140,7 +163,7 @@ class Report:
 
 # ------------------------------------------------------------------ the test
 
-async def run(base: str, env: dict[str, str], usd: int, r: Report) -> None:
+async def run(base: str, env: dict[str, str], usd: int, r: Report, real: bool = False, tmp: Path | None = None) -> None:
     key, whsec = env.get("STRIPE_SECRET_KEY", ""), env.get("STRIPE_WEBHOOK_SECRET", "")
     ws_base = base.replace("http://", "ws://")
     async with httpx.AsyncClient(base_url=base, timeout=30) as c:
@@ -331,6 +354,183 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report) -> None:
                and round(b3["balance_usd"] - b4["balance_usd"], 2) == 1.0,
                f"used {b4['balance']['used_min']} min, ${b3['balance_usd']:.2f} → ${b4['balance_usd']:.2f}")
 
+        if real:
+            await real_translations(c, base, ws_base, auth, signup, st, tmp, r)
+
+
+# ------------------------------------------------------------------ step 9: real translations through the hub
+
+# Short, so the whole step costs a few cents. Each is translated by the engine's own hub backend.
+LIVE_SENTENCES = [("fr", "Brothers and sisters, we are grateful that you could join us this morning."),
+                  ("es", "Please remember that the youth activity on Wednesday starts at seven.")]
+WIFI_SENTENCE = ("fr", "The closing prayer will be offered by Sister Johnson.")
+BROKE_SENTENCE = "Thank you for coming, and have a good week."
+GLOSSARIES = {"fr": "glossary.json", "es": "glossary.es.json"}   # the code's defaults (the Mac copies them)
+
+
+class Engine:
+    """The Mac's translation side for one congregation: one HubSession per language, built like the router builds
+    them (system prompt + scripture rule, model and effort from config.toml, the seed first), talking to the hub
+    with the device token through HubClient. This process has no Anthropic key: only the hub can call Claude."""
+
+    def __init__(self, base: str, token: str):
+        import tomllib
+
+        from app.config import Settings
+        self.cfg = Settings.model_validate(tomllib.loads((ROOT / "config.toml").read_text())).translate
+        self.base, self.token = base, token
+        self.sessions: dict = {}
+
+    async def translate(self, code: str, english: str) -> str | None:
+        from app.config import load_glossary
+        from app.translate.hub_session import HubClient, HubSession
+        from app.translate.prompts import SCRIPTURE_RULE, build_system_prompt, clean_output, seed_message, user_message
+        s = self.sessions.get(code)
+        if s is None:
+            prompt = build_system_prompt(load_glossary(ROOT / GLOSSARIES[code]), self.cfg.audience, code, "en")
+            s = HubSession(prompt + SCRIPTURE_RULE, self.cfg.claude_model, self.cfg.claude_effort,
+                           client=HubClient(self.base, self.token))
+            await s.start()
+            await s.ask(seed_message([]))     # kept by HubSession: it goes out with the first sentence
+            self.sessions[code] = s
+        return clean_output(await asyncio.wait_for(s.ask(user_message(english, False)), 90))
+
+    @property
+    def cost_usd(self) -> float:
+        return sum(s.usage.cost_usd for s in self.sessions.values())
+
+    async def close(self) -> None:
+        for s in self.sessions.values():
+            await s.close()
+
+
+def hub_error(e: BaseException):
+    from app.translate.hub_session import HubError
+    while e is not None and not isinstance(e, HubError):
+        e = e.__cause__
+    return e
+
+
+async def meeting(ws_base: str, auth: dict, st, langs: list[str], private: bool = False):
+    ws = await websockets.connect(f"{ws_base}/ws/engine", additional_headers=auth)
+    await ws.send(json.dumps({"type": "hello", "name": "E2E Mac", "languages": langs,
+                              "stream": {"sample_rate": st.sample_rate, "bitrate_kbps": st.bitrate_kbps}}))
+    await ws.send(json.dumps({"type": "session_start", "languages": langs, **({"private": True} if private else {})}))
+    return ws, await recv_on(ws, "session_started")
+
+
+async def stop(ws) -> None:
+    await ws.send(json.dumps({"type": "session_stop"}))
+    await asyncio.sleep(0.3)
+    await ws.close()
+
+
+async def real_translations(c: httpx.AsyncClient, base: str, ws_base: str, auth: dict, signup: dict, st, tmp: Path,
+                            r: Report) -> None:
+    import sqlite3
+
+    seen: list[str] = []                       # every text that must not be stored or logged
+    eng = Engine(base, signup["device_token"])
+    model_effort = f"{eng.cfg.claude_model}/{eng.cfg.claude_effort}"
+    try:
+        # live, listed meeting: fr and es
+        ws, started = await meeting(ws_base, auth, st, ["fr", "es"])
+        try:
+            if not r.step("9 a meeting starts for the real translations", started.get("type") == "session_started",
+                          started.get("message", "")):
+                return
+            for code, english in LIVE_SENTENCES:
+                seen.append(english)
+                try:
+                    out = await eng.translate(code, english)
+                except Exception as e:
+                    he = hub_error(e)
+                    r.step(f"9 en→{code} through POST /api/hc/translate", False,
+                           f"HTTP {he.status} {he.code}: {he.message}" if he else f"{type(e).__name__}: {str(e)[:200]}")
+                    continue
+                if out:
+                    seen.append(out)
+                print(f"      en: {english}\n      {code}: {out}", flush=True)
+                r.step(f"9 en→{code} through POST /api/hc/translate ({model_effort})",
+                       bool(out) and out.strip() != english, f"{len(out or '')} chars back")
+        finally:
+            await stop(ws)
+
+        # "this Wi-Fi only": a private billing session
+        ws, started = await meeting(ws_base, auth, st, ["fr"], private=True)
+        try:
+            code, english = WIFI_SENTENCE
+            seen.append(english)
+            try:
+                out = await eng.translate(code, english)
+                err = ""
+            except Exception as e:
+                he = hub_error(e)
+                out, err = None, (f"HTTP {he.status} {he.code}" if he else f"{type(e).__name__}: {str(e)[:200]}")
+            if out:
+                seen.append(out)
+            print(f"      en: {english}\n      {code}: {out}", flush=True)
+            r.step("9 en→fr in a Wi-Fi-only (private) meeting", started.get("type") == "session_started"
+                   and bool(out) and out.strip() != english, err or f"{len(out or '')} chars back")
+        finally:
+            await stop(ws)
+        print(f"      Anthropic cost of these translations: ${eng.cost_usd:.4f} (the app's own price table)", flush=True)
+    finally:
+        await eng.close()
+
+    # a congregation with nothing left: 402 once its meeting is over
+    tag = secrets.token_hex(3)
+    res = await c.post("/api/hc/signup", json={
+        "church": "E2E Test Church", "name": f"E2E Broke {tag}", "unit_type": "ward",
+        "email": f"e2e-broke-{tag}@example.invalid", "meeting_times": [{"day": "sun", "time": "10:00"}],
+        "device_name": "E2E Mac 2"})
+    if not r.step("9 sign up a second congregation", res.status_code == 200, f"HTTP {res.status_code}"):
+        return
+    broke = res.json()
+    bauth = {"Authorization": f"Bearer {broke['device_token']}"}
+    ws, started = await meeting(ws_base, bauth, st, ["fr"])
+    try:
+        items = [{"seq": i, "s": 60.0, "langs": ["fr"]} for i in range(1, FREE_MIN + 2)]   # the free hour and a minute
+        await ws.send(json.dumps({"type": "meter", "session": started.get("session"), "items": items}))
+        await recv_on(ws, "meter_ok")
+    finally:
+        await stop(ws)
+    bb = (await c.get("/api/hc/billing", headers=bauth)).json()
+    # The proxy still serves a Mac's last sentences for TRAILING_S after its meeting ends; move the end back past it.
+    with sqlite3.connect(tmp / "hearchurch.db") as db:
+        db.execute("UPDATE sessions SET ended_at = ended_at - 600 WHERE congregation_id ="
+                   " (SELECT id FROM congregations WHERE slug = ?)", (broke["slug"],))
+    beng = Engine(base, broke["device_token"])
+    try:
+        out = await beng.translate("fr", BROKE_SENTENCE)
+        he, detail = None, f"translated: {out!r}"
+    except Exception as e:
+        he = hub_error(e)
+        detail = f"HTTP {he.status} {he.code}: {he.message}" if he else f"{type(e).__name__}: {str(e)[:200]}"
+    finally:
+        await beng.close()
+    seen.append(BROKE_SENTENCE)
+    r.step("9 out of credit (meeting over) → 402 out_of_credit, no Anthropic call",
+           he is not None and he.status == 402 and he.code == "out_of_credit" and beng.cost_usd == 0,
+           f"balance ${bb.get('balance_usd', 0):.2f}, free left {bb.get('balance', {}).get('free_left_min')} min; {detail}")
+
+    # nothing of the speech or its translation stayed on the hub
+    await asyncio.sleep(0.3)
+    log = (tmp / "hub.log").read_text(errors="replace")
+    files = [f for f in tmp.rglob("*") if f.is_file()]
+    found = []
+    for f in files:
+        data = f.read_bytes()
+        for t in seen:
+            needles = {t.encode(), t[:24].encode(), json.dumps(t)[1:25].encode()}
+            if any(n in data for n in needles):
+                found.append(f"{f.name}: {t[:20]}…")
+    lines = log.count(f"translate for {signup['slug']}")
+    r.step("9 the hub log and database hold neither the English nor the translations",
+           not found and lines >= 3,
+           f"{len(seen)} texts checked in {len(files)} files ({', '.join(sorted(f.name for f in files))}); "
+           f"the log has {lines} proxy lines for this congregation" + (f"; FOUND {found}" if found else ""))
+
 
 async def recv_on(ws, kind: str) -> dict:
     while True:
@@ -343,6 +543,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--env", type=Path, default=DEFAULT_ENV, help=f"env file with {', '.join(STRIPE_VARS)}")
     ap.add_argument("--usd", type=int, default=10, help="top-up in whole dollars (5–500)")
+    ap.add_argument("--real-anthropic", action="store_true",
+                    help="also step 9: real translations through the hub with the real Anthropic key (a few cents)")
+    ap.add_argument("--hub-env", type=Path, default=DEFAULT_HUB_ENV, help="env file with ANTHROPIC_API_KEY")
     ap.add_argument("--serve", nargs=2, metavar=("PORT", "HOME"), help=argparse.SUPPRESS)  # the hub child
     a = ap.parse_args()
     if a.serve:
@@ -355,12 +558,24 @@ def main() -> int:
         print("FAIL  STRIPE_SECRET_KEY is not a test key: this script only runs against Stripe test mode.")
         return 1
     print(f"env {a.env}: " + ", ".join(f"{k} {'set' if env.get(k) else 'MISSING'}" for k in STRIPE_VARS), flush=True)
+    claude: dict[str, str] = {}
+    if a.real_anthropic:
+        claude = load_env(a.hub_env.expanduser(), ("ANTHROPIC_API_KEY",))
+        if not claude.get("ANTHROPIC_API_KEY", "").startswith("sk-ant-"):
+            print(f"FAIL  --real-anthropic: no ANTHROPIC_API_KEY in {a.hub_env}")
+            return 1
+        print(f"hub env {a.hub_env}: ANTHROPIC_API_KEY set (for the hub process only)", flush=True)
+    for k in CLAUDE_VARS:   # this process plays the engine: it never has a Claude key
+        os.environ.pop(k, None)
 
     tmp = Path(tempfile.mkdtemp(prefix="hc-e2e-"))
     port = free_port()
     child_env = {k: v for k, v in os.environ.items() if k not in STRIPE_VARS and k not in
                  ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")}   # no Claude key: nothing can reach Anthropic
     child_env.update(env)
+    if claude:
+        child_env.update(claude)
+        child_env[PROD_LOG] = "1"
     child_env["HEARCHURCH_HOME"] = str(tmp)
     log = open(tmp / "hub.log", "w")
     hub = subprocess.Popen([sys.executable, __file__, "--serve", str(port), str(tmp)], cwd=ROOT, env=child_env,
@@ -378,7 +593,7 @@ def main() -> int:
                 time.sleep(0.1)
         up = hub.poll() is None
         if r.step("1 hub started on a free port with a throwaway database", up, f"{base}, data in {tmp}"):
-            asyncio.run(run(base, env, a.usd, r))
+            asyncio.run(run(base, env, a.usd, r, a.real_anthropic, tmp))
     except Exception as e:  # a crash in the test itself counts as a failure, never a traceback with secrets
         r.step("unexpected error", False, f"{type(e).__name__}: {str(e)[:200]}")
     finally:
@@ -392,7 +607,7 @@ def main() -> int:
         log.close()
         if r.failed:
             text = (tmp / "hub.log").read_text()
-            for s in env.values():
+            for s in [*env.values(), *claude.values()]:
                 text = text.replace(s, "<secret>")
             print("---- hub log (last 30 lines) ----\n" + "\n".join(text.splitlines()[-30:]))
         shutil.rmtree(tmp, ignore_errors=True)

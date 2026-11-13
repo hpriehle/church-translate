@@ -222,6 +222,14 @@ then $2.50) → a signed `charge.refunded` of 40 % (taken off once). Keys come f
 "this Wi-Fi only" (private) meeting. PASS/FAIL per check, exit 1 on any failure. The paid
 event is simulated, so Checkout's own payment intent isn't used (the script makes one up for the credit and refund).
 
+`--real-anthropic` (branch `chat/hc-realproxy`) adds step 9, the proxy with the real key: `ANTHROPIC_API_KEY` from
+`~/.config/hearchurch/hub.env` goes to the hub child process only (never printed; the script, playing the engine,
+has no key). The engine's own hub backend (`HubSession`/`HubClient`, the app's prompt, glossary, opus/low from
+config.toml) translates en→fr and en→es in a live meeting and en→fr in a Wi-Fi-only one; then the hub log
+(production log levels plus the proxy's debug line) and every file of the database must hold none of the texts, and
+a congregation past its free hour, its meeting over, gets 402 `out_of_credit`. Nov 13 run: 24 of 24 PASS, about
+$0.05 of Anthropic usage.
+
 ## Built on branch `chat/hc-local` (from `chat/hc-e2e`; nothing pushed or deployed, no Anthropic call made)
 
 Credits work for "this Wi-Fi only" meetings (Harrison, Nov 12: "local only needs to work … stored locally on the
