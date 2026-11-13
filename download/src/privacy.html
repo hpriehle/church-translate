@@ -38,7 +38,8 @@ footer a { color: inherit; }
 <h2>The short version</h2>
 <ul>
   <li>The sound of the meeting stays on the Mac running it. Only the text of what was said is sent out for translation.</li>
-  <li>Our server passes captions and translated voice to listeners while the meeting is live and doesn't save them.</li>
+  <li>Our server passes captions and translated voice to listeners while the meeting is live and doesn't save them. For congregations on credits, the text sent for translation also passes through our server on its way to the translation service, and isn't saved there either.</li>
+  <li>Card payments are handled by Stripe. We never see or store your card number.</li>
   <li>Listeners don't need an account.</li>
   <li>There are no ads, and we don't sell your information. We do track visits to our website with Cloudflare and Google Search Console, to see how people find it and help it rank in search. Our pages about Hear Church also have their own analytics, including session replay. The pages for finding a congregation and listening to a meeting don't load them. We also count app downloads as daily totals, with nothing about who downloaded.</li>
 </ul>
@@ -55,8 +56,9 @@ footer a { color: inherit; }
 <ul>
   <li>Its name, church, unit type, stake or group, address, building location, city, meeting times and time zone. Most of this appears publicly so listeners can find it.</li>
   <li>The contact email you sign up with. It isn't shown publicly.</li>
-  <li>The name of each connected Mac, when it was last seen, and scrambled (hashed) versions of its access token and your connect code.</li>
-  <li>A record of each meeting: which languages it used and when it started and ended. Not what was said.</li>
+  <li>The name of each connected Mac, when it was last seen, and scrambled (hashed) versions of its access token, your connect code and any one-time setup code.</li>
+  <li>A record of each meeting: which languages it used, which Mac started it, and when it started and ended. Not what was said.</li>
+  <li>For billing: whether the congregation pays with credits or its own API key, how many seconds of speech each meeting had in each language someone was listening to, and each credit purchase (amount, date and Stripe's payment ID). Not what was said.</li>
 </ul>
 <p>We keep this until you ask us to delete it.</p>
 <p><b>What happens on your Mac:</b></p>
@@ -64,7 +66,7 @@ footer a { color: inherit; }
   <li>Speech is turned into text on the Mac itself. Audio from the microphone is not uploaded anywhere.</li>
   <li>The app saves a log of each meeting on that Mac, including the transcript and its translations. It stays on the Mac and is not sent to us. You can delete it from the app's folder in Application Support/Hear Church.</li>
   <li>If you turn on recording, the translated voice is saved on that Mac too.</li>
-  <li>Your Anthropic API key and access token are stored in the Mac's Keychain.</li>
+  <li>The Mac's access token, and your Anthropic API key if your congregation uses its own, are stored in the Mac's Keychain.</li>
 </ul>
 
 <h2>If you visit our pages about Hear Church</h2>
@@ -79,7 +81,8 @@ footer a { color: inherit; }
 
 <h2>Who else handles information</h2>
 <ul>
-  <li><b>Anthropic</b> receives the text of what is said in the meeting so Claude can translate it, using the API key you provide. Your use of that key is governed by your agreement with Anthropic; see <a href="https://www.anthropic.com/legal/privacy">Anthropic's privacy policy</a>.</li>
+  <li><b>Anthropic</b> receives the text of what is said in the meeting so Claude can translate it. For congregations on credits, the text goes from the Mac through our server to Anthropic under our account. For congregations using their own API key, the Mac sends it straight to Anthropic with that key, and your use of the key is governed by your agreement with Anthropic. See <a href="https://www.anthropic.com/legal/privacy">Anthropic's privacy policy</a>.</li>
+  <li><b>Stripe</b> processes credit purchases. The card details and anything else you enter on Stripe's checkout page go to Stripe, not to us; see <a href="https://stripe.com/privacy">Stripe's privacy policy</a>. Of what Stripe sends us about a payment, we keep only the amount, its payment ID and which congregation it was for.</li>
   <li><b>Cloudflare</b> runs the network in front of hearchurch.com and stores app downloads. All website traffic, including IP addresses and the rounded location above, passes through it, and it may keep short-term logs.</li>
   <li><b>OpenStreetMap Nominatim or Mapbox</b> receive the address or building location you enter at sign-up, to place it on the map.</li>
   <li><b>Apple</b> receives the address you type in the Mac app during setup, or the Mac's location if you use it, to place the building on the map.</li>
