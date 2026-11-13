@@ -163,6 +163,7 @@ nothing else changes.
   billing message; credit left but no live meeting → 409 `not_live` ("Translation on credit works only while the
   meeting is online on Hear Church. Set sharing to Online, or use your own Anthropic key (ask for a code)."). So
   "this Wi-Fi only" meetings, which the meter can't see, can't translate on credits. Own key → 409 `own_key`.
+  *(Replaced on `chat/hc-local`, below: Wi-Fi-only meetings open a private billing session and translate.)*
 - Limits per congregation: 600 requests a minute, 40 at once, 2 MB a request, 1,000 messages; model one of
   opus/sonnet/haiku 5.5, effort one of the API's. A bad body → 400 without quoting it.
 - Privacy (what the draft privacy page says): speech and translation only pass through memory. Nothing is
@@ -192,7 +193,7 @@ without a key, and the disabled "Start with your free first hour / coming soon" 
 to set up here: continue, and your first hour is free. You can buy credit later on the speaker page.").
 `Engine.swift`: the engine status carries `claude_access`. `AppModel.swift`: on credits the readiness check is
 "Translation on Hear Church credit" instead of "No Claude API key" (which blocked Start); with local sharing it is
-the blocking "Credits need online sharing". `Engine.swift` already drops an inherited `ANTHROPIC_API_KEY`; the app
+the blocking "Credits need online sharing" (replaced on `chat/hc-local`). `Engine.swift` already drops an inherited `ANTHROPIC_API_KEY`; the app
 still passes a Keychain key if there is one (only own-key congregations can enter one), and the engine ignores it
 on credits.
 
@@ -217,8 +218,56 @@ Stripe test mode only, no Anthropic call): sign-up on credits → a real Stripe 
 fake id without `STRIPE_SECRET_KEY`; a live key is refused) → a signed `checkout.session.completed` posted twice
 (credited once; a bad signature → 400) → the meter over `/ws/engine` (90 language-minutes, sent twice: free hour,
 then $2.50) → a signed `charge.refunded` of 40 % (taken off once). Keys come from
-`~/.config/hearchurch/stripe-test.env` and are never printed. PASS/FAIL per check, exit 1 on any failure. The paid
+`~/.config/hearchurch/stripe-test.env` and are never printed. Since `chat/hc-local` step 8 also runs a
+"this Wi-Fi only" (private) meeting. PASS/FAIL per check, exit 1 on any failure. The paid
 event is simulated, so Checkout's own payment intent isn't used (the script makes one up for the credit and refund).
+
+## Built on branch `chat/hc-local` (from `chat/hc-e2e`; nothing pushed or deployed, no Anthropic call made)
+
+Credits work for "this Wi-Fi only" meetings (Harrison, Nov 12: "local only needs to work … stored locally on the
+app and connect through the app"). Phones still connect only on the local Wi-Fi; the hub never lists the meeting.
+
+**Private billing session (hub, `app/hear/live.py`).** `session_start` takes `private: true`. Such a session is
+recorded, credit-checked (out of credit → refused like any new meeting) and metered exactly like an online one, but
+`Live.get`, which every public route uses (`/api/live`, `/api/hc/search`, `/api/hc/c/<slug>`, `/<slug>`'s listener
+socket, `/c/<slug>/stream/*.mp3`), never returns it; waiting phones get no reload; captions and audio from the
+engine are dropped; no `listeners` counts go back. `Live.get_any` (the translation proxy, the admin list, hiding a
+congregation) sees it; the admin list marks it `wifi_only`. A resume must be private again to match.
+
+**Translation.** `POST /api/hc/translate` accepts the Mac whose private session is under way (same rules: the
+grace, the 2 trailing minutes, never cut off). `409 not_live` now only means no meeting under way: "Translation on
+credit works only during a meeting started on this Mac while it can reach Hear Church. Check the internet
+connection, then start the meeting again."
+
+**Mac engine (`PublishClient`, `app/engine.py`).** With sharing "local" (app mode) a running meeting is announced
+with `private: true` and nothing is relayed but `meter` reports (no captions, no MP3). The billed languages are the
+Mac's own: every 0.5 s `heard` = the languages with a phone on this Mac (`ch.hub.count` or
+`ch.broadcaster.listeners`); hub listener messages are ignored for it. Switching sharing during a meeting stops the
+session and starts a new one of the other kind. `info()` adds `wifi_only`, `billing_link`; `live` stays false for a
+private session (the app's LIVE badge stays orange as before).
+- Meter on disk: unacknowledged items are also written to `HEARCHURCH_HOME/data/meter.json` (at most every 2 s,
+  when the link drops, and at quit; atomic replace) and read back at start, so a quit, crash or Wi-Fi drop doesn't
+  lose them; they go out on the next link. The file is tagged with a hash of hub URL + device token, so another
+  sign-in or hub doesn't send them; a damaged file is ignored (under-bills, never blocks). Same for online meetings.
+- As before, a chunk is metered only while the session is live on the hub: during an internet drop nothing is
+  translated on credit and nothing is billed.
+- Offline: on credits with sharing local and no link to the hub, the engine's notice (operator and speaker page) is
+  "No internet: translation on Hear Church credit needs it, also for a meeting on this Wi-Fi only. Phones can still
+  connect, but nothing is translated until the internet is back."
+
+**Mac (Swift, not compiled here)**: one change, `AppModel.swift` readiness check. On credits the "Credits need
+online sharing" block is gone: "Translation on Hear Church credit" (ok) for both sharing modes; with local sharing
+and hearchurch.com unreachable it is the blocking "Translation on credit needs the internet" ("Phones listen on this
+Wi-Fi, but the translation goes through hearchurch.com, which this Mac can't reach. Check the internet connection.").
+
+**Tests**: `tests/test_wifi_only.py` (a private session is metered and translates but is invisible on the page,
+search, listener socket and streams, its captions/audio dropped, marked in the admin list; it resumes only as
+private; out of credit refuses it; end to end a Wi-Fi-only Mac meeting with a local listener on fr of fr + es bills
+fr only, sends no captions or audio, translates through the hub; switching sharing mid-meeting; the meter file
+survives a restart, isn't inherited by another sign-in or hub, survives a damaged file, is written at most every
+2 s and on a drop; the offline notice). `scripts/e2e_credits.py` step 8: a private session against the real local
+hub, invisible publicly, 12 language-minutes billed $1.00 (17 of 17 checks pass). `uv run pytest -q`: 250 pass, the
+same 5 known Linux failures.
 
 ## Still missing
 
@@ -228,5 +277,7 @@ event is simulated, so Checkout's own payment intent isn't used (the script make
 - No per-congregation record of what the proxy cost us (tokens / dollars per meeting); the hub log has nothing
   but sizes and timing at debug level.
 - If the engine can't reach the hub when a meeting starts, the Mac can't translate on credits until it can (the
-  meeting isn't live on the hub either).
+  meeting isn't live on the hub either). Online or Wi-Fi only alike; the app now says so for Wi-Fi only.
+- Wi-Fi-only billing counts every listener connection on the Mac, including a listening page opened on the Mac
+  itself (localhost), not only phones.
 - The balance in the Mac app's own window (Swift), if wanted.

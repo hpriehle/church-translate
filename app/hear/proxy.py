@@ -6,8 +6,8 @@
       with the Messages API's reply.
 
 Who may: a congregation on credits, from a Mac whose meeting is live on this hub (during the reconnect grace too),
-or that ended one in the last TRAILING_S (its last sentences). The meter only counts a meeting that is live here,
-so a meeting shared on "this Wi-Fi only" can't translate on credits (409 not_live). A meeting under way is never
+or that ended one in the last TRAILING_S (its last sentences). A "this Wi-Fi only" meeting counts too: the Mac
+opens a private, unlisted session for it (app/hear/live.py), so it is metered like an online one. A meeting under way is never
 cut off, whatever the balance; a Mac with no credit left gets 402 out_of_credit (its meeting was refused anyway).
 Own-key congregations get 409 own_key (they translate straight from the Mac).
 
@@ -80,15 +80,15 @@ def may_translate(device: dict[str, Any], cong: dict[str, Any]) -> JSONResponse 
     h = hear_api._hear()
     if cong["billing"] != "credits":
         return _no(409, "own_key", "This congregation translates with its own Anthropic key.")
-    live = h.live.get(cong["id"])
+    live = h.live.get_any(cong["id"])   # private ("this Wi-Fi only") sessions too
     if live is not None and live.device_id == device["id"]:
         return None                       # a meeting under way is never cut off
     if h.db.ended_lately(cong["id"], device["id"], TRAILING_S):
         return None
     if not h.db.can_start(cong):
         return _no(402, "out_of_credit", hear_api.billing_info(cong)["message"])
-    return _no(409, "not_live", "Translation on credit works only while the meeting is online on Hear Church. "
-                                "Set sharing to Online, or use your own Anthropic key (ask for a code).")
+    return _no(409, "not_live", "Translation on credit works only during a meeting started on this Mac while it "
+                                "can reach Hear Church. Check the internet connection, then start the meeting again.")
 
 
 @router.post("/api/hc/translate")

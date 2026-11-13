@@ -325,9 +325,11 @@ final class AppModel: ObservableObject {
         // Credits: no key on this Mac. Before the engine says, no key in the Keychain means credits too.
         let onCredits = engine.status.map { $0.claude_access == "credits" } ?? (keyState == .missing)
         if onCredits {
-            out.append(localSharing
-                       ? Check(id: "key", title: "Credits need online sharing", state: .bad,
-                               detail: "Translation on credit works only when sharing online. Switch sharing to Online, or use your own Anthropic key (ask us for a code).")
+            // This Wi-Fi only works on credits too (the engine opens a private billing link), but the translation
+            // still goes through hearchurch.com: without internet nothing could be translated.
+            out.append(localSharing && hubReachable == false
+                       ? Check(id: "key", title: "Translation on credit needs the internet", state: .bad,
+                               detail: "Phones listen on this Wi-Fi, but the translation goes through \(AppPaths.hub.host ?? "hearchurch.com"), which this Mac can't reach. Check the internet connection.")
                        : Check(id: "key", title: "Translation on Hear Church credit", state: .ok))
         } else {
         switch keyState {

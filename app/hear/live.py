@@ -7,8 +7,9 @@ An engine (the congregation's Mac) connects to /ws/engine with "Authorization: B
 (the legacy engine token path in app/engine.py is separate and unchanged) and then:
   engine → hub   {"type": "hello", name, languages, stream, busy}   (languages = every language it can
                      produce; the binary frames index into this list; stream must match this server's)
-                 {"type": "session_start", languages, speaker?, trial?, resume?}   languages = the ones offered;
-                     resume = the session code from an earlier "session_started" (reconnect within the grace)
+                 {"type": "session_start", languages, speaker?, trial?, resume?, private?}   languages = the ones
+                     offered; resume = the session code from an earlier "session_started" (reconnect within the
+                     grace); private = a "this Wi-Fi only" meeting (see below)
                  {"type": "languages", languages}      (offered languages changed during the meeting)
                  {"type": "hub", lang, msg, remember}  (a caption etc. for that language's listeners)
                  binary: one byte = index into hello.languages, then MP3 bytes
@@ -25,6 +26,13 @@ session stays open for hearchurch.grace_s (60 s) so a reconnect can resume it, t
 Credits: a new meeting of a credit-billed congregation with nothing left is refused here (`_start`, through
 Database.can_start); a running meeting, or one resuming after a drop or a hub restart, never is. Resuming after
 the grace counts only from the Mac (device token) that started that meeting, within 6 hours.
+
+Private sessions ("this Wi-Fi only" sharing on credits): the phones listen on the Mac itself, but the meeting still
+needs the hub for translation on credit (app/hear/proxy.py) and its meter. Such a session is a billing link only: it
+is recorded and metered like any other, but `get` (every public route: the listing, search, the congregation page,
+the streams and the listener socket) never returns it, nothing is published to waiting phones, captions and audio
+from the engine are dropped, and no listener counts are sent back (the Mac counts its own phones and meters only
+the languages they hear). `get_any` (the proxy, the admin) sees both kinds.
 """
 from __future__ import annotations
 
@@ -74,6 +82,7 @@ class LiveSession:
         self.link: Link | None = link
         self.device_id = link.device["id"]
         self.db_id, self.code, self.offered = db_id, code, offered
+        self.private = False  # "this Wi-Fi only": a billing link, never listed or reachable by phones here
         self.speaker = "en"   # the speaker's language: the phones in that language are told to listen in the room
         self.started = time.time()
         self.grace = None  # timer handle while the engine is away
@@ -102,6 +111,12 @@ class Live:
         self.started = time.time()          # "boot": caption numbers restart when the server does
 
     def get(self, cid: int) -> LiveSession | None:
+        """The congregation's public live session, for listeners and listings (never a private one)."""
+        s = self.sessions.get(cid)
+        return None if s is None or s.private else s
+
+    def get_any(self, cid: int) -> LiveSession | None:
+        """Any session under way, private ones included (translation on credit, admin)."""
         return self.sessions.get(cid)
 
     def waiting_hub(self, cid: int) -> Hub:
@@ -143,7 +158,7 @@ class Live:
                     item = await asyncio.wait_for(link.out.get(), LISTENERS_EVERY_S)
                 except asyncio.TimeoutError:
                     s = link.session
-                    count = (s.listeners(), s.captions(), s.heard()) if s else None
+                    count = (s.listeners(), s.captions(), s.heard()) if s and not s.private else None
                     if count is None or count == reported:
                         continue
                     reported = count
@@ -169,7 +184,7 @@ class Live:
             self._set_offered(link.session, [c for c in (m.get("languages") or []) if c in link.session.hubs])
         elif t == "session_stop" and link.session:
             self.end(link.session, notify=False)
-        elif t == "hub" and link.session:
+        elif t == "hub" and link.session and not link.session.private:
             self._caption(link.session, m)
         elif t == "meter":
             self._meter(link, m)
@@ -191,7 +206,7 @@ class Live:
             if old.link is link:
                 return refuse("This meeting is already started.")
             same = old.device_id == link.device["id"]
-            if m.get("resume") == old.code and (old.link is None or same):
+            if m.get("resume") == old.code and (old.link is None or same) and old.private == bool(m.get("private")):
                 old.speaker = str(m.get("speaker") or old.speaker)[:8]
                 self._resume(old, link, offered)
                 return
@@ -214,11 +229,15 @@ class Live:
                                      device_id=link.device["id"])
         s = LiveSession(cong, link, db_id, code, offered, link.languages, self.stream)
         s.speaker = str(m.get("speaker") or "en")[:8]
+        s.private = bool(m.get("private"))
         self.sessions[cong["id"]] = s
         link.session = s
+        link.send({"type": "session_started", "session": code, "resumed": False})
+        if s.private:   # nothing to tell phones here: they listen on the Mac
+            log.info("%s started a Wi-Fi-only meeting (%s) on %s", cong["slug"], ", ".join(offered), link.name)
+            return
         for c, h in s.hubs.items():
             h.publish({"type": "session", "session": code, "live": True})
-        link.send({"type": "session_started", "session": code, "resumed": False})
         self.waiting_hub(cong["id"]).publish({"type": "reload"})
         log.info("%s is live (%s) on %s", cong["slug"], ", ".join(offered), link.name)
 
@@ -262,7 +281,7 @@ class Live:
 
     def _mp3(self, link: Link, data: bytes) -> None:
         s = link.session
-        if s is None or len(data) < 2 or data[0] >= len(link.languages):
+        if s is None or s.private or len(data) < 2 or data[0] >= len(link.languages):
             return
         b = s.streams.get(link.languages[data[0]])
         if b is not None:

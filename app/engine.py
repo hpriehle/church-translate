@@ -24,7 +24,9 @@ import logging
 import os
 import subprocess
 import sys
+import hashlib
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -420,11 +422,17 @@ class EngineClient:
 
 class PublishClient(EngineClient):
     """Engine side of Hear Church: publish this computer's own locally started meetings to the hub as the
-    congregation's live session. The hub never sends audio here; it only relays what this computer makes."""
+    congregation's live session. The hub never sends audio here; it only relays what this computer makes.
 
-    def __init__(self, url: str, token: str, name: str) -> None:
+    "This Wi-Fi only" sharing: the meeting is announced as a *private* session, a billing link only. The hub
+    doesn't list it or serve it to phones (they listen on this Mac), nothing but the meter goes to it (no captions,
+    no audio), and the languages billed are the ones this Mac's own listeners hear. It lets the hub's translation
+    proxy see a meeting under way, so translation on credit works without online sharing."""
+
+    def __init__(self, url: str, token: str, name: str, meter_path: Path | None = None) -> None:
         super().__init__(url, token, name)
         self.announced = False            # session_start sent on this link and not stopped yet
+        self.private = False              # the announced session is "this Wi-Fi only" (a billing link, unlisted)
         self.session_code = ""            # the hub's code for the running session, for resuming after a drop
         self.refused_run = 0.0            # started_at of a meeting the hub refused (not asked again)
         self._offered: list[str] = []
@@ -432,6 +440,12 @@ class PublishClient(EngineClient):
         self.listeners = {"stream": 0, "captions": 0}  # phones on the hub, as it reports them
         self.heard: set[str] = set()      # languages with a phone on them, as the hub reports them: only these are billed
         self.meter: dict[str, dict[int, dict]] = {}   # session code → seq → speech not yet acknowledged by the hub
+        # Unacknowledged meter items are also kept on disk (a quit, a crash or a long drop doesn't lose them),
+        # for this hub and device only: a Mac signed into another congregation doesn't send them.
+        self.meter_path = meter_path
+        self._meter_owner = hashlib.sha256(f"{url}\n{token}".encode()).hexdigest()[:16]
+        self._meter_dirty, self._meter_saved = False, 0.0
+        self._load_meter()
 
     # Metering (credits): seconds of speech per chunk, in the languages someone listens to, are kept here and sent
     # every METER_EVERY_S until the hub acknowledges them (so a dropped link only delays them; the hub stores each
@@ -439,10 +453,60 @@ class PublishClient(EngineClient):
     METER_EVERY_S = 15.0
     METER_BATCH = 200
     METER_KEEP = 20000
+    METER_SAVE_S = 2.0   # at most one write of the meter file this often (and when the link drops, and at quit)
 
     def info(self) -> dict[str, Any]:
-        return {**super().info(), "mode": "publish", "live": self.running, "notice": self.notice,
-                "listeners": self.listeners if self.running else {"stream": 0, "captions": 0}}
+        public = self.running and not self.private
+        notice = self.notice
+        if not notice and self.private_wanted() and not self.connected and _m().S.settings.translate.backend == "hub":
+            notice = ("No internet: translation on Hear Church credit needs it, also for a meeting on this Wi-Fi "
+                      "only. Phones can still connect, but nothing is translated until the internet is back.")
+        return {**super().info(), "mode": "publish", "live": public, "wifi_only": self.private_wanted(),
+                "billing_link": self.running and self.private, "notice": notice,
+                "listeners": self.listeners if public else {"stream": 0, "captions": 0}}
+
+    @staticmethod
+    def private_wanted() -> bool:
+        """Sharing is "this Wi-Fi only": a meeting is announced as a private billing session."""
+        M = _m()
+        return bool(M.S.app_mode and M.S.settings.server.sharing == "local")
+
+    # ---------------------------------------------------------------- meter file
+    def _load_meter(self) -> None:
+        if self.meter_path is None or not self.meter_path.exists():
+            return
+        try:
+            data = json.loads(self.meter_path.read_text())
+            if data.get("owner") != self._meter_owner:
+                return
+            for code, items in (data.get("meter") or {}).items():
+                kept = {int(i["seq"]): {"seq": int(i["seq"]), "s": float(i["s"]), "langs": list(i["langs"])}
+                        for i in items}
+                if kept:
+                    self.meter[str(code)] = kept
+            if self.meter:
+                log.info("%d meter reports from before are waiting for the hub", sum(map(len, self.meter.values())))
+        except Exception as e:   # a damaged file: under-bill rather than break the app
+            log.warning("meter file not read: %s", e)
+
+    def _save_meter(self, force: bool = False) -> None:
+        if self.meter_path is None or not self._meter_dirty:
+            return
+        if not force and time.monotonic() - self._meter_saved < self.METER_SAVE_S:
+            return
+        try:
+            self.meter_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.meter_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"owner": self._meter_owner,
+                                       "meter": {c: list(v.values()) for c, v in self.meter.items()}}))
+            os.replace(tmp, self.meter_path)
+            self._meter_dirty, self._meter_saved = False, time.monotonic()
+        except Exception as e:
+            log.warning("meter file not written: %s", e)
+
+    def _meter_changed(self) -> None:
+        self._meter_dirty = True
+        self._save_meter()
 
     async def hub_api(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict[str, Any]]:
         """Call the hub's HTTP API with this Mac's device token (the operator page's balance and "Buy credit"):
@@ -481,7 +545,7 @@ class PublishClient(EngineClient):
                     self.announced, self.running = False, False
                     self.refused_run, self.notice = _m().S.pipeline.started_at, str(msg.get("message") or "refused")
                     log.warning("hub refused the meeting: %s", self.notice)
-                elif msg.get("type") == "listeners":
+                elif msg.get("type") == "listeners" and not self.private:
                     self.listeners = {"stream": int(msg.get("stream") or 0), "captions": int(msg.get("captions") or 0)}
                     if isinstance(msg.get("heard"), list):
                         self.heard = {c for c in msg["heard"] if isinstance(c, str)}
@@ -509,15 +573,15 @@ class PublishClient(EngineClient):
             _m().use_billing(str(data.get("billing") or ""))
 
     def _attach(self) -> None:
-        """Relay everything while a session is announced; the hub ignores it otherwise."""
+        """Relay everything while a public session is announced (a private one gets nothing but the meter)."""
         M = _m()
         for i, (code, ch) in enumerate(M.S.pipeline.channels.items()):
             def hub_tap(msg, remember, code=code):
-                if self.announced:
+                if self.announced and not self.private:
                     self._send({"type": "hub", "lang": code, "msg": msg, "remember": remember})
 
             def mp3_tap(data, i=i):
-                if self.announced:
+                if self.announced and not self.private:
                     self._send(bytes([i]) + data)
             self._tap(ch.hub.taps, hub_tap)
             self._tap(ch.broadcaster.taps, mp3_tap)
@@ -538,6 +602,7 @@ class PublishClient(EngineClient):
                 extra -= 1
             if not self.meter[code]:
                 del self.meter[code]
+        self._meter_changed()
 
     def _send_meter(self) -> None:
         for code, items in list(self.meter.items()):
@@ -556,6 +621,11 @@ class PublishClient(EngineClient):
             items.pop(seq, None)
         if not items:
             del self.meter[code]
+        self._meter_changed()
+
+    def _local_heard(self) -> set[str]:
+        """Languages with a phone on this Mac (stream or captions): what a Wi-Fi-only meeting bills."""
+        return {c for c, ch in _m().S.pipeline.channels.items() if ch.hub.count or ch.broadcaster.listeners}
 
     async def _publish_watch(self) -> None:
         """Announce a meeting started on this computer, follow its languages, and stop it when it is over."""
@@ -567,15 +637,21 @@ class PublishClient(EngineClient):
             if self.meter and time.monotonic() - metered >= self.METER_EVERY_S:
                 metered = time.monotonic()
                 self._send_meter()
-            local = M.S.app_mode and M.S.settings.server.sharing == "local"   # this Wi-Fi only: not on the hub
-            if local and self.announced:
+            self._save_meter()
+            local = self.private_wanted()   # this Wi-Fi only: a private billing session, not listed on the hub
+            if self.announced and self.private:
+                self.heard, self.listeners = self._local_heard(), {"stream": 0, "captions": 0}
+            if self.announced and local != self.private:   # sharing changed during the meeting: start over
                 self._send({"type": "session_stop"})
-                self.announced, self.running, self.session_code = False, False, ""
-            elif p.running and not local and not self.announced and p.started_at != self.refused_run:
+                self.announced, self.running, self.session_code, self.heard = False, False, "", set()
+            elif p.running and not self.announced and p.started_at != self.refused_run:
                 self._offered = list(p.on_channels)
-                self.announced = True
-                self._send({"type": "session_start", "languages": self._offered, "resume": self.session_code,
-                            "speaker": getattr(p, "speaker", "en")})
+                self.announced, self.private = True, local
+                start = {"type": "session_start", "languages": self._offered, "resume": self.session_code,
+                         "speaker": getattr(p, "speaker", "en")}
+                if local:
+                    start["private"] = True
+                self._send(start)
             elif self.announced and not p.running:
                 self._send({"type": "session_stop"})
                 self.announced, self.running, self.session_code = False, False, ""
@@ -589,5 +665,6 @@ class PublishClient(EngineClient):
         meter reports stay and go out on the next link."""
         self.announced, self.running, self.heard = False, False, set()
         self._detach()
+        self._save_meter(force=True)
         if not _m().S.pipeline.running:
             self.session_code = ""

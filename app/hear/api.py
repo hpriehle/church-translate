@@ -802,10 +802,11 @@ async def admin_list(request: Request):
     h = _hear()
     out = []
     for c in h.db.list_congregations():
-        s = h.live.get(c["id"])
+        s = h.live.get_any(c["id"])
         out.append({**{k: c[k] for k in ("id", "slug", "church", "name", "unit_type", "stake", "address", "email",
                                          "email_verified", "hidden", "created_at", "billing")},
                     "devices": len(h.db.devices(c["id"])), "live": s is not None,
+                    "wifi_only": bool(s and s.private),
                     "listeners": s.listeners() if s else 0,
                     "last_session": (h.db.sessions(c["id"]) or [{}])[-1].get("started_at"),
                     "balance": h.db.balance(c["id"])})
@@ -866,7 +867,7 @@ async def admin_hide(request: Request, cid: int):
     hidden = bool((await request.json()).get("hidden", True))
     if not h.db.set_hidden(cid, hidden):
         raise HTTPException(404)
-    s = h.live.get(cid)
+    s = h.live.get_any(cid)
     if hidden and s is not None:
         h.live.end(s, why="This congregation was hidden by the administrator.")  # it stops being live
     return {"ok": True, "hidden": hidden}

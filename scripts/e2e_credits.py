@@ -13,9 +13,11 @@
 6. a meeting over the engine's link (/ws/engine): session_start, then the engine's `meter` report of 90
    language-minutes (sent twice): the free hour goes first, the other 30 min cost $2.50 at $5/language-hour
 7. charge.refunded for part of the top-up (posted twice): the balance drops by the refunded part
-8. PASS/FAIL per step, exit 1 on any failure; the hub is stopped and the temp dir deleted.
+8. a "this Wi-Fi only" meeting: session_start with private=true starts a billing session that the congregation's
+   public page, search and listener socket don't show; its meter report (12 language-minutes) costs $1.00
+9. PASS/FAIL per step, exit 1 on any failure; the hub is stopped and the temp dir deleted.
 
-No Anthropic call (the translation proxy isn't part of this), no live keys, nothing deployed. Stripe is called
+No Anthropic call (the translation proxy isn't part of this; tests/test_wifi_only.py covers it with a fake), no live keys, nothing deployed. Stripe is called
 only in step 3 (create a test Checkout session, then read it back).
 """
 from __future__ import annotations
@@ -297,6 +299,44 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report) -> None:
                and b3["balance"]["bought_usd"] == (cents - refund_cents) / 100,
                f"${b2['balance_usd']:.2f} → ${b3['balance_usd']:.2f}, bought ${b3['balance']['bought_usd']:.2f}; "
                f"{b3['message']}")
+
+        # 8 ------------------------------------------------------------ a "this Wi-Fi only" meeting on credits
+        ws = await websockets.connect(f"{ws_base}/ws/engine", additional_headers=auth)
+        try:
+            await ws.send(json.dumps({"type": "hello", "name": "E2E Mac", "languages": ["fr", "es"],
+                                      "stream": {"sample_rate": st.sample_rate, "bitrate_kbps": st.bitrate_kbps}}))
+            await ws.send(json.dumps({"type": "session_start", "languages": ["fr", "es"], "private": True}))
+            started = await recv_on(ws, "session_started")
+            if not r.step("8 a Wi-Fi-only meeting starts a private billing session",
+                          started.get("type") == "session_started", started.get("message", "")):
+                return
+            info = (await c.get(f"/api/hc/c/{signup['slug']}")).json()
+            found = (await c.get("/api/hc/search", params={"q": f"E2E Credits {tag}"})).json()["results"]
+            async with websockets.connect(f"{ws_base}/c/{signup['slug']}/ws/listen") as phone:
+                await phone.send(json.dumps({"type": "hello", "lang": "fr"}))
+                init = await recv_on(phone, "init")
+            r.step("8 nothing public: the page, the search and a phone all see no meeting",
+                   info.get("live") is False and all(not x["live"] for x in found) and init.get("live") is False,
+                   f"page live={info.get('live')}, search live={[x['live'] for x in found]}, phone live={init.get('live')}")
+            items = [{"seq": i, "s": 60.0, "langs": ["fr"]} for i in range(1, 13)]   # fr heard on the Mac's Wi-Fi
+            await ws.send(json.dumps({"type": "meter", "session": started["session"], "items": items}))
+            ok = await recv_on(ws, "meter_ok")
+            await ws.send(json.dumps({"type": "session_stop"}))
+            await asyncio.sleep(0.3)
+        finally:
+            await ws.close()
+        b4 = await billing()
+        r.step("8 its 12 language-minutes are billed like an online meeting's ($1.00)",
+               len(ok.get("seqs", [])) == 12 and b4["balance"]["used_min"] == 102
+               and round(b3["balance_usd"] - b4["balance_usd"], 2) == 1.0,
+               f"used {b4['balance']['used_min']} min, ${b3['balance_usd']:.2f} → ${b4['balance_usd']:.2f}")
+
+
+async def recv_on(ws, kind: str) -> dict:
+    while True:
+        m = json.loads(await asyncio.wait_for(ws.recv(), 5))
+        if m.get("type") == kind or m.get("type") == "session_refused":
+            return m
 
 
 def main() -> int:

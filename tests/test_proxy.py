@@ -104,9 +104,9 @@ def test_who_may_translate(client, hear, claude):
     cong, token = make_cong(hear)
     assert client.post("/api/hc/translate", json=turn()).status_code == 403
     assert client.post("/api/hc/translate", json=turn(), headers=auth("nope")).status_code == 403
-    # credits, but no meeting live on the hub (e.g. shared on "this Wi-Fi only"): never metered, so no
+    # credits, but no meeting under way on the hub (online or Wi-Fi-only): never metered, so no
     r = client.post("/api/hc/translate", json=turn(), headers=auth(token))
-    assert r.status_code == 409 and r.json()["error"] == "not_live" and "Online" in r.json()["message"]
+    assert r.status_code == 409 and r.json()["error"] == "not_live" and "internet" in r.json()["message"]
     # another Mac of the congregation while this one is live: no
     other = hear.db.add_device(cong["id"], "Second Mac")
     go_live(hear, cong, token)

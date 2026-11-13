@@ -329,7 +329,8 @@ async def lifespan(app: FastAPI):
     import platform
 
     if eng.hub_url and eng.device_token:  # this computer publishes its own meetings as a Hear Church congregation
-        S.engine_client = PublishClient(eng.hub_url, eng.device_token, eng.name or platform.node().split(".")[0])
+        S.engine_client = PublishClient(eng.hub_url, eng.device_token, eng.name or platform.node().split(".")[0],
+                                        meter_path=HOME / "data" / "meter.json")
         bg.append(asyncio.create_task(S.engine_client.run_forever()))
     elif eng.hub_url and eng.token:  # this computer runs the meetings of a public server
         S.engine_client = EngineClient(eng.hub_url, eng.token, eng.name or platform.node().split(".")[0])
@@ -369,6 +370,8 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(0.4)
     except Exception:
         log.exception("could not tell the hub the session ended")
+    if isinstance(S.engine_client, PublishClient):
+        S.engine_client._save_meter(force=True)   # unsent meter reports go out on the next start
     for t in bg:
         t.cancel()
     for ch in S.pipeline.channels.values():
