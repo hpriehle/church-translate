@@ -210,6 +210,16 @@ the same 5 in test_app_mode/test_languages fail on this Linux box (Mac-only pack
   like the Stripe keys. Then restart the hub.
 - The Stripe webhook's events: add **`charge.refunded`** to the endpoint (step 2 above).
 
+## End-to-end check (branch `chat/hc-e2e`)
+
+`uv run python scripts/e2e_credits.py` runs the paid chain against a real local hub (free port, throwaway database,
+Stripe test mode only, no Anthropic call): sign-up on credits → a real Stripe TEST Checkout session (skipped with a
+fake id without `STRIPE_SECRET_KEY`; a live key is refused) → a signed `checkout.session.completed` posted twice
+(credited once; a bad signature → 400) → the meter over `/ws/engine` (90 language-minutes, sent twice: free hour,
+then $2.50) → a signed `charge.refunded` of 40 % (taken off once). Keys come from
+`~/.config/hearchurch/stripe-test.env` and are never printed. PASS/FAIL per check, exit 1 on any failure. The paid
+event is simulated, so Checkout's own payment intent isn't used (the script makes one up for the credit and refund).
+
 ## Still missing
 
 - After a refusal the Mac doesn't ask again for that run: after a top-up the operator stops and restarts the meeting.
