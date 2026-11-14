@@ -159,6 +159,7 @@ async def test_pipeline_bills_only_translated_languages(monkeypatch):
     pipe = Pipeline.__new__(Pipeline)
     pipe.settings, pipe.records, pipe.hints, pipe._seq = settings, {}, [], 0
     pipe.source, pipe.prev_en, pipe.prev_lang, pipe.metrics = "", "", "", None
+    pipe.meeting_id = "m1"
     pipe.loop = asyncio.get_running_loop()
     pipe.chunk_q, pipe.stt_ready = asyncio.Queue(), asyncio.Event()
     pipe.stt_ready.set()
@@ -187,7 +188,7 @@ async def test_pipeline_bills_only_translated_languages(monkeypatch):
     taps = []
     pipe.speech_taps = [lambda seq, s, langs: taps.append((seq, langs))]
     chunk = SimpleNamespace(start_s=0, duration=1, voiced_s=1.0, reason="x", t_speech_start=0, t_speech_end=0,
-                            t_cut=0, audio=None)
+                            t_cut=0, audio=None, meeting="")
     task = asyncio.create_task(pipe._stt_stage())
     pipe.chunk_q.put_nowait(chunk)
     pipe.chunk_q.put_nowait(chunk)

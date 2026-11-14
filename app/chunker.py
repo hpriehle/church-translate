@@ -58,6 +58,7 @@ class Chunk:
     t_cut: float                 # monotonic clock when the chunk was emitted
     voiced_s: float
     reason: str
+    meeting: str = ""            # the meeting it was heard in (set by the pipeline)
 
     @property
     def duration(self) -> float:

@@ -15,7 +15,11 @@ final class Engine: ObservableObject {
     @Published private(set) var status: EngineStatus?
     @Published private(set) var packages: [PackageStatus] = []
     @Published private(set) var settings: EngineSettings?
-    @Published private(set) var chunks: [Chunk] = []          // newest first
+    @Published private(set) var chunks: [Chunk] = []          // newest first, the current (or last) meeting's only
+    /// The meeting `chunks` belong to (the engine's id; nil for engines before V3.4, which don't send one).
+    @Published private(set) var meetingID: String?
+    /// That meeting's translation languages as the engine last reported them: the transcript's columns after it ends.
+    @Published private(set) var meetingTargets: [String] = []
     @Published private(set) var log: [LogLine] = []           // newest first
     /// Which languages' downloads to follow (the operator's choice, also during setup).
     var packageLanguages: [String] = [] { didSet { if oldValue != packageLanguages { Task { await refreshPackages() } } } }
@@ -166,7 +170,10 @@ final class Engine: ObservableObject {
                         await self.loadSettings()
                         self.onRunning?()
                     }
-                    if self.status != s { self.status = s }
+                    if self.status != s {
+                        self.status = s
+                        self.followMeeting(s)
+                    }
                     if tick % 10 == 0 || self.packages.contains(where: { $0.state == "downloading" }) {
                         await self.refreshPackages()
                     }
@@ -280,15 +287,40 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// A new meeting: the transcript starts empty, with the new meeting's columns. Old meetings live on only in
+    /// their reports.
+    private func newMeeting(_ id: String, targets: [String]?) {
+        if id != meetingID {
+            meetingID = id
+            chunks.removeAll()
+        }
+        if let targets { meetingTargets = targets }
+    }
+
+    /// The status names the current (or last) meeting: catches a start whose "meeting" message was missed (the
+    /// feed reconnecting), and keeps the columns in step with languages switched on or off during it.
+    private func followMeeting(_ s: EngineStatus) {
+        guard let id = s.pipeline.meeting_id else { return }
+        newMeeting(id, targets: s.pipeline.running ? s.meeting?.targets : nil)
+    }
+
     private func handle(_ data: Data) {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         switch json["type"] as? String {
+        case "meeting":
+            guard let id = json["meeting"] as? String else { return }
+            newMeeting(id, targets: json["targets"] as? [String])
         case "chunk":
             guard let c = try? JSONDecoder().decode(Chunk.self, from: data) else { return }
+            if let m = c.meeting, !m.isEmpty {
+                // A line still finishing from an earlier meeting: not part of this transcript.
+                if meetingID == nil { meetingID = m } else if m != meetingID { return }
+            } else if let first = chunks.first, c.seq < first.seq {
+                chunks.removeAll()   // engines before V3.4: numbering started over, so a new meeting started
+            }
             if let i = chunks.firstIndex(where: { $0.seq == c.seq }) {
                 chunks[i] = c
             } else {
-                if let first = chunks.first, c.seq < first.seq { chunks.removeAll() }   // a new meeting started
                 chunks.insert(c, at: 0)
                 if chunks.count > 300 { chunks.removeLast(chunks.count - 300) }
             }
@@ -383,11 +415,60 @@ struct EngineStatus: Decodable, Equatable {
         let backlog_s: Double?
         let behind_s: [String: Double]?   // per translation language: its last line's delay behind the speaker
         let last_error: String?
+        // V3.4: the operator's live stats (what the old web operator page showed)
+        let meeting_id: String?           // the current (or last) meeting; every chunk carries the one it was heard in
+        let stt_engine: String?           // "mlx" (Apple Silicon) or "faster-whisper" (Intel)
+        let stt_model: String?
+        let stt_rtf: Double?              // seconds of work per second of speech (faster-whisper)
+        let stt_skipped: Int?             // lines skipped because speech recognition fell behind
+        let stt_stepped_down: String?     // why a smaller speech model is used, if it was stepped down
+        let queues: [String: Int]?
+        let channels: [String: Channel]?
+        let meeting_stats: MeetingStats?
+    }
+    /// One translation language right now.
+    struct Channel: Decodable, Equatable {
+        struct Tts: Decodable, Equatable { let engine: String?; let voice: String?; let error: String? }
+        let backlog_s: Double?            // seconds of voice waiting to be played
+        let speed: Double?                // voice speed-up to catch up (1 = normal)
+        let condense: Bool?               // translations shortened to catch up
+        let queues: [String: Int]?        // lines waiting for translation / voice
+        let tts: Tts?
+        let listeners: Listeners?         // phones on this Mac (Wi-Fi sharing)
+        let underruns: Int?
+    }
+    /// The meeting so far (app/metrics.py live_stats).
+    struct MeetingStats: Decodable, Equatable {
+        struct Lang: Decodable, Equatable {
+            let lines: Int
+            let captioned: Int
+            let aired: Int
+            let dropped: Int
+            let skipped: Int
+            let failed: Int
+            let merged: Int?
+            let sped_up: Int?
+            let condensed: Int?
+            let engines: [String: Int]?
+            let caption_p50: Double?
+            let caption_p95: Double?
+            let audio_p50: Double?
+            let audio_p95: Double?
+        }
+        let lines: Int
+        let skipped: Int
+        let failed: Int
+        let speech_s: Double
+        let stt_ms_p50: Double?
+        let in_progress: Int?
+        let usage: [String: Double]?
+        let langs: [String: Lang]
     }
     struct Translate: Decodable, Equatable {
-        struct Claude: Decodable, Equatable { let state: String }
+        struct Claude: Decodable, Equatable { let state: String; let model: String?; let busy_for: Double? }
         let claude: Claude
         let last_error: String?
+        let counts: [String: Int]?
     }
     struct Link: Decodable, Equatable {
         let connected: Bool?
@@ -395,6 +476,7 @@ struct EngineStatus: Decodable, Equatable {
         let error: String?
         let notice: String?
         let listeners: Listeners?
+        let listeners_by_lang: [String: Listeners]?   // hubs since V3.4
     }
     struct EngineInfo: Decodable, Equatable { let client: Link? }
     struct Listeners: Decodable, Equatable { let stream: Int; let captions: Int }
@@ -463,11 +545,20 @@ struct Chunk: Decodable, Equatable, Identifiable {
         let text: String
         let status: String     // pending|captioned|aired|dropped|skipped|failed|merged
         let note: String?
-        let caption_lag: Double?
+        let caption_lag: Double?   // seconds from the end of the speech to this caption: how far behind it is
         let engine: String?    // "original": pass-through, the speaker spoke this language
+        let air_lag: Double?   // … to its voice starting on the phones
+        let mt_ms: Double?
+        let tts_ms: Double?
+        let speed: Double?
+        let condensed: Bool?
         var original: Bool { engine == "original" }
     }
     let seq: Int
+    let meeting: String?       // the meeting it was heard in (V3.4)
+    let audio_dur_s: Double?
+    let stt_ms: Double?
+    let cut_reason: String?
     let en: String             // what was said, as recognised, in `src`
     let src: String?           // the chunk's language: one of the meeting's speaker languages
     let status: String

@@ -536,7 +536,18 @@
       + `<span class="meta">${eng}${bits.join(" · ")}</span></td>`;
   }
 
+  // A new meeting: its own table (earlier meetings are in their reports).
+  let meeting = "";
+  function newMeeting(m) {
+    meeting = m.meeting || "";
+    rows.forEach((tr) => tr.remove()); rows.clear();
+    for (const k in lags) delete lags[k];
+    dropped = 0;
+    $("chunkCount").textContent = 0; $("dropped").textContent = 0; $("capLag").textContent = "–"; $("airLag").textContent = "–";
+  }
+
   function upsertChunk(r) {
+    if (meeting && r.meeting && r.meeting !== meeting) return;   // still finishing from an earlier meeting
     let tr = rows.get(r.seq);
     if (!tr) {
       tr = document.createElement("tr");
@@ -579,6 +590,7 @@
       const m = JSON.parse(ev.data);
       if (m.type === "restarting") { if ($("overlay").hidden) waitForRestart(); }
       else if (m.type === "status") updateStatus(m);
+      else if (m.type === "meeting") newMeeting(m);
       else if (m.type === "chunk") upsertChunk(m);
       else if (m.type === "log") log(m.text, m.level);
     };

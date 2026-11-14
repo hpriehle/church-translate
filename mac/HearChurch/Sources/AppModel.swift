@@ -75,6 +75,12 @@ final class AppModel: ObservableObject {
         localSharing ? (engine.status?.listeners.captions ?? 0) : (engine.status?.engine.client?.listeners?.captions ?? 0)
     }
 
+    /// Phones on one language now (captions open, the voice included), if the engine / hub reports it per language.
+    func listeners(_ code: String) -> Int? {
+        if localSharing { return engine.status?.pipeline.channels?[code]?.listeners?.captions }
+        return engine.status?.engine.client?.listeners_by_lang?[code]?.captions ?? (listeners == 0 ? 0 : nil)
+    }
+
     func setSharing(local: Bool) async {
         await engine.set(["server": ["sharing": local ? "local" : "cloud"]])
         // The engine picks its network address when it starts (this Mac only, or the Wi-Fi for local

@@ -66,6 +66,7 @@ class ChunkRecord:
     status: str = "pending"       # pending|done|skipped|failed (speech-recognition level)
     out: dict[str, LangResult] = field(default_factory=dict)
     wall_time: float = field(default_factory=time.time)
+    meeting: str = ""             # the meeting it was heard in (Pipeline.meeting_id)
 
     @property
     def complete(self) -> bool:
@@ -151,4 +152,48 @@ def summarize(records: list[dict[str, Any]], lang: str) -> dict[str, Any]:
         "backlog": percentiles([x["backlog_at_enqueue"] for x in aired]),
         "sped_up": sum(1 for x in aired if x.get("speed", 1) > 1.0),
         "condensed": sum(1 for x in rs if x.get("condensed")),
+    }
+
+
+def _p(values: list[float], q: float) -> float | None:
+    vals = sorted(v for v in values if v is not None)
+    return round(vals[min(len(vals) - 1, int(q * len(vals)))], 1) if vals else None
+
+
+def live_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """A running meeting's numbers for the operator (what the old web operator page showed): lines heard and
+    skipped, seconds of speech, and per translation language how many lines were captioned / voiced / had their
+    audio dropped / failed, which translator made them, and how far behind the speaker captions and voices were
+    (median and 95th percentile). `records` are finished chunks (ChunkRecord.public()) of one meeting."""
+    langs: dict[str, dict[str, Any]] = {}
+    for code in languages_in(records):
+        rs = [r["langs"][code] for r in records if code in r.get("langs", {})]
+        engines: dict[str, int] = {}
+        for x in rs:
+            if x.get("t_caption") and x.get("engine"):
+                engines[x["engine"]] = engines.get(x["engine"], 0) + 1
+        cap = [x.get("caption_lag") for x in rs if x.get("t_caption")]
+        air = [x.get("air_lag") for x in rs if x["status"] == "aired"]
+        langs[code] = {
+            "lines": len(rs),
+            "captioned": len(cap),
+            "aired": len(air),
+            "dropped": sum(1 for x in rs if x["status"] == "dropped"),
+            "skipped": sum(1 for x in rs if x["status"] == "skipped"),
+            "failed": sum(1 for x in rs if x["status"] == "failed"),
+            "merged": sum(1 for x in rs if x["status"] == "merged"),
+            "sped_up": sum(1 for x in rs if (x.get("speed") or 1) > 1.0),
+            "condensed": sum(1 for x in rs if x.get("condensed")),
+            "engines": engines,
+            "caption_p50": _p(cap, .5), "caption_p95": _p(cap, .95),
+            "audio_p50": _p(air, .5), "audio_p95": _p(air, .95),
+        }
+    heard = [r for r in records if r["status"] not in ("skipped", "failed")]
+    return {
+        "lines": len(heard),
+        "skipped": sum(1 for r in records if r["status"] == "skipped"),
+        "failed": sum(1 for r in records if r["status"] == "failed"),
+        "speech_s": round(sum(r.get("voiced_s") or 0 for r in heard), 1),
+        "stt_ms_p50": _p([r["stt_ms"] for r in heard if r.get("stt_ms")], .5),
+        "langs": langs,
     }

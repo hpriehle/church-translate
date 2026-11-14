@@ -182,7 +182,10 @@ private struct Sidebar: View {
                     }
                     if model.running { DuringMeeting() } else { BeforeMeeting() }
                     SoundSection()
-                    if model.running { LanguagesSection() }   // before a meeting the selector is large, in the main pane
+                    if model.running {
+                        LanguagesSection()   // before a meeting the selector is large, in the main pane
+                        StatsSection()
+                    }
                 }
                 .padding(16)
             }
@@ -326,6 +329,156 @@ private struct LanguagesSection: View {
     }
 }
 
+/// During a meeting: the live numbers the old web operator page showed, compact and collapsible.
+private struct StatsSection: View {
+    @EnvironmentObject var model: AppModel
+    @AppStorage("statsOpen") private var open = true
+
+    var body: some View {
+        let st = model.engine.status
+        let p = st?.pipeline
+        let m = p?.meeting_stats
+        VStack(alignment: .leading, spacing: 8) {
+            Button { open.toggle() } label: {
+                HStack(spacing: 4) {
+                    Text("STATS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            if open {
+                if let m {
+                    line("Heard", "\(m.lines) lines · \(Format.minutes(m.speech_s)) of speech")
+                    if m.skipped > 0 || (p?.stt_skipped ?? 0) > 0 {
+                        line("Skipped", skips(m, behind: p?.stt_skipped ?? 0),
+                             warn: (p?.stt_skipped ?? 0) > 0,
+                             help: "Stretches with no words (noise, music) are skipped. On a slow Mac, speech recognition also skips to the newest speech when it falls behind.")
+                    }
+                }
+                line("Speech model", sttText(p), warn: !(p?.stt_stepped_down ?? "").isEmpty,
+                     help: p?.stt_stepped_down?.isEmpty == false ? p!.stt_stepped_down! : "The speech recognition model in use")
+                if let claude = st?.translate.values.first?.claude.model, !claude.isEmpty {
+                    line("Translator", "Claude \(claude)" + usage(m?.usage, credits: st?.claude_access == "credits"))
+                }
+                ForEach(model.targets, id: \.self) { code in
+                    LanguageStats(code: code)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func line(_ key: String, _ value: String, warn: Bool = false, help: String = "") -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(key).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value).multilineTextAlignment(.trailing).foregroundStyle(warn ? .orange : .primary)
+        }
+        .font(.callout.monospacedDigit())
+        .help(help)
+    }
+
+    private func skips(_ m: EngineStatus.MeetingStats, behind: Int) -> String {
+        var bits: [String] = []
+        if m.skipped - behind > 0 { bits.append("\(m.skipped - behind) no words") }
+        if behind > 0 { bits.append("\(behind) to catch up") }
+        if m.failed > 0 { bits.append("\(m.failed) failed") }
+        return bits.joined(separator: " · ")
+    }
+
+    private func sttText(_ p: EngineStatus.Pipeline?) -> String {
+        guard let p, let name = p.stt_model, !name.isEmpty else { return p?.stt_ready == true ? "Ready" : "Loading…" }
+        var text = name.replacingOccurrences(of: "whisper-", with: "")
+        if p.stt_engine == "faster-whisper", let rtf = p.stt_rtf, rtf > 0 { text += String(format: " · %.2f×", rtf) }
+        if p.stt_stepped_down?.isEmpty == false { text += " (smaller)" }
+        return text
+    }
+
+    /// Claude requests and tokens this meeting; the cost only with the congregation's own key (credits are billed
+    /// per language-hour, not per token).
+    private func usage(_ u: [String: Double]?, credits: Bool) -> String {
+        guard let u, let turns = u["turns"], turns > 0 else { return "" }
+        let input = (u["input"] ?? 0) + (u["cache_read"] ?? 0) + (u["cache_write"] ?? 0)
+        var text = " · \(Int(turns)) requests · \(Int(input / 1000))k in / \(String(format: "%.1f", (u["output"] ?? 0) / 1000))k out"
+        if !credits, let cost = u["cost_usd"], cost > 0 { text += String(format: " · $%.2f", cost) }
+        return text
+    }
+}
+
+/// One translation language: listeners, how far behind it is now, its delays so far, and what went wrong.
+private struct LanguageStats: View {
+    @EnvironmentObject var model: AppModel
+    let code: String
+
+    var body: some View {
+        let st = model.engine.status
+        let ch = st?.pipeline.channels?[code]
+        let s = st?.pipeline.meeting_stats?.langs[code]
+        let t = st?.translate[code]
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(OutputLanguage.name(code)).font(.callout.weight(.semibold))
+                if let n = model.listeners(code) {
+                    Label("\(n)", systemImage: "person.fill").font(.caption).foregroundStyle(.secondary)
+                        .help("Phones on \(OutputLanguage.name(code)) now")
+                }
+                Spacer(minLength: 6)
+                if let b = st?.pipeline.behind_s?[code] {
+                    Text(String(format: "%.0f s behind", b)).font(.caption.monospacedDigit())
+                        .foregroundStyle(b > 15 ? .red : b > 8 ? .orange : .secondary)
+                        .help("The latest line's delay behind the speaker")
+                }
+            }
+            if let s, s.captioned > 0 {
+                Text(delays(s)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .help("Captions and voices after the speaker finished a sentence: typical (median) and slowest 5%")
+            }
+            let now = current(ch, busyFor: t?.claude.state == "busy" ? t?.claude.busy_for : nil)
+            if !now.isEmpty { Text(now).font(.caption.monospacedDigit()).foregroundStyle(.orange) }
+            if let s {
+                let issues = problems(s)
+                if !issues.isEmpty { Text(issues).font(.caption).foregroundStyle(.secondary) }
+            }
+            if let e = ch?.tts?.error, !e.isEmpty { Text("Voice: \(e)").font(.caption).foregroundStyle(.red) }
+        }
+    }
+
+    private func delays(_ s: EngineStatus.MeetingStats.Lang) -> String {
+        var text = "\(s.captioned) lines · captions \(Format.seconds(s.caption_p50)) (95%: \(Format.seconds(s.caption_p95)))"
+        if s.aired > 0 { text += " · voice \(Format.seconds(s.audio_p50)) (95%: \(Format.seconds(s.audio_p95)))" }
+        return text
+    }
+
+    /// Catching up right now: voice waiting, sped up, shortened, lines queued, a slow translation.
+    private func current(_ ch: EngineStatus.Channel?, busyFor: Double?) -> String {
+        guard let ch else { return "" }
+        var bits: [String] = []
+        if let b = ch.backlog_s, b >= 3 { bits.append(String(format: "%.0f s of voice waiting", b)) }
+        if let sp = ch.speed, sp > 1.001 { bits.append(String(format: "voice %.2f×", sp)) }
+        if ch.condense == true { bits.append("shortening") }
+        let waiting = (ch.queues?["translate"] ?? 0) + (ch.queues?["tts"] ?? 0)
+        if waiting > 1 { bits.append("\(waiting) lines queued") }
+        if let b = busyFor, b > 3 { bits.append("translating for \(Int(b)) s") }
+        return bits.joined(separator: " · ")
+    }
+
+    private func problems(_ s: EngineStatus.MeetingStats.Lang) -> String {
+        var bits: [String] = []
+        if s.dropped > 0 { bits.append("\(s.dropped) voice skipped to catch up") }
+        if (s.sped_up ?? 0) > 0 { bits.append("\(s.sped_up!) sped up") }
+        if (s.condensed ?? 0) > 0 { bits.append("\(s.condensed!) shortened") }
+        if s.failed > 0 { bits.append("\(s.failed) failed") }
+        if let e = s.engines {
+            let other = e.filter { $0.key != "claude" && $0.key != "original" && $0.value > 0 }
+            for (k, v) in other.sorted(by: { $0.key < $1.key }) { bits.append("\(v) by \(k == "none" ? "nobody (untranslated)" : k)") }
+        }
+        return bits.joined(separator: " · ")
+    }
+}
+
 private struct ListenersSection: View {
     @EnvironmentObject var model: AppModel
     @State private var copied = false
@@ -421,13 +574,11 @@ private struct TranscriptView: View {
         }
     }
 
-    /// The meeting's translation languages, then any other language still in the shown sentences (switched off since).
+    /// Original + exactly the meeting's translation languages: during a meeting the ones switched on now (a column
+    /// comes and goes with its toggle); afterwards the ones the last meeting ended with.
     private var columns: [String] {
-        var out = model.targets
-        for c in model.engine.chunks.prefix(50) {
-            for code in c.langs.keys.sorted() where !out.contains(code) { out.append(code) }
-        }
-        return out
+        if model.running || model.engine.meetingTargets.isEmpty { return model.targets }
+        return model.engine.meetingTargets
     }
 
     private var summary: String {
@@ -508,6 +659,7 @@ private struct ChunkRow: View {
                         Text(Date(timeIntervalSince1970: t), style: .time).font(.caption).foregroundStyle(.tertiary)
                     }
                 }
+                .help(heardDetail)
                 Text(chunk.en.isEmpty ? "…" : chunk.en).textSelection(.enabled)
                 if chunk.status == "skipped" || chunk.status == "failed" {
                     Text(chunk.note ?? chunk.status).font(.caption).foregroundStyle(.secondary)
@@ -525,6 +677,10 @@ private struct ChunkRow: View {
                             Text(out.text.isEmpty ? (out.status == "pending" ? "…" : "—") : out.text)
                                 .foregroundStyle(color(out.status)).textSelection(.enabled)
                             if let note = note(out) { Text(note).font(.caption).foregroundStyle(.orange) }
+                            if let delay = Self.delay(out) {
+                                Text(delay.text).font(.caption.monospacedDigit()).foregroundStyle(delay.color)
+                                    .help(Self.detail(out))
+                            }
                         }
                     } else {
                         Text("—").foregroundStyle(.tertiary)
@@ -533,6 +689,44 @@ private struct ChunkRow: View {
                 .cell(width)
             }
         }
+    }
+
+    /// Under the original: how long the stretch was and how long speech recognition took.
+    private var heardDetail: String {
+        var bits: [String] = []
+        if let d = chunk.audio_dur_s { bits.append(String(format: "%.1f s of speech", d)) }
+        if let ms = chunk.stt_ms, ms > 0 { bits.append("recognised in \(Int(ms)) ms") }
+        if let why = chunk.cut_reason, !why.isEmpty { bits.append("cut: \(why)") }
+        return bits.joined(separator: " · ")
+    }
+
+    /// The line's own delay behind the speaker: caption, then voice. Orange from 8 s, red from 15 s (as the old
+    /// operator page).
+    static func delay(_ out: Chunk.Out) -> (text: String, color: Color)? {
+        guard let cap = out.caption_lag else { return nil }
+        var text = String(format: "%.1f s behind", cap)
+        var worst = cap
+        if out.status == "aired", let air = out.air_lag {
+            text += String(format: " · voice %.1f s", air)
+            worst = max(worst, air)
+        } else if out.status == "dropped" {
+            text += " · no voice"
+        }
+        return (text, worst > 15 ? .red : worst > 8 ? .orange : .secondary)
+    }
+
+    /// The tooltip on the delay: who translated it and how long each step took.
+    static func detail(_ out: Chunk.Out) -> String {
+        var bits = ["Caption: after the speaker finished the sentence"]
+        switch out.engine {
+        case "original": bits.append("passed through as spoken")
+        case let e? where !e.isEmpty: bits.append("translated by \(e.capitalized)" + (out.mt_ms.map { " in \(Int($0)) ms" } ?? ""))
+        default: break
+        }
+        if let ms = out.tts_ms, ms > 0 { bits.append("voice made in \(Int(ms)) ms") }
+        if let sp = out.speed, sp > 1.001 { bits.append(String(format: "voice sped up %.2f×", sp)) }
+        if out.condensed == true { bits.append("shortened to catch up") }
+        return bits.joined(separator: " · ")
     }
 
     private func color(_ status: String) -> Color {

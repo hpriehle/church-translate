@@ -170,7 +170,7 @@ class EngineHub:
             msg = m.get("msg") or {}
             if msg.get("type") == "status":
                 self.status = msg
-            elif msg.get("type") in ("chunk", "log") and self.run_active:
+            elif msg.get("type") in ("chunk", "log", "meeting") and self.run_active:
                 M.S.operator.publish(msg)
         elif t == "done":
             self._end_run()
@@ -439,6 +439,7 @@ class PublishClient(EngineClient):
         self._speakers: list[str] = []
         self.notice = ""                  # the hub's last refusal / ending of our session, for the operator page
         self.listeners = {"stream": 0, "captions": 0}  # phones on the hub, as it reports them
+        self.listeners_by_lang: dict[str, dict[str, int]] = {}   # the same per language (hubs since V3.4)
         self.heard: set[str] = set()      # languages with a phone on them, as the hub reports them: only these are billed
         self.meter: dict[str, dict[int, dict]] = {}   # session code → seq → speech not yet acknowledged by the hub
         # Unacknowledged meter items are also kept on disk (a quit, a crash or a long drop doesn't lose them),
@@ -464,7 +465,8 @@ class PublishClient(EngineClient):
                       "only. Phones can still connect, but nothing is translated until the internet is back.")
         return {**super().info(), "mode": "publish", "live": public, "wifi_only": self.private_wanted(),
                 "billing_link": self.running and self.private, "notice": notice,
-                "listeners": self.listeners if public else {"stream": 0, "captions": 0}}
+                "listeners": self.listeners if public else {"stream": 0, "captions": 0},
+                "listeners_by_lang": self.listeners_by_lang if public else {}}
 
     @staticmethod
     def private_wanted() -> bool:
@@ -551,6 +553,10 @@ class PublishClient(EngineClient):
                     self.listeners = {"stream": int(msg.get("stream") or 0), "captions": int(msg.get("captions") or 0)}
                     if isinstance(msg.get("heard"), list):
                         self.heard = {c for c in msg["heard"] if isinstance(c, str)}
+                    if isinstance(msg.get("langs"), dict):
+                        self.listeners_by_lang = {
+                            c: {"stream": int(v[0] or 0), "captions": int(v[1] or 0)} for c, v in msg["langs"].items()
+                            if isinstance(c, str) and isinstance(v, list) and len(v) == 2}
                 elif msg.get("type") == "meter_ok":
                     self._metered(msg)
                 elif msg.get("type") == "session_ended":  # the hub closed it (e.g. hidden): stop sending, don't re-announce

@@ -23,7 +23,7 @@ from .backlog import BacklogPolicy
 from .channel import Channel
 from .chunker import Chunk, Chunker, SileroVad
 from .config import HOME, LOG_DIR, Settings, tts_for
-from .metrics import ChunkRecord, LangResult, MetricsLog
+from .metrics import ChunkRecord, LangResult, MetricsLog, live_stats
 from .stt import Transcriber, build_prompt, resolve_engine
 from .translate.prompts import whisper_hints
 
@@ -59,6 +59,10 @@ class Pipeline:
         self.source = ""                # the language of the last recognised chunk ("" before the first)
         self._seq = 0
         self.session_id: str | None = None  # one per run; listeners only ever see the current one
+        # The current (or last) meeting's id: kept after it ends, so the operator's transcript can tell its lines
+        # from an earlier meeting's. Every chunk carries the id of the meeting it was heard in.
+        self.meeting_id = ""
+        self._stats_cache: tuple[int, dict[str, Any]] | None = None
         self._tasks: list[asyncio.Task] = []
         self.last_error = ""
         self.last_report: Path | None = None
@@ -208,6 +212,13 @@ class Pipeline:
                     self.metrics.path.with_name(f"{self.metrics.path.stem}-{ch.code}.mp3"))
             u = ch.translator.usage()
             self._usage_at_start[ch.code] = {k: getattr(u, k) for k in ("input", "cache_read", "cache_write", "output", "cost_usd", "turns")}
+        # New meeting id before capture starts: every chunk it hears carries it (chunks from an earlier meeting still
+        # finishing keep theirs, and the operator's transcript leaves them out).
+        mid = time.strftime("%Y%m%d-%H%M%S")
+        if self.meeting_id.startswith(mid):   # two meetings in the same second
+            mid += f"-{int(self.meeting_id.rsplit('-', 1)[-1]) + 1 if self.meeting_id.count('-') > 1 else 2}"
+        self.meeting_id = self.session_id = mid
+        self._stats_cache = None
         self.worker = CaptureWorker(source, chunker, a.input_gain, self._on_chunk_thread,
                                     self._on_level_thread, self._on_end_thread)
         self.capturing = True
@@ -221,10 +232,12 @@ class Pipeline:
             ch.translator.prepare_fallback()
         log.info("started: %s → %s", source.label, ", ".join(self.on_channels) or "no languages")
         # New session: phones clear what they show, and nobody is sent captions from earlier runs.
-        self.session_id = time.strftime("%Y%m%d-%H%M%S")
         for ch in self.channels.values():
             ch.hub.history.clear()
             ch.hub.publish({"type": "session", "session": self.session_id, "live": True})
+        # The operator's transcript (web page, Mac app) starts empty, with a column per translation language.
+        self.operator.publish({"type": "meeting", "meeting": self.meeting_id, "speakers": self.speakers,
+                               "targets": list(self.on_channels)})
         self.operator.publish({"type": "log", "level": "info", "text": f"Started — {source.label}"})
 
     def stop(self) -> None:
@@ -234,6 +247,7 @@ class Pipeline:
 
     # ------------------------------------------------------------ capture thread callbacks
     def _on_chunk_thread(self, chunk: Chunk) -> None:
+        chunk.meeting = self.meeting_id   # the meeting it was heard in (a later meeting may start before it is done)
         self.loop.call_soon_threadsafe(self.chunk_q.put_nowait, chunk)
 
     def _on_level_thread(self, db: float) -> None:
@@ -306,7 +320,8 @@ class Pipeline:
             self._seq += 1
             rec = ChunkRecord(seq=self._seq, audio_start_s=round(chunk.start_s, 2), audio_dur_s=round(chunk.duration, 2),
                               voiced_s=round(chunk.voiced_s, 2), cut_reason=chunk.reason,
-                              t_speech_start=chunk.t_speech_start, t_speech_end=chunk.t_speech_end, t_cut=chunk.t_cut)
+                              t_speech_start=chunk.t_speech_start, t_speech_end=chunk.t_speech_end, t_cut=chunk.t_cut,
+                              meeting=chunk.meeting or self.meeting_id)
             self.records[rec.seq] = rec
             try:
                 await self.stt_ready.wait()
@@ -450,6 +465,29 @@ class Pipeline:
             ch.translator.reload(settings.translate, self.glossary(code), self.speakers)
         self._setup_scripture()
 
+    def _stt_model(self) -> str:
+        if self.stt.engine == "mlx":
+            return str(self.settings.stt.model).rsplit("/", 1)[-1]
+        return self.stt.model_name or self.settings.stt.faster_whisper_model
+
+    def meeting_stats(self) -> dict[str, Any]:
+        """The current (or last) meeting so far: lines, skips, delays per language and Claude use (the operator's
+        Stats). Recomputed only when a line finished."""
+        records = self.metrics.records if self.metrics else []
+        if self._stats_cache and self._stats_cache[0] == len(records):
+            stats = self._stats_cache[1]
+        else:
+            stats = live_stats(records)
+            self._stats_cache = (len(records), stats)
+        usage: dict[str, float] = {}
+        for code, ch in self.channels.items():
+            if code not in self._usage_at_start:
+                continue
+            u, u0 = ch.translator.usage(), self._usage_at_start[code]
+            for k in ("input", "cache_read", "cache_write", "output", "cost_usd", "turns"):
+                usage[k] = round(usage.get(k, 0) + getattr(u, k) - u0.get(k, 0), 4)
+        return {**stats, "in_progress": len(self.records), "usage": usage}
+
     def status(self) -> dict[str, Any]:
         chans = {code: {**ch.status(), "paused": False, "passthrough": code == self.source}
                  for code, ch in self.on_channels.items()}
@@ -469,6 +507,10 @@ class Pipeline:
             "stt_engine": self.stt.engine,
             "stt_rtf": round(self.stt.rtf, 2),
             "stt_skipped": self.stt_skipped,
+            "stt_model": self._stt_model(),
+            "stt_stepped_down": self.stt.stepped_down,
+            "meeting_id": self.meeting_id or None,
+            "meeting_stats": self.meeting_stats(),
             "channels": chans,
             "metrics_file": str(self.metrics.path.name) if self.metrics else "",
             "last_error": self.last_error,

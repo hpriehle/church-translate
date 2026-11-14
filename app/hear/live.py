@@ -20,7 +20,8 @@ An engine (the congregation's Mac) connects to /ws/engine with "Authorization: B
                      languages someone listened to; any session of this congregation, also after it ended
   hub → engine   {"type": "session_started", session, resumed}   {"type": "session_refused", message}
                  {"type": "session_ended", message}   the hub closed the session itself (congregation hidden)
-                 {"type": "listeners", stream, captions, heard}   heard = languages with a phone on them now
+                 {"type": "listeners", stream, captions, heard, langs}   heard = languages with a phone on them now,
+                                                                       langs = {code: [stream, captions]}
                  {"type": "meter_ok", session, seqs, unknown}   the items stored (resent ones too); unknown = no
                      such session here, so the engine drops that report
 A second device starting while the congregation is live is refused. If the engine's link drops the
@@ -124,6 +125,11 @@ class LiveSession:
         """Languages someone is listening to or reading right now: only these are billed."""
         return sorted(c for c in self.hubs if self.hubs[c].count or self.streams[c].listeners)
 
+    def by_lang(self) -> dict[str, list[int]]:
+        """Phones per language: [listening to the voice, reading captions] (the operator's listeners per language)."""
+        return {c: [self.streams[c].listeners if c in self.streams else 0, self.hubs[c].count] for c in self.hubs
+                if self.hubs[c].count or (c in self.streams and self.streams[c].listeners)}
+
 
 class Live:
     def __init__(self, db: Database, stream, grace_s: float = 60.0):
@@ -183,11 +189,12 @@ class Live:
                     item = await asyncio.wait_for(link.out.get(), LISTENERS_EVERY_S)
                 except asyncio.TimeoutError:
                     s = link.session
-                    count = (s.listeners(), s.captions(), s.heard()) if s and not s.private else None
+                    count = (s.listeners(), s.captions(), s.heard(), s.by_lang()) if s and not s.private else None
                     if count is None or count == reported:
                         continue
                     reported = count
-                    item = {"type": "listeners", "stream": count[0], "captions": count[1], "heard": count[2]}
+                    item = {"type": "listeners", "stream": count[0], "captions": count[1], "heard": count[2],
+                            "langs": count[3]}
                 await link.ws.send_text(json.dumps(item, ensure_ascii=False))
         except Exception:
             pass

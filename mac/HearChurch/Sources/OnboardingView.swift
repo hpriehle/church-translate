@@ -659,6 +659,16 @@ enum Format {
     static func size(_ mb: Double) -> String {
         mb >= 1000 ? String(format: "%.1f GB", mb / 1000) : "\(Int(mb.rounded())) MB"
     }
+
+    /// 754 s → "12 min"; under a minute → "40 s".
+    static func minutes(_ s: Double) -> String {
+        s < 60 ? "\(Int(s)) s" : "\(Int((s / 60).rounded())) min"
+    }
+
+    /// A delay: "2.4 s", or "–" when there is none yet.
+    static func seconds(_ s: Double?) -> String {
+        s.map { String(format: "%.1f s", $0) } ?? "–"
+    }
 }
 
 /// Where setup stopped, so quitting in the middle resumes there.
