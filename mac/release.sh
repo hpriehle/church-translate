@@ -170,6 +170,15 @@ hdiutil detach -quiet "$MNT"
 [[ "$DMG_BUILD" == "$BUILD" ]] || die "$DMG is build $DMG_BUILD but project.yml says $BUILD: set CURRENT_PROJECT_VERSION back to $DMG_BUILD to publish it"
 r2_setup
 
+# The GPL/LGPL parts' source (Piper, eSpeak NG, LAME, libsoxr, and Intel's FFmpeg/x264/x265), offered in
+# THIRD_PARTY_NOTICES.md at hearchurch.com/source. Built before anything goes up, so a stale pin in
+# mac/oss-sources.json stops the release here. Dev builds skip it.
+if [[ -z "$DEV" ]]; then
+  step "Open-source archive"
+  OSS="$(python3 -I "$MAC/oss_sources.py" "$VERSION")" || die "the open-source archive did not build: see above"
+  du -h "$OSS"
+fi
+
 step "Appcast"
 APPCAST=("$SPARKLE/generate_appcast" --download-url-prefix "$URL" --link https://hearchurch.com/download
          --maximum-deltas "$DELTAS" --versions "$BUILD")
@@ -196,7 +205,9 @@ if [[ -z "$DEV" ]]; then     # the download page and /download/HearChurch.dmg: p
 fi
 
 step "Uploading to R2"
-# Files first, the feed last: the appcast never points at something not uploaded yet.
+# Files first, the feed last: the appcast never points at something not uploaded yet. The source archive
+# goes before the DMG, so the app is never on offer without it (the Worker serves source/* at /source/).
+[[ -z "$DEV" ]] && rclone copyto "$OSS" "r2:$BUCKET/source/$(basename "$OSS")"
 rclone copy --stats-one-line --stats 30s --include "*.dmg" --include "*.delta" "$DIST" "r2:$BUCKET"
 rclone copyto "$DIST/$FEED" "r2:$BUCKET/$FEED"     # generate_appcast names it after the app's SUFeedURL
 [[ -z "$DEV" ]] && rclone copyto "$DIST/$LATEST" "r2:$BUCKET/$LATEST"
@@ -209,4 +220,6 @@ if [[ -n "$DEV" ]]; then
   exit 0
 fi
 curl -fsSI "https://hearchurch.com/download/$PUBLIC_DMG" | grep -i -E "^(content-length|content-disposition)"
+curl -fsSI "https://hearchurch.com/source/$(basename "$OSS")" | grep -i "^content-length" \
+  || echo "warning: hearchurch.com/source/$(basename "$OSS") is not served: deploy the download/ Worker" >&2
 echo "released $VERSION (build $BUILD). Commit mac/project.yml and tag it: git tag mac-v$VERSION"

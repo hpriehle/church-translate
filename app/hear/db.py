@@ -158,7 +158,7 @@ CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", 
 # congregation already has that slug.
 SITE_PAGES = frozenset({
     "app", "appcast", "blog", "compare", "credits", "demo", "download", "faq", "features", "how-it-works", "languages", "lds",
-    "multilingual", "pricing", "rr", "rrweb", "setup", "sitemap", "small-churches"})
+    "multilingual", "pricing", "rr", "rrweb", "setup", "sitemap", "small-churches", "source"})
 
 # Listener pages live at hearchurch.com/<slug>, so a slug may never be one of the site's own top-level paths
 # (tests/test_hear.py checks this list against the routes).

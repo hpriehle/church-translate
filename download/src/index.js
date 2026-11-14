@@ -6,13 +6,15 @@
 //   /appcast.xml               Sparkle's update feed
 //   /download/HearChurch-Intel.dmg, /appcast-intel.xml   the same for Intel Macs (separate build and feed)
 //   /privacy, /terms, /credits  the legal pages
+//   /source, /source/<file>    the source code of the app's GPL/LGPL parts, per version (R2 source/*, from mac/release.sh)
 //   /download/icon.png, *.woff2  the page's icon and fonts
 //   /sitemap.xml               the pages we want in search
 //   /<key>.txt                 IndexNow's key file, so search engines accept our URL submissions
 //   /rr.js, /rrweb.min.js      Siteboard's tracker; only the /download page loads it
 //   /api/collect               forwards the tracker's batches to the hub
 //
-// R2 holds what mac/release.sh uploads: HearChurch-<version>.dmg, *.delta, wolof-libs-*.tar.gz, appcast.xml, latest.json.
+// R2 holds what mac/release.sh uploads: HearChurch-<version>.dmg, *.delta, wolof-libs-*.tar.gz, appcast.xml, latest.json,
+// source/hearchurch-oss-<version>.tar.gz.
 import PAGE from "./page.html";
 import { onRequestPost as collectPost, onRequest as collectOther } from "./collect.js";
 import TRACKER from "./tracker/rr.min.js.txt";
@@ -40,7 +42,7 @@ const INDEXNOW_KEY = "b8a8b0718483acd04cef33be1f6d395c";
 // here, has a route in wrangler.toml and is in the sitemap; site/src/site.js lists the same pages.
 const SITE_PAGE = /^(\/(how-it-works|pricing|lds|blog)(\/[a-z0-9-]+)?)?$/;
 // Everything else this Worker answers itself.
-const OWN = /^\/(download(\/.*)?|appcast(?:-intel)?\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
+const OWN = /^\/(download(\/.*)?|source(\/[\w.-]+)?|appcast(?:-intel)?\.xml|privacy|terms|credits|sitemap\.xml|rr\.js|rrweb\.min\.js|[0-9a-f]{32}\.txt)$/;
 const SITE_PATHS = ["/", "/how-it-works", "/pricing", "/lds", "/blog", "/blog/sacrament-meeting-translation"];
 
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
@@ -112,6 +114,13 @@ const site = {
       if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, latest.version));
       return response;
     }
+    // The written offer in THIRD_PARTY_NOTICES.md points here: every version's source archive stays available.
+    if (path === "/source") return sourceList(env);
+    if (path.startsWith("/source/")) {
+      const name = path.slice("/source/".length);
+      if (!/^hearchurch-oss-\d+\.\d+\.\d+\.tar\.gz$/.test(name)) return new Response("Not found", { status: 404 });
+      return file(request, env, `source/${name}`, "application/gzip", "public, max-age=31536000, immutable", name);
+    }
     // The site's audio samples (site/public/download/media/).
     if (path.startsWith("/download/media/")) return env.SITE.fetch(request);
     // generate_appcast names deltas after the app, so they have a space: "Hear Church4-3.delta".
@@ -150,6 +159,29 @@ async function countDownload(env, version) {
   } catch (e) {
     console.error("download count failed:", e.message);
   }
+}
+
+// The source archives in R2, newest version first, as a plain page.
+async function sourceList(env) {
+  const listed = await env.FILES.list({ prefix: "source/" });
+  const files = listed.objects
+    .map((o) => ({ name: o.key.slice("source/".length), size: o.size }))
+    .filter((f) => /^hearchurch-oss-\d+\.\d+\.\d+\.tar\.gz$/.test(f.name))
+    .sort((a, b) => versionOf(b.name).localeCompare(versionOf(a.name), "en", { numeric: true }));
+  const items = files.map((f) =>
+    `<li><a href="/source/${escapeHtml(f.name)}">${escapeHtml(f.name)}</a> (${(f.size / 1e6).toFixed(0)} MB)</li>`).join("\n");
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Source code of the open-source parts - Hear Church</title></head><body style="font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5">
+<h1>Source code of the open-source parts</h1>
+<p>The Hear Church app for Mac includes Piper and eSpeak NG (GNU GPL v3), LAME and libsoxr (GNU LGPL), and in the Intel version FFmpeg (GNU LGPL v3) with x264 and x265 (GNU GPL v2). Each archive below holds their complete source code for that version of the app, the licence texts, and a README on how they were built. The app's own engine code is MIT-licensed and ships as source inside the app.</p>
+${items ? `<ul>\n${items}\n</ul>` : "<p>No archives yet.</p>"}
+<p>Questions, or to ask for the source on a physical medium: <a href="mailto:support@hearchurch.com">support@hearchurch.com</a>. <a href="/credits">Voice credits</a> · <a href="/download">Download</a></p>
+</body></html>`;
+  return html(body);
+}
+
+function versionOf(name) {
+  return name.replace(/^hearchurch-oss-|\.tar\.gz$/g, "");
 }
 
 async function latestRelease(env, key = "latest.json") {

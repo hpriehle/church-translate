@@ -16,7 +16,25 @@ Included in the Mac app:
   later; `certifi` and `tqdm` — Mozilla Public License 2.0; SciPy's libgfortran/libgcc — GNU GPL v3 with the GCC
   Runtime Library Exception. `ctranslate2` (Intel Macs) — MIT License, Copyright (c) 2018- SYSTRAN.
 - Intel Macs only: PyAV (`av`, BSD) contains FFmpeg — GNU LGPL v3 or later — built with x264 and x265 — GNU GPL v2
-  or later.
+  or later — and lamer (a LAME fork) — GNU LGPL v2 or later.
+
+The licence texts (GNU GPL v2 and v3, LGPL v2.1 and v3, MPL 2.0, AGPL v3, and the licences of Sparkle and
+CTranslate2) are in the `licenses` folder next to this file, inside the app at
+`Hear Church.app/Contents/Resources/engine/licenses`.
+
+Source code of the GPL and LGPL parts. The complete source code of Piper, eSpeak NG, lameenc and LAME, soxr and
+libsoxr, and (Intel Macs) PyAV, FFmpeg, x264, x265 and lamer, exactly as built into each version of the app, is at
+https://hearchurch.com/source, as `hearchurch-oss-<version>.tar.gz` for the version you have (Hear Church menu → About
+Hear Church). Written offer: for at least three years after we last distribute a version of the app, anyone may also
+ask support@hearchurch.com for that source code on a physical medium, for no more than our cost of sending it.
+The app's own engine (`app/`, `web/` inside `Contents/Resources/engine`) is MIT-licensed and ships as source.
+
+Replacing an LGPL library. lameenc (`lameenc*.so`), soxr (`soxr_ext*.so`) and, on Intel Macs, PyAV's FFmpeg
+(`av/.dylibs/*.dylib`) are separate files inside `Contents/Resources/python` that Python loads when the app runs,
+so you may replace them with versions built from modified source. macOS only loads code signed by the same
+developer into the app, so after replacing a file, re-sign the app on your Mac:
+`codesign --force --deep -s - "/Applications/Hear Church.app"`. You may reverse-engineer the app as far as needed
+to do this and to debug such changes.
 
 Downloaded at setup (not included):
 - Whisper large-v3-turbo / faster-whisper models — MIT License (OpenAI).

@@ -265,9 +265,23 @@ struct HelpLinks: View {
             Link("Privacy", destination: URL(string: "https://hearchurch.com/privacy")!)
             Link("Terms", destination: URL(string: "https://hearchurch.com/terms")!)
             Link("Voice credits", destination: URL(string: "https://hearchurch.com/credits")!)
+            Button("Open-source notices", action: Self.showNotices)
+                .buttonStyle(.link)
+                .help("The open-source parts of the app, their licences, and where to get their source code")
             Link("Contact support", destination: URL(string: "mailto:support@hearchurch.com")!)
         }
         .font(.callout)
+    }
+
+    /// Shows THIRD_PARTY_NOTICES.md in Finder, next to the licences/ folder (both in Resources/engine, from
+    /// mac/build.sh). A development build without the bundled engine opens the source page instead.
+    static func showNotices() {
+        let notices = Bundle.main.resourceURL?.appendingPathComponent("engine/THIRD_PARTY_NOTICES.md")
+        if let notices, FileManager.default.fileExists(atPath: notices.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([notices])
+        } else {
+            NSWorkspace.shared.open(URL(string: "https://hearchurch.com/source")!)
+        }
     }
 }
 

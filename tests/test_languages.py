@@ -245,6 +245,20 @@ def test_the_paid_mac_app_never_offers_the_non_commercial_wolof_voice(monkeypatc
     assert (cfg.engine, cfg.speed) == ("speecht5", 1.25)
 
 
+def test_the_engine_refuses_to_build_the_mms_voice_on_macos(monkeypatch):
+    from app.config import TtsCfg
+    from app.tts import engines
+
+    built = []
+    monkeypatch.setattr(engines, "MmsTts", lambda cfg, sr: built.append(cfg) or "mms")
+    monkeypatch.setattr("app.tts.engines.sys.platform", "darwin")
+    with pytest.raises(ValueError, match="non-commercial"):
+        engines.make_tts(TtsCfg(engine="mms", voice="default", lang="wo"), 24000)
+    assert built == []
+    monkeypatch.setattr("app.tts.engines.sys.platform", "linux")     # the Linux development server still may
+    assert engines.make_tts(TtsCfg(engine="mms", voice="default", lang="wo"), 24000) == "mms"
+
+
 def test_chinese_tables_ship_with_the_app():
     from piper.g2pw_onnx import DATA_FILES
 

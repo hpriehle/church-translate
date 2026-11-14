@@ -1,0 +1,115 @@
+{
+  "_about": "The source code of every GPL/LGPL part of the Mac app, pinned by exact version and SHA-256. mac/oss_sources.py downloads these (cached in mac/oss-cache) into hearchurch-oss-<version>.tar.gz, which mac/release.sh uploads on every public release and hearchurch.com/source serves. 'pin' ties a file to the version the app actually ships: the script stops if uv.lock or mac/requirements-intel.txt has moved on, so update this file (version, url, sha256) whenever one of these packages changes.",
+  "sources": [
+    {
+      "file": "piper1-gpl-1.8.0.tar.gz",
+      "url": "https://github.com/OHF-Voice/piper1-gpl/archive/refs/tags/v1.8.0.tar.gz",
+      "sha256": "0a22987a6157f14e2fb7cf4aa702b547467fd0448bea9f233abd503c3ff4a0e1",
+      "what": "Piper 1.8.0 (Python package piper-tts), with its build files (CMakeLists.txt, setup.py) and espeakbridge.c, which the PyPI source package leaves out",
+      "licence": "GPL-3.0-or-later",
+      "macs": "all",
+      "pin": {"package": "piper-tts", "version": "1.8.0", "in": ["uv.lock", "mac/requirements-intel.txt"]}
+    },
+    {
+      "file": "espeak-ng-724808c5a83f9ef95fdd0db886ba7ba537ff224a.tar.gz",
+      "url": "https://github.com/espeak-ng/espeak-ng/archive/724808c5a83f9ef95fdd0db886ba7ba537ff224a.tar.gz",
+      "sha256": "7d8ebd78201923a443245362a928999977d1721c3eeba596eafc6ea8db7e243c",
+      "what": "eSpeak NG at commit 724808c, the commit piper1-gpl v1.8.0's CMakeLists.txt builds (statically linked into piper/espeakbridge.so, and its espeak-ng-data)",
+      "licence": "GPL-3.0-or-later",
+      "macs": "all",
+      "pin": {"espeak_commit_in": "piper1-gpl-1.8.0.tar.gz"}
+    },
+    {
+      "file": "lameenc-1.8.4.tar.gz",
+      "url": "https://github.com/chrisstaite/lameenc/archive/refs/tags/v1.8.4.tar.gz",
+      "sha256": "70c7a23830c98139f2b8e2ebdd56990b3e8e50bb8eaf22daa7b8861b1f6bffcb",
+      "what": "lameenc 1.8.4 (no source package on PyPI: the tagged source from GitHub; its CMakeLists.txt downloads lame-3.100.tar.gz, included next to it)",
+      "licence": "LGPL-3.0",
+      "macs": "Apple Silicon",
+      "pin": {"package": "lameenc", "version": "1.8.4", "in": ["uv.lock"]}
+    },
+    {
+      "file": "lame-3.100.tar.gz",
+      "url": "https://sourceforge.net/projects/lame/files/lame/3.100/lame-3.100.tar.gz/download",
+      "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+      "what": "LAME 3.100, statically linked into lameenc 1.8.4 (hash as pinned in lameenc's CMakeLists.txt)",
+      "licence": "LGPL-2.0-or-later",
+      "macs": "Apple Silicon"
+    },
+    {
+      "file": "lameenc-1.9.0.tar.gz",
+      "url": "https://github.com/chrisstaite/lameenc/archive/refs/tags/v1.9.0.tar.gz",
+      "sha256": "1d96b6d818d00d5d479ecfc01c8939f3fde1ee002a133577d6f42354181044f7",
+      "what": "lameenc 1.9.0 (tagged source from GitHub; its CMakeLists.txt downloads lame-4.0.tar.gz, included next to it)",
+      "licence": "LGPL-3.0",
+      "macs": "Intel",
+      "pin": {"package": "lameenc", "version": "1.9.0", "in": ["mac/requirements-intel.txt"]}
+    },
+    {
+      "file": "lame-4.0.tar.gz",
+      "url": "https://sourceforge.net/projects/lame/files/lame/4.0/lame-4.0.tar.gz/download",
+      "sha256": "3df5124d5ad3a98312ffd7ba6a9b36230e4f8a3e66d3ce0f425e336c32d216eb",
+      "what": "LAME 4.0, statically linked into lameenc 1.9.0 (hash as pinned in lameenc's CMakeLists.txt)",
+      "licence": "LGPL-2.0-or-later",
+      "macs": "Intel"
+    },
+    {
+      "file": "soxr-1.1.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/ed/11/27cebce4a108f77afea7c80545115536b45e3f11ebfb914f638fdd9ba847/soxr-1.1.0.tar.gz",
+      "sha256": "9f228ae21c78fa9359ca98d8a5e8e91f30639e438e574133dace62c5b5309e44",
+      "what": "python-soxr 1.1.0, including the libsoxr and PFFFT sources it links statically",
+      "licence": "LGPL-2.1-or-later",
+      "macs": "all",
+      "pin": {"package": "soxr", "version": "1.1.0", "in": ["uv.lock", "mac/requirements-intel.txt"]}
+    },
+    {
+      "file": "av-19.0.2.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/23/01/76b6bf563fe907597cf58f10d10168e93fe588b6db9f2658db87e87efa7e/av-19.0.2.tar.gz",
+      "sha256": "bebbc52598886480f4d861c575dc2b020785d6c04e1308680ddcc545e1b94c66",
+      "what": "PyAV 19.0.2; its macOS wheel bundles FFmpeg as built by pyav-ffmpeg 9.0.2-1 (scripts/ffmpeg-latest.json at PyAV tag v19.0.2)",
+      "licence": "BSD-3-Clause",
+      "macs": "Intel",
+      "pin": {"package": "av", "version": "19.0.2", "in": ["mac/requirements-intel.txt"]}
+    },
+    {
+      "file": "pyav-ffmpeg-9.0.2-1.tar.gz",
+      "url": "https://github.com/PyAV-Org/pyav-ffmpeg/archive/refs/tags/9.0.2-1.tar.gz",
+      "sha256": "f1d1cce5b20eba71675c1c5efdd90105f79223d40abcad2cd12a0735a0379c2e",
+      "what": "The scripts and patches that built the FFmpeg libraries in PyAV 19.0.2's wheel (scripts/build-ffmpeg.py, scripts/pkg.py: the sources below and their hashes)",
+      "licence": "BSD-3-Clause (scripts)",
+      "macs": "Intel"
+    },
+    {
+      "file": "ffmpeg-9.0.2.tar.xz",
+      "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+      "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
+      "what": "FFmpeg 9.0.2 (libavcodec, libavformat, libavutil, libavfilter, libavdevice, libswscale, libswresample in av/.dylibs)",
+      "licence": "LGPL-3.0-or-later (as configured, --enable-version3)",
+      "macs": "Intel"
+    },
+    {
+      "file": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2",
+      "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2",
+      "sha256": "6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224",
+      "what": "x264 at commit b35605a (av/.dylibs/libx264.165.dylib)",
+      "licence": "GPL-2.0-or-later",
+      "macs": "Intel"
+    },
+    {
+      "file": "x265_4.3.tar.gz",
+      "url": "https://github.com/Multicorewareinc/x265/releases/download/4.3/x265_4.3.tar.gz",
+      "sha256": "83c53e4c8bbb8f1e33ed59e10a7d621d1d7801ca853910c3eb41f038b8ffb121",
+      "what": "x265 4.3 (av/.dylibs/libx265.217.dylib)",
+      "licence": "GPL-2.0-or-later",
+      "macs": "Intel"
+    },
+    {
+      "file": "lamer-3.101.0.tar.gz",
+      "url": "https://github.com/basswood-io/bwlame/archive/refs/tags/v3.101.0.tar.gz",
+      "sha256": "506d8a6e855f59151a5407d848557f9ac10acad6ff61718c7b0b3441221bfe72",
+      "what": "lamer 3.101.0 (a LAME fork), linked into PyAV's libavcodec (--enable-libmp3lame). The repository has since been renamed bwlame, so GitHub's archive of the same tag (commit 3ffd14f, tagged 2026-07-09) has a different top folder and hash than the one pyav-ffmpeg's pkg.py lists",
+      "licence": "LGPL-2.0-or-later",
+      "macs": "Intel"
+    }
+  ]
+}

@@ -304,6 +304,10 @@ def make_tts(cfg: TtsCfg, out_sr: int):
     if cfg.engine == "speecht5":
         return SpeechT5Tts(cfg, out_sr)
     if cfg.engine == "mms":
+        # CC BY-NC 4.0: never in the paid Mac app, even if a setting or caller asks for it (config.py already
+        # swaps a saved "mms" for SpeechT5 on macOS; this is the last line of defence).
+        if sys.platform == "darwin":
+            raise ValueError("the MMS Wolof voice is licensed for non-commercial use only and is not available on macOS")
         return MmsTts(cfg, out_sr)
     raise ValueError(f"unknown voice engine {cfg.engine!r}")
 

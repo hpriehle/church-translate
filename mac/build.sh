@@ -73,6 +73,8 @@ mkdir -p "$STAGE/engine/models"
 rsync -a --delete --exclude "__pycache__" "$REPO/app" "$REPO/web" "$STAGE/engine/"
 rsync -a "$REPO/models/silero_vad.onnx" "$REPO/models/wolof" "$STAGE/engine/models/"
 cp "$REPO/config.toml" "$REPO/glossary.json" "$REPO"/glossary.??.json "$REPO/LICENSE" "$REPO/THIRD_PARTY_NOTICES.md" "$STAGE/engine/"
+# GPL/LGPL/MPL texts and the licences of Sparkle and CTranslate2, next to the notices (About and help opens them).
+rsync -a --delete "$REPO/licenses/" "$STAGE/engine/licenses/"
 # Intel: the multilingual CPU model (the speaker may not be speaking English), and no Wolof.
 [[ -n "$INTEL" ]] && sed -i '' -e 's/^faster_whisper_model = .*/faster_whisper_model = "small"/' -e 's/^languages = .*/languages = ["fr"]/' "$STAGE/engine/config.toml"
 "$STAGE/python/bin/python3" -m compileall -q "$STAGE/engine/app"

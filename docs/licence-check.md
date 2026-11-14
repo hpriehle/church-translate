@@ -231,6 +231,15 @@ Complies.
 4. **Credits page** (~15 min): Hi-Fi TTS on the siwis, dmitri, faber, chaowen rows.
 5. **Optional hardening** (~15 min): `make_tts()` refuses `mms` on macOS.
 
+**Done 2026-11-14 (option A, Harrison's go-ahead):** `licenses/` ships in `Resources/engine/licenses` (build.sh);
+Settings → About and help → "Open-source notices" shows the notices in Finder; `mac/oss_sources.py` builds
+`hearchurch-oss-<version>.tar.gz` (one archive for both apps, ~64 MB, reproducible) from the pins in
+`mac/oss-sources.json` (piper1-gpl v1.8.0 tag source — the PyPI sdist lacks the CMake/C files —, eSpeak NG 724808c,
+lameenc 1.8.4/1.9.0 + LAME 3.100/4.0, soxr 1.1.0, and for Intel PyAV 19.0.2 + pyav-ffmpeg 9.0.2-1's FFmpeg 9.0.2,
+x264, x265, lamer); `release.sh` uploads it to R2 `source/` on every public `--publish`; the Worker serves
+`/source` and `/source/<file>`; notices and credits carry the written offer, the re-signing note and the Hi-Fi TTS
+credits; `make_tts()` refuses `mms` on macOS.
+
 Total about one working day, no change to how the app sounds or behaves. Must be in place before 0.3.0 is sold
 (the GPL duty starts with the first paid copy; it arguably already started with test copies on the dev channel).
 
