@@ -114,3 +114,63 @@ def test_activate_ignores_a_download_not_finished(libs):
     pk.activate_libs()
     assert not any("wolof-libs" in p for p in sys.path)
     assert not pk.Packages._present(pk.Package("wo", "Wolof voice", 1, libs=manifest))
+
+
+# ---- English Joe/Kristin (0.2.x) → Mike/Kathleen
+
+def test_saved_old_english_voice_becomes_the_new_one():
+    from app.config import Settings, tts_for
+    for old, new in (("en_US-joe-medium", "en_US-mike-medium"), ("en_US-kristin-medium", "en_US-kathleen-medium")):
+        s = Settings.model_validate({"voices": {"en": {"engine": "piper", "voice": old, "speed": 1.2}}})
+        assert s.voices["en"].voice == new and s.voices["en"].speed == 1.2
+        assert tts_for(s, "en").voice == new
+    keep = Settings.model_validate({"voices": {"en": {"engine": "piper", "voice": "en_US-mike-medium"}}})
+    assert keep.voices["en"].voice == "en_US-mike-medium"
+
+
+def _voice(dir, name):
+    for ext in ("onnx", "onnx.json"):
+        (dir / f"{name}.{ext}").write_text("x")
+
+
+def test_english_with_the_old_voices_downloads_mike_and_kathleen(tmp_path, monkeypatch):
+    import asyncio
+    monkeypatch.setattr(pk, "PIPER_DIR", tmp_path)
+    assert pk.replaced_languages() == []
+    _voice(tmp_path, "en_US-joe-medium")
+    _voice(tmp_path, "en_US-kristin-medium")
+    assert pk.replaced_languages() == ["en"]
+
+    async def fake_fetch(url, dest):
+        dest.write_text("new")
+    monkeypatch.setattr(pk, "_fetch", fake_fetch)
+    packs = pk.Packages()
+    en = packs.wanted(["en"])[1]
+    assert en.id == "en" and set(en.piper_voices) == {"en_US-mike-medium", "en_US-kathleen-medium"}
+    assert not pk.Packages._present(en)   # the old files don't count: "missing", so it downloads
+
+    async def run():
+        await packs._download(en)
+    asyncio.run(run())
+    assert en.state == "ready", en.error
+    assert pk.Packages._present(en)
+    assert not list(tmp_path.glob("en_US-joe-medium*")) and not list(tmp_path.glob("en_US-kristin-medium*"))
+    assert pk.replaced_languages() == []
+
+
+def test_download_endpoint_adds_languages_with_replaced_voices(tmp_path, monkeypatch):
+    from app import main
+    from app.config import Settings
+    monkeypatch.setattr(main.S, "settings", Settings.model_validate({}), raising=False)
+    monkeypatch.setattr(pk, "PIPER_DIR", tmp_path)
+    _voice(tmp_path, "en_US-joe-medium")
+    seen = []
+    monkeypatch.setattr(pk.PACKAGES, "download_missing", lambda langs: seen.append(list(langs)))
+
+    async def status(langs):
+        return []
+    monkeypatch.setattr(pk.PACKAGES, "status", status)
+    monkeypatch.setattr(main, "require_operator", lambda request: None)
+    from fastapi.testclient import TestClient
+    r = TestClient(main.app).post("/api/packages/download", json={"languages": ["fr"]})
+    assert r.status_code == 200 and seen == [["fr", "en"]]

@@ -20,7 +20,7 @@ struct MainView: View {
             Divider()
             DownloadBar()
             HStack(spacing: 0) {
-                ScrollView { Sidebar().padding(16) }
+                Sidebar()
                     .frame(width: 330)
                     .background(.background.secondary)
                 Divider()
@@ -43,7 +43,7 @@ private struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            if model.running { StartButton() }   // before a meeting it sits under the language selector
+            StartButton()
             MeetingState()
             HStack(spacing: 6) {
                 Image(systemName: "mic.fill").foregroundStyle(.secondary)
@@ -65,6 +65,7 @@ private struct TopBar: View {
             }
             Button { model.openSettings?() } label: { Image(systemName: "gearshape") }
                 .buttonStyle(.borderless)
+                .focusEffectDisabled()   // no blue ring: a plain icon button
                 .help("Settings")
         }
         .padding(.horizontal, 16)
@@ -72,17 +73,14 @@ private struct TopBar: View {
     }
 }
 
-/// Before a meeting: the languages, large, with Start meeting under them; the last meeting's transcript below.
+/// Before a meeting: the languages, large (Start meeting is at the top left); the last meeting's transcript below.
 private struct IdlePane: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(spacing: 18) {
-                    LanguageSelector()
-                    StartButton(large: true)
-                }
+                LanguageSelector()
                 .padding(24)
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity)
@@ -98,7 +96,6 @@ private struct IdlePane: View {
 
 private struct StartButton: View {
     @EnvironmentObject var model: AppModel
-    var large = false
     @State private var confirmStop = false
     @State private var busy = false
 
@@ -107,8 +104,8 @@ private struct StartButton: View {
             if model.running { confirmStop = true } else { Task { busy = true; await model.startMeeting(); busy = false } }
         } label: {
             Label(model.running ? "Stop meeting" : "Start meeting", systemImage: model.running ? "stop.fill" : "play.fill")
-                .font(large ? .title2.weight(.semibold) : .title3.weight(.semibold))
-                .frame(minWidth: large ? 260 : 170, minHeight: large ? 44 : 34)
+                .font(.title3.weight(.semibold))
+                .frame(minWidth: 170, minHeight: 34)
         }
         .buttonStyle(.borderedProminent)
         .tint(model.running ? .red : .green)
@@ -175,15 +172,22 @@ private struct ConnectionBadge: View {
 private struct Sidebar: View {
     @EnvironmentObject var model: AppModel
 
+    /// The checks, sound and (during a meeting) languages scroll; Listeners and the QR code stay pinned at the bottom.
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            if let msg = model.message {
-                Text(msg).foregroundStyle(.red).font(.callout)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let msg = model.message {
+                        Text(msg).foregroundStyle(.red).font(.callout)
+                    }
+                    if model.running { DuringMeeting() } else { BeforeMeeting() }
+                    SoundSection()
+                    if model.running { LanguagesSection() }   // before a meeting the selector is large, in the main pane
+                }
+                .padding(16)
             }
-            if model.running { DuringMeeting() } else { BeforeMeeting() }
-            if model.running { LanguagesSection() }   // before a meeting the selector is large, above Start
-            SoundSection()
-            ListenersSection()
+            Divider()
+            ListenersSection().padding(16)
         }
     }
 }

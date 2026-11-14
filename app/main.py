@@ -1002,10 +1002,11 @@ async def api_packages(request: Request, languages: str = ""):
 async def api_packages_download(request: Request):
     """Start downloading what is missing for {"languages": [...]} (default: the switched-on languages)."""
     require_operator(request)
-    from .packages import PACKAGES
+    from .packages import PACKAGES, replaced_languages
 
     body = await request.json() if await request.body() else {}
     langs = _package_languages(body.get("languages"))
+    langs += [c for c in replaced_languages() if c not in langs]   # e.g. English, downloaded before Mike/Kathleen
     await PACKAGES.status(langs)
     PACKAGES.download_missing(langs)
     return {"packages": await PACKAGES.status(langs)}

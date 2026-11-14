@@ -135,6 +135,10 @@ class TtsCfg(BaseModel):
     lang: str = "fr"     # which macOS voices `say` picks from
 
 
+# Piper voices an older version offered → the voice that replaced them (0.3.0: English Joe/Kristin → Mike/Kathleen).
+RENAMED_VOICES = {"en_US-joe-medium": "en_US-mike-medium", "en_US-kristin-medium": "en_US-kathleen-medium"}
+
+
 class VoiceCfg(BaseModel):
     engine: str
     voice: str
@@ -231,6 +235,9 @@ class Settings(BaseModel):
         m.targets = apply_auto_en(targets, m.speakers) if m.auto_en else targets
         self.stt.language, self.stt.languages = m.speakers[0], list(m.speakers)
         self.languages = [c for c in m.targets if not (m.auto_en and c == "en")]
+        for v in self.voices.values():   # a voice an older version saved, since replaced (packages.REPLACED_VOICES)
+            if v.engine == "piper" and v.voice in RENAMED_VOICES:
+                v.voice = RENAMED_VOICES[v.voice]
         return self
 
 

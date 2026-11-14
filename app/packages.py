@@ -44,6 +44,24 @@ PIPER_VOICES = {
     "en": ("English voices", ("en_US-mike-medium", "en_US-kathleen-medium")),
     "lv": ("Latvian voice", ("lv_LV-aivars-medium",)),   # CC0 1.0; the only Latvian voice in piper-voices
 }
+# Voices an older version downloaded for a language, since replaced: where they are on disk, that language gets its
+# new voices on the next launch (so it stays downloaded) and the old files go.
+REPLACED_VOICES = {"en_US-joe-medium": "en", "en_US-kristin-medium": "en"}
+
+
+def replaced_languages() -> list[str]:
+    """Languages downloaded with voices this version no longer uses."""
+    return list(dict.fromkeys(code for voice, code in REPLACED_VOICES.items()
+                              if any(dest.exists() for _, dest in _piper_files(voice))))
+
+
+def _delete_replaced(code: str) -> None:
+    for voice, c in REPLACED_VOICES.items():
+        if c == code:
+            for _, dest in _piper_files(voice):
+                dest.unlink(missing_ok=True)
+
+
 WOLOF_REPOS = ("bilalfaye/speecht5_tts-wolof", "microsoft/speecht5_hifigan")
 # What Piper's Chinese voice needs beyond the voice itself. Piper would fetch these on the first sentence, into the
 # working directory (inside the signed app), so they come with the voice. Pinned because Piper runs the config.py inside.
@@ -296,6 +314,7 @@ class Packages:
                     if not dest.exists():
                         await _fetch(url, dest)
             p.state = "ready"
+            await asyncio.to_thread(_delete_replaced, p.id)
             log.info("downloaded %s", p.name)
             if self.on_ready:
                 self.on_ready()

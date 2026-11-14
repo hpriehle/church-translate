@@ -50,7 +50,7 @@ struct LanguageSelector: View {
                 Text(model.engine.packages.isEmpty ? "The translation engine is starting…" : "No language downloaded yet: add one in Settings → Languages.")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: compact ? 92 : 128), spacing: compact ? 6 : 8)], spacing: compact ? 6 : 8) {
+            CenteredGrid(minWidth: compact ? 92 : 128, spacing: compact ? 6 : 8) {
                 ForEach(languages) { l in
                     LanguageCell(language: l, on: model.isOn(l.id, role), compact: compact) { note = model.toggle(l.id, role) }
                 }
@@ -90,7 +90,6 @@ private struct LanguageCell: View {
                 HStack(spacing: 6) {
                     Text(language.flag)
                     Text(compact ? language.name : language.native).lineLimit(1).minimumScaleFactor(0.8)
-                    Spacer(minLength: 0)
                     if on { Image(systemName: "checkmark").font(.caption.weight(.bold)) }
                 }
                 if !compact || state != "ready" {
@@ -104,7 +103,6 @@ private struct LanguageCell: View {
                         default: Label("Download \(Format.size(pkg?.size_mb ?? language.sizeMB))", systemImage: "arrow.down.circle")
                             .foregroundStyle(on ? Color.white.opacity(0.85) : .secondary)
                         }
-                        Spacer(minLength: 0)
                     }
                     .font(.caption)
                     .labelStyle(.titleAndIcon)
@@ -132,6 +130,46 @@ private struct LanguageCell: View {
         case "ready": return on ? "Click to switch \(language.name) off" : "Click to switch \(language.name) on"
         case "downloading": return "\(language.name) is downloading"
         default: return "\(language.name) needs to be downloaded: click to download it"
+        }
+    }
+}
+
+/// Equal-width cells, as many per row as fit at `minWidth`, every row centered (a part-filled last row too).
+private struct CenteredGrid: Layout {
+    var minWidth: CGFloat
+    var spacing: CGFloat
+
+    private func columns(_ width: CGFloat, _ count: Int) -> (cols: Int, cell: CGFloat) {
+        let cols = max(1, Int((width + spacing) / (minWidth + spacing)))
+        return (cols, max(minWidth, (width - CGFloat(cols - 1) * spacing) / CGFloat(cols)))
+    }
+
+    private func rowHeights(_ subviews: Subviews, cols: Int, cell: CGFloat) -> [CGFloat] {
+        stride(from: 0, to: subviews.count, by: cols).map { start in
+            subviews[start..<min(start + cols, subviews.count)]
+                .map { $0.sizeThatFits(ProposedViewSize(width: cell, height: nil)).height }.max() ?? 0
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? minWidth * 3 + spacing * 2
+        let (cols, cell) = columns(width, subviews.count)
+        let rows = rowHeights(subviews, cols: cols, cell: cell)
+        return CGSize(width: width, height: rows.reduce(0, +) + CGFloat(max(0, rows.count - 1)) * spacing)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (cols, cell) = columns(bounds.width, subviews.count)
+        var y = bounds.minY
+        for (row, height) in rowHeights(subviews, cols: cols, cell: cell).enumerated() {
+            let start = row * cols, end = min(start + cols, subviews.count)
+            let used = CGFloat(end - start) * cell + CGFloat(end - start - 1) * spacing
+            var x = bounds.minX + (bounds.width - used) / 2
+            for i in start..<end {
+                subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: cell, height: height))
+                x += cell + spacing
+            }
+            y += height + spacing
         }
     }
 }

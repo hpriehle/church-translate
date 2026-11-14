@@ -304,6 +304,10 @@ private struct GeneralSettings: View {
             }
             Section("About and help") {
                 HelpLinks()
+                if Updater.devUpdates {
+                    Label("Dev updates on", systemImage: "hammer").foregroundStyle(.secondary)
+                        .help("This Mac also gets test builds. Turn off: defaults delete com.hearchurch.HearChurch HCDevUpdates")
+                }
             }
         }
         .formStyle(.grouped)

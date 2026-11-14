@@ -20,6 +20,14 @@ final class Updater: NSObject, ObservableObject, SPUUpdaterDelegate {
 
     func checkForUpdates() { controller.checkForUpdates(nil) }
 
+    /// Test builds go out on Sparkle's "dev" channel (mac/release.sh --dev). Only Macs that opted in see
+    /// them: `defaults write com.hearchurch.HearChurch HCDevUpdates -bool true`. Everyone else: public only.
+    nonisolated static var devUpdates: Bool { UserDefaults.standard.bool(forKey: "HCDevUpdates") }
+
+    nonisolated func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        Self.devUpdates ? ["dev"] : []
+    }
+
     nonisolated func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
         let running = MainActor.assumeIsolated { AppModel.shared.running }
         if running && updateCheck != .updates {   // a check the operator asked for still runs

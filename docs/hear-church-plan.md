@@ -35,6 +35,11 @@ Working notes for whoever continues:
   the rest of the site stays on the VPS. Release with `mac/release.sh <version>` (Keychain items
   `hearchurch-r2` and notary profile `hearchurch-notary` are set up on this Mac). `release.sh <version>`
   stops at a notarized DMG in `mac/dist/`; `--publish` ships that same file. Not released yet.
+  Dev channel: `mac/release.sh <version> --dev [--intel] [--publish]` makes `HearChurch-<version>-dev<build>.dmg`
+  and tags its appcast item `<sparkle:channel>dev</sparkle:channel>` in the same feeds; latest.json and the
+  download page are untouched. Only Macs with `defaults write com.hearchurch.HearChurch HCDevUpdates -bool true`
+  get it (Check for Updates; Settings > General shows "Dev updates on"). Every shipped copy has Sparkle 2.10.1+,
+  which skips items on channels it doesn't allow, so public Macs never see dev builds. Details: top of release.sh.
 - torch and transformers are not in the app (797 MB, DMG 358 MB). `mac/split_requirements.py` separates what
   only they need; `mac/wolof_libs.sh` builds it, signed, as `mac/wolof-libs/wolof-libs-<id>.tar.gz` (id from
   the pinned versions, so rebuilt only when they change) and release.sh uploads it to R2. The app carries
