@@ -1,7 +1,7 @@
 # V3.1 languages: any-to-any, several speaker languages, Latvian
 
 Status: engine side built on `chat/hc-v3-engine` (V3.1). Hub, listen pages and accounts on `chat/hc-v3-hub`
-(V3.2). Mac app UI = V3.3.
+(V3.2). Mac app UI on `chat/hc-v3-mac` (V3.3, see the end).
 
 ## What changes
 
@@ -186,7 +186,33 @@ code with a 15-minute countdown. A new code replaces the previous unused one. 30
 - `POST /api/hc/emails/main {"email": "…"}` → make one of them main; `404 not_found` if it isn't one.
 - `POST /api/hc/emails/remove {"email": "…"}` → `409 main` (make another main first), `404 not_found`.
 
+### Settings: devices
+
+`POST /api/hc/devices/revoke {"id": 12}` (device token, added for V3.3) → revoke another Mac of the same congregation:
+its token stops working and a meeting it runs ends (as the admin's revoke). Answer: `{ok, emails, main_email, devices}`.
+`409 this_device` for the Mac asking (it signs out instead), `404 not_found` for an id that isn't one of the
+congregation's Macs.
+
 Every one of these answers 403 for an unknown or revoked device token; the app should then go back to first launch
 ("Create congregation" / "Connect by code"). The older routes (`/api/hc/connect-code` + `/api/hc/connect` with a
 6-digit code and the slug, `/api/hc/device-link` magic links) still work for 0.2.x apps; V3.3 should use the ones
 above.
+
+## The Mac app (V3.3, `chat/hc-v3-mac`)
+
+- First launch: "Create a congregation" (church → name → place → times → languages → microphone → credits or own-key
+  code → e-mails → sign-up) or "Connect to my congregation" (a code from Add device, or "Email me a code" → code →
+  `/api/hc/pair`, then languages → microphone → credits/key). The permission step is gone (inferred; `approved` is
+  set on sign-up). The old 6-digit connect code is no longer shown or asked for.
+- The meeting lives in `profile.json` as `speakers` / `targets` and goes to the engine as
+  `{"meeting": {...}}` when the engine starts and on every toggle (live during a meeting). A profile from 0.2.x
+  takes the engine's migrated meeting once (`meetingPicked`). The church goes to the engine (`{"church"}`) on every
+  engine start and after connecting. `languages` / `stt.language` are no longer sent.
+- Language grids (`LanguageSelector.swift`): all 11 speaker and 12 translation languages, each marked ready,
+  downloading or "Download N MB"; switching one on downloads it (during a meeting a language that isn't downloaded
+  only downloads, and is switched on once ready). Large above Start meeting before a meeting, small in the sidebar
+  during one.
+- Transcript: one column for the original (with the chunk's `src`) and one per target; pass-through cells say
+  "Original".
+- Settings → Congregation: e-mails (add, remove, make main), devices (revoke others), Add device (code + countdown).
+  A 403 from `/api/hc/account` (at launch or in Settings) signs the Mac out, back to first launch.
