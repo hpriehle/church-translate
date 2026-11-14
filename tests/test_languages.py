@@ -218,15 +218,21 @@ def test_every_downloadable_voice_has_a_name(code):
     assert all(E.voice_label(code, v) != "Voice" for v in PIPER_VOICES[code][1])
 
 
-def test_every_voice_on_a_language_screen_has_a_built_in_sample():
+def test_every_offered_voice_has_a_built_in_sample():
+    """Settings → Listen plays sample-<lang>-<voice>.m4a from the app; without it, "Couldn't play that voice."
+    Record a new voice's with mac/make_voice_samples.py."""
+    import re
+
     from app.tts.engines import voice_catalog
-    from mac.make_voice_samples import LANGUAGE_SCREENS, OUT
+    from mac.make_voice_samples import OUT
 
     catalog = voice_catalog()
-    for code in LANGUAGE_SCREENS:
-        assert catalog[code], code
-        for option in catalog[code]:
-            assert (OUT / f"sample-{code}-{option['voice']}.m4a").is_file(), option["label"]
+    swift = (ROOT / "mac" / "HearChurch" / "Sources" / "Profile.swift").read_text()
+    app_languages = set(re.findall(r'OutputLanguage\(id: "(\w+)"', swift))
+    assert app_languages and app_languages <= set(catalog), app_languages - set(catalog)
+    missing = [f"{code} {option['label']}" for code, options in catalog.items() for option in options
+               if not (OUT / f"sample-{code}-{option['voice']}.m4a").is_file()]
+    assert not missing, f"no Listen sample for {missing}: run mac/make_voice_samples.py"
 
 
 def test_the_paid_mac_app_never_offers_the_non_commercial_wolof_voice(monkeypatch):
