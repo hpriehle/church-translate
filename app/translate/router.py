@@ -53,12 +53,16 @@ SESSION_TYPES = {"api": ApiSession, "hub": HubSession, "cli": ClaudeSession}
 NO_FALLBACK_WAIT_S = 30.0
 
 
+def _srcs(src: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    return (src,) if isinstance(src, str) else tuple(src)
+
+
 class Translator:
     def __init__(self, cfg: TranslateCfg, glossary: dict[str, Any], workdir: Path, lang: Language | None = None,
-                 src: str = "en"):
+                 src: str | list[str] | tuple[str, ...] = "en"):
         self.cfg = cfg
         self.lang = lang or LANGUAGES["fr"]
-        self.src = src            # the speaker's language
+        self.src = _srcs(src)     # the meeting's speaker languages
         self.workdir = workdir
         self.system_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code, src) + SCRIPTURE_RULE
         self.active: ClaudeSession | None = None
@@ -143,9 +147,10 @@ class Translator:
                 await s.close()
         await self.ollama.close()
 
-    def reload(self, cfg: TranslateCfg, glossary: dict[str, Any], src: str | None = None) -> None:
-        if src and src != self.src:
-            self.src = src
+    def reload(self, cfg: TranslateCfg, glossary: dict[str, Any],
+               src: str | list[str] | tuple[str, ...] | None = None) -> None:
+        if src and _srcs(src) != self.src:
+            self.src = _srcs(src)
             self.history.clear()   # the earlier pairs were in another language
         new_prompt = build_system_prompt(glossary, cfg.audience, self.lang.code, self.src) + SCRIPTURE_RULE
         restart = (new_prompt != self.system_prompt or cfg.claude_model != self.cfg.claude_model

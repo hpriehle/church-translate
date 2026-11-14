@@ -1,0 +1,1080 @@
+{
+  "_note": "Latvian glossary for live Church translation, structured like glossary.ru.json. The 'fr' field holds the Latvian form (name kept for historical reasons). Sources: churchofjesuschrist.org Latvian pages (home page, Mormona Grāmata table of contents, Pearl of Great Price introduction, General Handbook, Gospel Principles) for the Church name, sacrament meeting, ward, temple, Relief Society, Holy Ghost, Heavenly Father and Book of Mormon book titles; the Latvian Bible book list from bibele.lv for Old and New Testament book names. The Church site was frequently timing out, so many terms were filled from general knowledge of Latvian usage and are marked review:true; General Authority surnames are phonetic Latvian renderings and unconfirmed. Items with review:true need a Latvian member's check; Latvian Bible book forms may differ from the Church's own Bible edition.",
+  "local_names": [],
+  "terms": [
+    {
+      "en": "The Church of Jesus Christ of Latter-day Saints",
+      "fr": "Pēdējo Dienu Svēto Jēzus Kristus Baznīca",
+      "source": "churchofjesuschrist.org/?lang=lav"
+    },
+    {
+      "en": "Latter-day Saints",
+      "fr": "Pēdējo Dienu Svētie"
+    },
+    {
+      "en": "sacrament meeting",
+      "fr": "Svētā Vakarēdiena sanāksme",
+      "source": "churchofjesuschrist.org/?lang=lav"
+    },
+    {
+      "en": "sacrament",
+      "fr": "Svētais Vakarēdiens",
+      "source": "churchofjesuschrist.org (Hunter manual ch. 15)"
+    },
+    {
+      "en": "fast and testimony meeting",
+      "fr": "gavēņa un liecības sanāksme",
+      "review": true
+    },
+    {
+      "en": "bishop",
+      "fr": "bīskaps"
+    },
+    {
+      "en": "bishopric",
+      "fr": "bīskapija",
+      "source": "General Handbook ch. 32 (lav)"
+    },
+    {
+      "en": "stake",
+      "fr": "stabs",
+      "review": true
+    },
+    {
+      "en": "stake president",
+      "fr": "staba prezidents",
+      "review": true
+    },
+    {
+      "en": "stake center",
+      "fr": "staba centrs",
+      "review": true
+    },
+    {
+      "en": "ward",
+      "fr": "draudze",
+      "source": "churchofjesuschrist.org/?lang=lav"
+    },
+    {
+      "en": "branch",
+      "fr": "atzars",
+      "review": true
+    },
+    {
+      "en": "branch president",
+      "fr": "atzara prezidents",
+      "review": true
+    },
+    {
+      "en": "Relief Society",
+      "fr": "Palīdzības biedrība",
+      "source": "churchofjesuschrist.org (lav manuals)"
+    },
+    {
+      "en": "Primary",
+      "fr": "Pamatskola",
+      "review": true
+    },
+    {
+      "en": "Young Women",
+      "fr": "Jaunās Sievietes",
+      "review": true
+    },
+    {
+      "en": "Young Men",
+      "fr": "Jaunie Vīrieši",
+      "review": true
+    },
+    {
+      "en": "Sunday School",
+      "fr": "Svētdienas skola",
+      "review": true
+    },
+    {
+      "en": "elders quorum",
+      "fr": "vecāko kvorums",
+      "review": true
+    },
+    {
+      "en": "elder",
+      "fr": "vecākais",
+      "review": true
+    },
+    {
+      "en": "high priest",
+      "fr": "augstais priesteris",
+      "review": true
+    },
+    {
+      "en": "priesthood",
+      "fr": "priesterība"
+    },
+    {
+      "en": "Aaronic Priesthood",
+      "fr": "Aarona priesterība",
+      "review": true
+    },
+    {
+      "en": "Melchizedek Priesthood",
+      "fr": "Melhizedeka priesterība",
+      "review": true
+    },
+    {
+      "en": "General Conference",
+      "fr": "Vispārējā konference",
+      "review": true
+    },
+    {
+      "en": "First Presidency",
+      "fr": "Pirmā Prezidija",
+      "review": true
+    },
+    {
+      "en": "Quorum of the Twelve Apostles",
+      "fr": "Divpadsmit apustuļu kvorums",
+      "review": true
+    },
+    {
+      "en": "Seventy",
+      "fr": "Septiņdesmitie",
+      "review": true
+    },
+    {
+      "en": "patriarchal blessing",
+      "fr": "patriarha svētība",
+      "review": true
+    },
+    {
+      "en": "temple",
+      "fr": "templis",
+      "source": "churchofjesuschrist.org/?lang=lav"
+    },
+    {
+      "en": "endowment",
+      "fr": "ieguldījums",
+      "review": true
+    },
+    {
+      "en": "sealing",
+      "fr": "savienošana",
+      "review": true
+    },
+    {
+      "en": "ordinance",
+      "fr": "rituāls",
+      "review": true
+    },
+    {
+      "en": "covenant",
+      "fr": "derība",
+      "source": "Mācība un Derības"
+    },
+    {
+      "en": "tithing",
+      "fr": "desmitā tiesa",
+      "review": true
+    },
+    {
+      "en": "fast offering",
+      "fr": "gavēņa ziedojums",
+      "review": true
+    },
+    {
+      "en": "ministering",
+      "fr": "kalpošana",
+      "source": "Liahona 2019/02 (lav)"
+    },
+    {
+      "en": "ministering brothers",
+      "fr": "kalpojošie brāļi",
+      "review": true
+    },
+    {
+      "en": "ministering sisters",
+      "fr": "kalpojošās māsas",
+      "review": true
+    },
+    {
+      "en": "calling",
+      "fr": "aicinājums",
+      "review": true
+    },
+    {
+      "en": "missionary",
+      "fr": "misionārs",
+      "source": "churchofjesuschrist.org/?lang=lav"
+    },
+    {
+      "en": "mission",
+      "fr": "misija",
+      "review": true
+    },
+    {
+      "en": "testimony",
+      "fr": "liecība",
+      "source": "Mormona Grāmata (lav)"
+    },
+    {
+      "en": "Atonement of Jesus Christ",
+      "fr": "Jēzus Kristus Izpirkšana",
+      "review": true
+    },
+    {
+      "en": "Heavenly Father",
+      "fr": "Debesu Tēvs",
+      "source": "Gospel Principles ch. 7 (lav)"
+    },
+    {
+      "en": "Holy Ghost",
+      "fr": "Svētais Gars",
+      "source": "Gospel Principles ch. 7 (lav)"
+    },
+    {
+      "en": "agency",
+      "fr": "rīcības brīvība",
+      "review": true
+    },
+    {
+      "en": "exaltation",
+      "fr": "paaugstināšana",
+      "review": true
+    },
+    {
+      "en": "celestial kingdom",
+      "fr": "celestiālā valstība",
+      "review": true
+    },
+    {
+      "en": "plan of salvation",
+      "fr": "pestīšanas plāns",
+      "review": true
+    },
+    {
+      "en": "plan of happiness",
+      "fr": "laimes plāns",
+      "review": true
+    },
+    {
+      "en": "Restoration",
+      "fr": "Atjaunošana",
+      "review": true
+    },
+    {
+      "en": "Come, Follow Me",
+      "fr": "Nāc, seko Man",
+      "review": true
+    },
+    {
+      "en": "family home evening",
+      "fr": "ģimenes mājas vakars",
+      "review": true
+    },
+    {
+      "en": "brothers and sisters",
+      "fr": "brāļi un māsas"
+    }
+  ],
+  "names": [
+    {
+      "en": "Jesus Christ",
+      "fr": "Jēzus Kristus"
+    },
+    {
+      "en": "Jehovah",
+      "fr": "Jehova",
+      "review": true
+    },
+    {
+      "en": "Elohim",
+      "fr": "Elohims",
+      "review": true
+    },
+    {
+      "en": "Joseph Smith",
+      "fr": "Džozefs Smits",
+      "source": "Pearl of Great Price (lav)"
+    },
+    {
+      "en": "Nephi",
+      "fr": "Nefijs",
+      "review": true
+    },
+    {
+      "en": "Nephites",
+      "fr": "nefieši",
+      "review": true
+    },
+    {
+      "en": "Lehi",
+      "fr": "Lehijs",
+      "review": true
+    },
+    {
+      "en": "Sariah",
+      "fr": "Sarija",
+      "review": true
+    },
+    {
+      "en": "Laman",
+      "fr": "Lamans",
+      "review": true
+    },
+    {
+      "en": "Lemuel",
+      "fr": "Lemuēls",
+      "review": true
+    },
+    {
+      "en": "Lamanites",
+      "fr": "lamanieši",
+      "review": true
+    },
+    {
+      "en": "Samuel the Lamanite",
+      "fr": "Samuēls lamanietis",
+      "review": true
+    },
+    {
+      "en": "Jaredites",
+      "fr": "jarediešu tauta",
+      "review": true
+    },
+    {
+      "en": "brother of Jared",
+      "fr": "Jareda brālis",
+      "review": true
+    },
+    {
+      "en": "Enos",
+      "fr": "Ēnoss",
+      "source": "Mormona Grāmata TOC (lav): Ēnosa"
+    },
+    {
+      "en": "Ether",
+      "fr": "Ēters",
+      "source": "Mormona Grāmata TOC (lav): Etera"
+    },
+    {
+      "en": "Helaman",
+      "fr": "Helamans",
+      "source": "Mormona Grāmata TOC (lav): Helamana"
+    },
+    {
+      "en": "Mosiah",
+      "fr": "Mosija",
+      "source": "Mormona Grāmata TOC (lav)"
+    },
+    {
+      "en": "King Benjamin",
+      "fr": "ķēniņš Benjamins",
+      "review": true
+    },
+    {
+      "en": "Abinadi",
+      "fr": "Ābinadajs",
+      "review": true
+    },
+    {
+      "en": "Alma",
+      "fr": "Alma",
+      "source": "Mormona Grāmata TOC (lav)"
+    },
+    {
+      "en": "Ammon",
+      "fr": "Amons",
+      "review": true
+    },
+    {
+      "en": "Captain Moroni",
+      "fr": "kapteinis Moronijs",
+      "review": true
+    },
+    {
+      "en": "Moroni",
+      "fr": "Moronijs",
+      "source": "Mormona Grāmata TOC (lav)"
+    },
+    {
+      "en": "Mormon",
+      "fr": "Mormons",
+      "source": "Mormona Grāmata TOC (lav)"
+    },
+    {
+      "en": "Korihor",
+      "fr": "Korihors",
+      "review": true
+    },
+    {
+      "en": "Zarahemla",
+      "fr": "Zarahemla",
+      "review": true
+    },
+    {
+      "en": "Bountiful",
+      "fr": "Bauntifula",
+      "review": true
+    },
+    {
+      "en": "Liahona",
+      "fr": "Liahona",
+      "review": true
+    },
+    {
+      "en": "Urim and Thummim",
+      "fr": "Urims un Tumims",
+      "review": true
+    },
+    {
+      "en": "Hill Cumorah",
+      "fr": "Kumoras pakalns",
+      "review": true
+    },
+    {
+      "en": "Melchizedek",
+      "fr": "Melhizedeks",
+      "review": true
+    },
+    {
+      "en": "Moses",
+      "fr": "Mozus",
+      "source": "bibele.lv (Mozus grāmata)"
+    },
+    {
+      "en": "Isaiah",
+      "fr": "Jesaja",
+      "source": "bibele.lv"
+    },
+    {
+      "en": "Jeremiah",
+      "fr": "Jeremija",
+      "source": "bibele.lv"
+    },
+    {
+      "en": "Ezekiel",
+      "fr": "Ecēhiēls",
+      "source": "bibele.lv"
+    },
+    {
+      "en": "Elijah",
+      "fr": "Elija",
+      "review": true
+    },
+    {
+      "en": "Elisha",
+      "fr": "Elīsa",
+      "review": true
+    },
+    {
+      "en": "Noah",
+      "fr": "Noa",
+      "review": true
+    },
+    {
+      "en": "Eve",
+      "fr": "Ieva",
+      "review": true
+    },
+    {
+      "en": "Peter",
+      "fr": "Pēteris",
+      "review": true
+    },
+    {
+      "en": "John",
+      "fr": "Jānis",
+      "source": "bibele.lv"
+    },
+    {
+      "en": "James",
+      "fr": "Jēkabs",
+      "source": "bibele.lv (Jēkaba vēstule)"
+    },
+    {
+      "en": "Matthew",
+      "fr": "Matejs",
+      "source": "bibele.lv"
+    },
+    {
+      "en": "Mark",
+      "fr": "Marks",
+      "source": "bibele.lv"
+    },
+    {
+      "en": "Luke",
+      "fr": "Lūkass",
+      "source": "bibele.lv"
+    },
+    {
+      "en": "Mary",
+      "fr": "Marija",
+      "review": true
+    },
+    {
+      "en": "Martha",
+      "fr": "Marta",
+      "review": true
+    },
+    {
+      "en": "Lazarus",
+      "fr": "Lācars",
+      "review": true
+    },
+    {
+      "en": "Zion",
+      "fr": "Ciāna",
+      "review": true
+    },
+    {
+      "en": "Jerusalem",
+      "fr": "Jeruzaleme",
+      "review": true
+    },
+    {
+      "en": "Israel",
+      "fr": "Izraēla",
+      "review": true
+    },
+    {
+      "en": "Babylon",
+      "fr": "Bābele",
+      "review": true
+    },
+    {
+      "en": "Gethsemane",
+      "fr": "Ģetsemane",
+      "review": true
+    },
+    {
+      "en": "Golgotha",
+      "fr": "Golgāta",
+      "review": true
+    },
+    {
+      "en": "Kirtland",
+      "fr": "Kērtlenda",
+      "review": true
+    },
+    {
+      "en": "Nauvoo",
+      "fr": "Navū",
+      "source": "Pearl of Great Price intro (lav)"
+    },
+    {
+      "en": "Liberty Jail",
+      "fr": "Libertijas cietums",
+      "review": true
+    },
+    {
+      "en": "Oaks",
+      "fr": "Oukss",
+      "review": true
+    },
+    {
+      "en": "Eyring",
+      "fr": "Airings",
+      "review": true
+    },
+    {
+      "en": "Christofferson",
+      "fr": "Kristofersons",
+      "review": true
+    },
+    {
+      "en": "Holland",
+      "fr": "Holands",
+      "review": true
+    },
+    {
+      "en": "Uchtdorf",
+      "fr": "Uhtdorfs",
+      "review": true
+    },
+    {
+      "en": "Bednar",
+      "fr": "Bednārs",
+      "review": true
+    },
+    {
+      "en": "Andersen",
+      "fr": "Andersens",
+      "review": true
+    },
+    {
+      "en": "Rasband",
+      "fr": "Rasbands",
+      "review": true
+    },
+    {
+      "en": "Renlund",
+      "fr": "Renlunds",
+      "review": true
+    },
+    {
+      "en": "Gong",
+      "fr": "Gongs",
+      "review": true
+    },
+    {
+      "en": "Soares",
+      "fr": "Soaress",
+      "review": true
+    },
+    {
+      "en": "Kearon",
+      "fr": "Kērons",
+      "review": true
+    },
+    {
+      "en": "Causse",
+      "fr": "Koss",
+      "review": true
+    }
+  ],
+  "books": [
+    {
+      "en": "Genesis",
+      "fr": "1. Mozus grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Exodus",
+      "fr": "2. Mozus grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Leviticus",
+      "fr": "3. Mozus grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Numbers",
+      "fr": "4. Mozus grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Deuteronomy",
+      "fr": "5. Mozus grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Joshua",
+      "fr": "Jozuas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Judges",
+      "fr": "Soģu grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Ruth",
+      "fr": "Rutes grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "1 Samuel",
+      "fr": "1. Samuēla grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "2 Samuel",
+      "fr": "2. Samuēla grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "1 Kings",
+      "fr": "1. Ķēniņu grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "2 Kings",
+      "fr": "2. Ķēniņu grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "1 Chronicles",
+      "fr": "1. Laiku grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "2 Chronicles",
+      "fr": "2. Laiku grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Ezra",
+      "fr": "Ezras grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Nehemiah",
+      "fr": "Nehemijas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Esther",
+      "fr": "Esteres grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Job",
+      "fr": "Ījaba grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Psalms",
+      "fr": "Psalmi",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Proverbs",
+      "fr": "Salamana pamācības",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Ecclesiastes",
+      "fr": "Salamans mācītājs",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Song of Solomon",
+      "fr": "Salamana augstā dziesma",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Isaiah",
+      "fr": "Jesajas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Jeremiah",
+      "fr": "Jeremijas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Lamentations",
+      "fr": "Raudu dziesmas",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Ezekiel",
+      "fr": "Ecēhiēla grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Daniel",
+      "fr": "Daniēla grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Hosea",
+      "fr": "Hozejas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Joel",
+      "fr": "Joēla grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Amos",
+      "fr": "Āmosa grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Obadiah",
+      "fr": "Obadijas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Jonah",
+      "fr": "Jonas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Micah",
+      "fr": "Mihas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Nahum",
+      "fr": "Nahuma grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Habakkuk",
+      "fr": "Habakuka grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Zephaniah",
+      "fr": "Cefanijas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Haggai",
+      "fr": "Hagaja grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Zechariah",
+      "fr": "Caharijas grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Malachi",
+      "fr": "Maleahija grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Matthew",
+      "fr": "Mateja evaņģēlijs",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Mark",
+      "fr": "Marka evaņģēlijs",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Luke",
+      "fr": "Lūkas evaņģēlijs",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "John",
+      "fr": "Jāņa evaņģēlijs",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Acts",
+      "fr": "Apustuļu darbi",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Romans",
+      "fr": "Romiešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "1 Corinthians",
+      "fr": "1. Korintiešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "2 Corinthians",
+      "fr": "2. Korintiešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Galatians",
+      "fr": "Galatiešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Ephesians",
+      "fr": "Efeziešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Philippians",
+      "fr": "Filipiešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Colossians",
+      "fr": "Kolosiešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "1 Thessalonians",
+      "fr": "1. Tesaloniķiešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "2 Thessalonians",
+      "fr": "2. Tesaloniķiešiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "1 Timothy",
+      "fr": "1. Timotejam",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "2 Timothy",
+      "fr": "2. Timotejam",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Titus",
+      "fr": "Titam",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Philemon",
+      "fr": "Filemonam",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Hebrews",
+      "fr": "Ebrejiem",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "James",
+      "fr": "Jēkaba vēstule",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "1 Peter",
+      "fr": "Pētera 1. vēstule",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "2 Peter",
+      "fr": "Pētera 2. vēstule",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "1 John",
+      "fr": "Jāņa 1. vēstule",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "2 John",
+      "fr": "Jāņa 2. vēstule",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "3 John",
+      "fr": "Jāņa 3. vēstule",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Jude",
+      "fr": "Jūdas vēstule",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Revelation",
+      "fr": "Atklāsmes grāmata",
+      "source": "bibele.lv/bibele/bibele.php"
+    },
+    {
+      "en": "Book of Mormon",
+      "fr": "Mormona Grāmata",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "1 Nephi",
+      "fr": "1. Nefija",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "2 Nephi",
+      "fr": "2. Nefija",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Jacob",
+      "fr": "Jēkaba",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Enos",
+      "fr": "Ēnosa",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Jarom",
+      "fr": "Jaroma",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Omni",
+      "fr": "Omnija",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Words of Mormon",
+      "fr": "Mormona vārdi",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Mosiah",
+      "fr": "Mosijas",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Alma",
+      "fr": "Almas",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Helaman",
+      "fr": "Helamana",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "3 Nephi",
+      "fr": "3. Nefija",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "4 Nephi",
+      "fr": "4. Nefija",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Mormon",
+      "fr": "Mormona",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Ether",
+      "fr": "Etera",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Moroni",
+      "fr": "Moronija",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Doctrine and Covenants",
+      "fr": "Mācība un Derības",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Pearl of Great Price",
+      "fr": "Dārgā Pērle",
+      "source": "churchofjesuschrist.org/study/scriptures/pgp/introduction?lang=lav"
+    },
+    {
+      "en": "Moses (Pearl of Great Price)",
+      "fr": "Mozus",
+      "review": true
+    },
+    {
+      "en": "Abraham",
+      "fr": "Ābrahāma",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Joseph Smith—Matthew",
+      "fr": "Džozefs Smits — Mateja evaņģēlijs",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Joseph Smith—History",
+      "fr": "Džozefs Smits — Vēsture",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    },
+    {
+      "en": "Articles of Faith",
+      "fr": "Ticības apliecinājumi",
+      "source": "churchofjesuschrist.org/study/scriptures (lav)"
+    }
+  ]
+}

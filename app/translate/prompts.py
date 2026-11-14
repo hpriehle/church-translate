@@ -141,6 +141,10 @@ _OTHER = {
            "style": "Natural spoken Mandarin, written in Simplified Chinese characters: clear and respectful. Write everything in Chinese characters, because the voice cannot read Latin letters.",
            "naming": "Use the Church's official Chinese terminology. Write people's names in Chinese characters (Smith → 斯密). Use the official Chinese forms of scriptural names (尼腓, 以赛亚, 摩西).",
            "refs": '"约翰福音3:16", "教义和圣约88:118", "尼腓一书3:7"'},
+    "lv": {"lang": "Latvian",
+           "style": 'Natural spoken Latvian: clear, standard, respectful Latvian with its diacritics (ā, č, ē, ģ, ī, ķ, ļ, ņ, š, ū, ž). Avoid slang and Russian loanwords. Address the congregation with "jūs".',
+           "naming": "Use the Church's official Latvian terminology. Write people's names the Latvian way, adding Latvian endings where Latvian usage does (Smith → Smits). Use the Latvian forms of scriptural names (Nefijs, Jesaja, Mozus).",
+           "refs": '"Jāņa 3:16", "Mācība un Derības 88:118", "1. Nefija 3:7"'},
 }
 
 
@@ -149,51 +153,93 @@ def _lines(items: list[dict[str, Any]], reverse: bool = False) -> str:
     return "\n".join(f"- {i[a]} → {i[b]}" for i in items if i.get("en") and i.get("fr"))
 
 
-def build_system_prompt(glossary: dict[str, Any], audience: str, lang: str = "fr", src: str = "en") -> str:
-    """The interpreter's instructions for translating from the speaker's language `src` into `lang`."""
-    from ..languages import SPEAKER_NAMES_EN
+_LDS_HEADER = "a meeting of The Church of Jesus Christ of Latter-day Saints (usually sacrament meeting)"
+_CHRISTIAN = [  # a congregation of another church: no Latter-day Saint wording in the instructions
+    (re.escape(_LDS_HEADER), "a Christian church service"),
+    (r"Use the Church's official English terminology \([^)]*\)", "Use standard English Christian terminology"),
+    (r"the King James Bible or the Book of Mormon", "a standard English Bible"),
+    (r"the Church's official (\w+) terminology", r"standard \1 Christian terminology"),
+    (r"the Church's (\w+) scriptures", r"a standard \1 Bible"),
+    (r"the Church's (\w+) book names", r"the \1 Bible book names"),
+    (r"official Church (\w+)", r"\1 Christian"),
+]
 
-    src_name = SPEAKER_NAMES_EN.get(src, src)
+
+def source_names(srcs: list[str]) -> str:
+    """"Russian", "Russian or Latvian", "French, Spanish or English"."""
+    from ..languages import NAMES_EN
+
+    names = [NAMES_EN.get(c, c) for c in srcs] or ["English"]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+
+
+def _pivot(glossary: dict[str, Any], name: str) -> str:
+    """Terms in each other speaker language → the official term in this one, joined on the English glossary."""
+    from ..languages import NAMES_EN
+
+    out = ""
+    for src, pairs in (glossary.get("pivot") or {}).items():
+        lines = "\n".join(f"- {p['src']} → {p['dst']}" for p in pairs if p.get("src") and p.get("dst"))
+        if lines:
+            out += f"\nGLOSSARY ({NAMES_EN.get(src, src)} → official Church {name})\n{lines}\n"
+    return out
+
+
+def build_system_prompt(glossary: dict[str, Any], audience: str, lang: str = "fr",
+                        src: str | list[str] | tuple[str, ...] = "en") -> str:
+    """The interpreter's instructions for translating from the speaker languages `src` into `lang` (a meeting may
+    have several; a chunk already in `lang` is passed through and never reaches the interpreter)."""
+    srcs = [src] if isinstance(src, str) else list(src)
+    srcs = [c for c in dict.fromkeys(srcs) if c != lang] or ["en"]
+    src_name = source_names(srcs)
     local = glossary.get("local_names") or []
     local_txt = ""
     if local:
         local_txt = "\nLOCAL NAMES (people and places in this congregation; keep exactly as written)\n" + \
             "\n".join(f"- {n}" for n in local if n)
+    non_en = [c for c in srcs if c != "en"]
     if lang == "en":
         gloss = ""
-        if src != "en":  # the speaker's language glossary (glossary_for), read the other way round
-            parts = [(f"GLOSSARY (official Church {src_name} → English)", glossary.get("terms", [])),
-                     (f"NAMES ({src_name} → English)", glossary.get("names", [])),
-                     (f"SCRIPTURE BOOKS ({src_name} → English)", glossary.get("books", []))]
+        if non_en:  # the speaker languages' glossaries (glossary_for), read the other way round
+            from_name = source_names(non_en)
+            parts = [(f"GLOSSARY (official Church {from_name} → English)", glossary.get("terms", [])),
+                     (f"NAMES ({from_name} → English)", glossary.get("names", [])),
+                     (f"SCRIPTURE BOOKS ({from_name} → English)", glossary.get("books", []))]
             gloss = "".join(f"\n{title}\n{_lines(items, reverse=True)}\n" for title, items in parts if _lines(items))
-        return _TEMPLATE_EN.format(src=src_name, condense=CONDENSE_TAG, skip=SKIP, glossary=gloss, local=local_txt)
-    if lang == "wo":
-        return _TEMPLATE_WO.format(
+        text = _TEMPLATE_EN.format(src=src_name, condense=CONDENSE_TAG, skip=SKIP, glossary=gloss, local=local_txt)
+    elif lang == "wo":
+        text = _TEMPLATE_WO.format(
             src=src_name, condense=CONDENSE_TAG, skip=SKIP,
             terms=_lines(glossary.get("terms", [])) or "- (none yet)",
             names=_lines(glossary.get("names", [])) or "- (none yet)",
-            local=local_txt,
+            local=_pivot(glossary, "Wolof") + local_txt,
         )
-    if lang in _OTHER:
+    elif lang in _OTHER:
         target = _OTHER[lang]
         name = target["lang"]
-        note = "" if src == "en" else f"\n(Use these official {name} terms whenever the speaker says them in {src_name}.)"
+        note = "" if not non_en else f"\n(Use these official {name} terms whenever the speaker says them in {src_name}.)"
         parts = [(f"GLOSSARY (English → official Church {name}){note}", glossary.get("terms", [])),
                  (f"NAMES (English → {name})", glossary.get("names", [])),
                  (f"SCRIPTURE BOOKS (English → {name})", glossary.get("books", []))]
         gloss = "".join(f"\n{title}\n{_lines(items)}\n" for title, items in parts if _lines(items))
-        return _TEMPLATE_OTHER.format(**target, src=src_name, condense=CONDENSE_TAG, skip=SKIP, glossary=gloss, local=local_txt)
-    note = "" if src == "en" else f"\n(Use these official French terms whenever the speaker says them in {src_name}.)"
-    return _TEMPLATE.format(
-        src=src_name, gloss_note=note,
-        audience=audience,
-        condense=CONDENSE_TAG,
-        skip=SKIP,
-        terms=_lines(glossary.get("terms", [])),
-        names=_lines(glossary.get("names", [])),
-        books=_lines(glossary.get("books", [])),
-        local=local_txt,
-    )
+        text = _TEMPLATE_OTHER.format(**target, src=src_name, condense=CONDENSE_TAG, skip=SKIP,
+                                      glossary=gloss + _pivot(glossary, name), local=local_txt)
+    else:
+        note = "" if not non_en else f"\n(Use these official French terms whenever the speaker says them in {src_name}.)"
+        text = _TEMPLATE.format(
+            src=src_name, gloss_note=note,
+            audience=audience,
+            condense=CONDENSE_TAG,
+            skip=SKIP,
+            terms=_lines(glossary.get("terms", [])),
+            names=_lines(glossary.get("names", [])),
+            books=_lines(glossary.get("books", [])),
+            local=_pivot(glossary, "French") + local_txt,
+        )
+    if glossary.get("_church") == "christian":
+        for pattern, repl in _CHRISTIAN:
+            text = re.sub(pattern, repl, text)
+    return text
 
 
 def whisper_hints(glossary: dict[str, Any]) -> list[str]:
