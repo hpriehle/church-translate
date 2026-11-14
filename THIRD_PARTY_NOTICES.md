@@ -13,7 +13,10 @@ Downloaded at setup (not included):
 - Piper voices `es_MX-ald-medium` (Unlicense), `es_MX-claude-high` (Apache-2.0), `ru_RU-denis-medium` (CC0) and
   `ru_RU-dmitri-medium` (CC0), `pt_BR-cadu-medium` and `pt_BR-faber-medium` (CC0), `uk_UA-tetiana-high` and
   `uk_UA-oleksa-high` (Apache-2.0), `fa_IR-amir-medium` and `fa_IR-ganji-medium` (CC0), `ne_NP-chitwan-medium` (CC0),
-  `zh_CN-chaowen-medium` (CC0), `en_US-joe-medium` (CC0), `en_US-kristin-medium` (public domain), from the same repository.
+  `zh_CN-chaowen-medium` (CC0), `en_US-mike-medium` (CC0), from the same repository.
+- Piper voice `en_US-kathleen-medium` — CC0 recordings (https://github.com/OHF-Voice/voice-datasets), fine-tuned from
+  a model trained on the Hi-Fi TTS dataset (reader 92, Cori Samuel; Bakhturina, Lavrukhin, Ginsburg and Zhang, NVIDIA,
+  https://www.openslr.org/109/), CC BY 4.0 — from the same repository.
 - Piper voice `vi_VN-vais1000-medium` — CC BY 4.0, from the same repository.
 - Piper voice `lv_LV-aivars-medium` — CC0 1.0, from the same repository (upstream:
   https://huggingface.co/RaivisDejus/Piper-lv_LV-Aivars-medium).

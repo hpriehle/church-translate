@@ -153,7 +153,7 @@ DEFAULT_VOICES: dict[str, VoiceCfg] = {
     "ne": VoiceCfg(engine="piper", voice="ne_NP-chitwan-medium"),
     "vi": VoiceCfg(engine="piper", voice="vi_VN-vais1000-medium"),
     "zh": VoiceCfg(engine="piper", voice="zh_CN-chaowen-medium"),
-    "en": VoiceCfg(engine="piper", voice="en_US-joe-medium"),
+    "en": VoiceCfg(engine="piper", voice="en_US-mike-medium"),
     "lv": VoiceCfg(engine="piper", voice="lv_LV-aivars-medium")}
 
 

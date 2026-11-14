@@ -264,6 +264,7 @@ struct HelpLinks: View {
         HStack(spacing: 16) {
             Link("Privacy", destination: URL(string: "https://hearchurch.com/privacy")!)
             Link("Terms", destination: URL(string: "https://hearchurch.com/terms")!)
+            Link("Voice credits", destination: URL(string: "https://hearchurch.com/credits")!)
             Link("Contact support", destination: URL(string: "mailto:support@hearchurch.com")!)
         }
         .font(.callout)

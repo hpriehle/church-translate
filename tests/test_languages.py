@@ -191,7 +191,7 @@ def test_macos_voices_saved_earlier_are_replaced():
     s = Settings.model_validate({"tts": {"engine": "say", "voice": "Thomas"},
                                  "voices": {"en": {"engine": "say", "voice": "Samantha"}}})
     assert tts_for(s, "fr").engine == "piper" and tts_for(s, "fr").voice == "fr_FR-tom-medium"
-    assert tts_for(s, "en").engine == "piper" and tts_for(s, "en").voice == "en_US-joe-medium"
+    assert tts_for(s, "en").engine == "piper" and tts_for(s, "en").voice == "en_US-mike-medium"
     assert tts_for(Settings(), "en").engine == "piper"
 
 
