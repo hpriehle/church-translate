@@ -164,6 +164,9 @@ class BacklogCfg(BaseModel):
     condense_on_s: float = 15.0
     condense_off_s: float = 9.0
     drop_above_s: float = 25.0
+    # CPU speech recognition (faster-whisper, Intel Macs) that can't keep up: skip a sentence said more than this
+    # many seconds ago when newer speech is already waiting, instead of falling further and further behind. 0 = off.
+    stt_behind_s: float = 12.0
 
 
 class StreamCfg(BaseModel):

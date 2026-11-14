@@ -59,6 +59,7 @@ LIBS_USERS = ("wo", "zh")       # these two share the downloaded libraries (the 
 # Download sizes in MB (measured), shown before a download starts and used for its progress.
 # The speech figure is the mlx model; Intel Macs use the smaller CPU model (FASTER_WHISPER_MB).
 FASTER_WHISPER_MB = 486
+FASTER_WHISPER_STEP_MB = 148    # the "base" model it can step down to (see stt.FW_LADDER)
 SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127, "pt": 126, "uk": 228, "fa": 127, "ne": 63, "vi": 63, "zh": 176, "en": 127, "lv": 64}
 LIBS_MANIFEST = ROOT / "wolof_libs.json"
 LIBS_DIR = HOME / "packages"
@@ -89,6 +90,7 @@ class Package:
     size_mb: int
     hf_repos: tuple[str, ...] = ()
     hf_only: tuple[str, ...] = ()   # just these files of hf_repos, when the rest isn't needed
+    hf_extra: tuple[str, ...] = ()  # downloaded with it, but not needed for it to count as ready
     g2pw: bool = False
     piper_voices: tuple[str, ...] = ()
     libs: dict[str, Any] | None = None
@@ -142,8 +144,22 @@ def _piper_files(voice: str) -> list[tuple[str, Path]]:
 
 def package_for(code: str, stt_model: str) -> Package | None:
     if code == "speech":
-        size = FASTER_WHISPER_MB if "faster-whisper" in stt_model else SIZES_MB["speech"]
-        return Package("speech", "Speech recognition", size, hf_repos=(stt_model,))
+        if "faster-whisper" not in stt_model:
+            return Package("speech", "Speech recognition", SIZES_MB["speech"], hf_repos=(stt_model,))
+        # Intel Macs: also the next smaller model, which a CPU too slow for the first steps down to mid-meeting
+        # (stt.FW_LADDER). Not required: installs from before it was added keep working, and fetch it only if
+        # their Mac proves too slow (stt.Transcriber._fetch).
+        from .stt import FW_LADDER
+
+        # The smaller model is the multilingual one ("small.en" too steps down to "base"): a meeting's speakers can
+        # be any language. An English-only meeting steps down to "base.en", fetched when needed.
+        repo, size = stt_model.rsplit("-", 1)
+        size = size.removesuffix(".en")
+        extra = ()
+        if size in FW_LADDER[:-1]:
+            extra = (f"{repo}-{FW_LADDER[FW_LADDER.index(size) + 1]}",)
+        return Package("speech", "Speech recognition", FASTER_WHISPER_MB + FASTER_WHISPER_STEP_MB * len(extra),
+                       hf_repos=(stt_model,), hf_extra=extra)
     if code == "zh":
         name, voices = PIPER_VOICES[code]
         libs = _libs()
@@ -199,7 +215,7 @@ class Packages:
 
     @staticmethod
     def _done_bytes(p: Package) -> int:
-        n = sum(_bytes_in(_hf_dir(r)) for r in p.hf_repos)
+        n = sum(_bytes_in(_hf_dir(r)) for r in p.hf_repos + p.hf_extra)
         if p.libs:
             archive = LIBS_DIR / f'{p.libs["id"]}.tar.gz'
             part = archive.with_name(archive.name + ".part")
@@ -234,7 +250,7 @@ class Packages:
 
     @staticmethod
     def _delete(p: Package) -> None:
-        for repo in p.hf_repos:
+        for repo in p.hf_repos + p.hf_extra:
             shutil.rmtree(_hf_dir(repo), ignore_errors=True)
         if p.g2pw:
             shutil.rmtree(G2PW_DIR, ignore_errors=True)
@@ -266,6 +282,11 @@ class Packages:
                         await asyncio.to_thread(_unpack_libs, archive, p.libs)
             for repo in p.hf_repos:
                 await asyncio.to_thread(snapshot_download, repo, allow_patterns=list(p.hf_only) or None)
+            for repo in p.hf_extra:
+                try:
+                    await asyncio.to_thread(snapshot_download, repo)
+                except Exception as e:   # optional: the package is ready without it
+                    log.warning("optional %s of %s not downloaded: %s", repo, p.name, e)
             if p.g2pw and not (G2PW_DIR / "g2pw.onnx").exists():
                 archive = PIPER_DIR / "g2pw.tar.gz"
                 await _fetch(G2PW_URL, archive)

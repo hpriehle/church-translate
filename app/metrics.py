@@ -134,6 +134,9 @@ def summarize(records: list[dict[str, Any]], lang: str) -> dict[str, Any]:
         "engines": engines,
         "chunk_s": percentiles([r["audio_dur_s"] for r in records]),
         "stt_ms": percentiles([r["stt_ms"] for r in records if r.get("stt_ms")]),
+        # from the chunk being cut to its speech recognition starting: grows without bound when the CPU is too slow
+        "stt_wait": percentiles([max(0.0, r["t_stt_done"] - r["t_cut"] - r["stt_ms"] / 1000)
+                                 for r in records if r.get("t_stt_done") and r.get("t_cut")]),
         "mt_ms": percentiles([x["mt_ms"] for x in captioned]),
         "mt_ms_claude": percentiles([x["mt_ms"] for x in captioned if x["engine"] == "claude"]),
         "mt_ms_ollama": percentiles([x["mt_ms"] for x in captioned if x["engine"] == "ollama"]),

@@ -71,11 +71,16 @@ def build_report(records: list[dict[str, Any]], info: dict[str, Any] | None = No
         if info.get(k):
             lines.append(f"- {'STT' if k == 'stt' else 'Translator'}: {info[k]}")
     lines.append(f"- Languages: {', '.join(NAMES.get(c, c) for c in langs)}")
-    lines.append(f"- Audio processed: {audio_s / 60:.1f} min in {len(records)} chunks · "
-                 f"skipped as non-speech: {sum(1 for r in records if r['status'] == 'skipped')}")
+    behind = sum(1 for r in records if r["status"] == "skipped" and r.get("note", "").startswith("behind"))
+    lines.append(f"- Audio processed: {audio_s / 60:.1f} min in {len(records)} chunks · skipped as non-speech: "
+                 f"{sum(1 for r in records if r['status'] == 'skipped') - behind}")
+    if behind or info.get("stt_events"):
+        lines.append(f"- Speech recognition too slow for this computer: {behind} chunks skipped to catch up"
+                     + "".join(f" · {e}" for e in info.get("stt_events", [])))
     if first:
         lines += ["", "| Shared | p50 | p90 | p95 | max | n |", "|---|---|---|---|---|---|",
-                  _row("Chunk length", first["chunk_s"]), _row("Speech-to-text", first["stt_ms"], " ms")]
+                  _row("Chunk length", first["chunk_s"]), _row("Speech-to-text", first["stt_ms"], " ms"),
+                  _row("Waiting for speech-to-text (behind)", first["stt_wait"])]
     lines += ["", "Latency is measured on the server. *After speaker pauses* = from the end of the phrase to the "
               "caption / the audio starting in that language's stream. Phones add their own playback buffer "
               "(typically 1–3 s).", ""]

@@ -155,6 +155,7 @@ async def test_pipeline_bills_only_translated_languages(monkeypatch):
         return SimpleNamespace(text=text, ms=1.0, dropped_reason="", language=lang)
 
     pipe._recognise = recognise
+    pipe.stt = SimpleNamespace(engine="mlx", stepped_down="")   # Apple Silicon: never skips ahead or steps down
     from concurrent.futures import ThreadPoolExecutor
     pipe.stt_exec = ThreadPoolExecutor(1)
     taps = []

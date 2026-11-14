@@ -37,6 +37,12 @@ class BacklogPolicy:
             self.condense_count += 1
         return self.condense
 
+    @staticmethod
+    def stt_skip(behind_s: float, newer_waiting: bool, limit_s: float) -> bool:
+        """Speech recognition is slower than the speaker (a CPU-only Mac): skip a chunk said more than limit_s
+        ago when newer speech is already waiting. The newest chunk is always heard, so captions stay live."""
+        return newer_waiting and limit_s > 0 and behind_s > limit_s
+
     @property
     def drop_above_s(self) -> float:
         return self.cfg.drop_above_s

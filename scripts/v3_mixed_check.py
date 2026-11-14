@@ -84,6 +84,7 @@ async def run(main, speakers: list[str], targets: list[str], wav: Path) -> list[
 
     st = main.S.settings.model_copy(deep=True)
     st.meeting.speakers, st.meeting.targets, st.meeting.auto_en = speakers, targets, False
+    st.backlog.stt_behind_s = 0   # the clip plays faster than a slow CPU recognises it: check every chunk, skip none
     main.S.settings = Settings.model_validate(st.model_dump())
     main.S.pipeline.apply_settings(main.S.settings, main.S.glossaries)
     main.set_targets(targets, persist=False)

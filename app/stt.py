@@ -5,7 +5,9 @@ import logging
 import platform
 import re
 import sys
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -71,6 +73,15 @@ def resolve_engine(engine: str) -> str:
     return engine
 
 
+# CPU speech recognition (faster-whisper) on a computer too slow for the configured model steps down this ladder,
+# one size at a time, while the measured speed stays above STEP_DOWN_RTF (seconds of work per second of speech).
+FW_LADDER = ["small", "base"]
+STEP_DOWN_RTF = 0.8
+RTF_WINDOW = 8           # judged on the last this many chunks (one slow chunk alone never steps down)
+RTF_MIN_CHUNKS = 6       # chunks measured on a model before it can be judged too slow
+RTF_MIN_AUDIO_S = 2.0    # shorter chunks say little about speed
+
+
 class Transcriber:
     def __init__(self, cfg: SttCfg):
         self.cfg = cfg
@@ -79,6 +90,16 @@ class Transcriber:
         self._fw_name = ""
         self.ready = False
         self.load_s = 0.0
+        self.rtf = 0.0             # seconds of work per second of speech, last RTF_WINDOW chunks (faster-whisper)
+        self._recent: deque[tuple[float, float]] = deque(maxlen=RTF_WINDOW)   # (speech s, work s)
+        self._step = 0             # sizes stepped down from cfg.faster_whisper_model (kept while the app runs)
+        self.stepped_down = ""     # what the operator is told when it happened
+        self.events: list[str] = []   # step-downs and background downloads, for the meeting report
+        self._fetch_at: dict[str, float] = {}   # smaller models being fetched in the background: when it started
+
+    @property
+    def model_name(self) -> str:
+        return self._fw_name
 
     def load(self) -> None:
         t0 = time.monotonic()
@@ -87,10 +108,8 @@ class Transcriber:
             # A first call loads the weights into memory (and downloads them once).
             self._transcribe_raw(np.zeros(16000, dtype=np.float32), None)
         elif self.engine == "faster-whisper":
-            from faster_whisper import WhisperModel
-
             self._fw_name = self._fw_wanted()
-            self._fw_model = WhisperModel(self._fw_name, device="cpu", compute_type="int8")
+            self._fw_model = self._fw_load(self._fw_name, local_only=False)
             self._transcribe_raw(np.zeros(16000, dtype=np.float32), None)
         else:
             raise ValueError(f"unknown stt engine {self.engine!r}")
@@ -100,17 +119,93 @@ class Transcriber:
 
     def _fw_wanted(self) -> str:
         """The faster-whisper model for the speaker languages: "small.en" becomes "small" unless only English is
-        spoken (English-only models know only English, and can't tell languages apart)."""
+        spoken (English-only models know only English, and can't tell languages apart), and a smaller size once
+        this computer has proved too slow for it (see _measure)."""
         name = self.cfg.faster_whisper_model
+        en = name.endswith(".en")
+        size = name[:-3] if en else name
+        if self._step and size in FW_LADDER:
+            size = FW_LADDER[min(FW_LADDER.index(size) + self._step, len(FW_LADDER) - 1)]
         english_only = (self.cfg.languages or [self.cfg.language]) == ["en"]
-        return name[:-3] if not english_only and name.endswith(".en") else name
+        return size + ".en" if en and english_only else size
+
+    def _measure(self, audio_s: float, work_s: float) -> None:
+        """Track the real-time factor; step down one model size when this CPU can't keep up with the speaker."""
+        if self.engine != "faster-whisper" or audio_s < RTF_MIN_AUDIO_S:
+            return
+        self._recent.append((audio_s, work_s))
+        self.rtf = sum(w for _, w in self._recent) / sum(a for a, _ in self._recent)
+        if len(self._recent) < RTF_MIN_CHUNKS or self.rtf <= STEP_DOWN_RTF:
+            return
+        before = self._fw_wanted()
+        self._step += 1
+        after = self._fw_wanted()
+        if after == before:   # already the smallest: nothing left to step down to
+            self._step -= 1
+            return
+        if not self._on_disk(after):   # e.g. installed before it was part of the download: fetch it, step later
+            self._step -= 1
+            self._fetch(after)
+            return
+        self.stepped_down = (f"Speech recognition was too slow on this computer ({self.rtf:.2f}s of work per second "
+                             f"of speech with {before}): switching to the smaller {after} model")
+        log.warning(self.stepped_down)
+        self.events.append(f"model {before} → {after} (it needed {self.rtf:.2f}s per second of speech)")
+        self._recent.clear()   # judge the new model on its own speed (it loads at the next chunk)
+
+    @staticmethod
+    def _fw_load(name: str, local_only: bool):
+        """Load a faster-whisper model by name from the model cache (downloading it unless local_only). Resolved to
+        its cache folder first: given a bare name, faster-whisper loads a folder of that name in the working
+        directory instead when one exists (a folder called "base" broke the step-down in a test)."""
+        from faster_whisper import WhisperModel, download_model
+
+        return WhisperModel(download_model(name, local_files_only=local_only), device="cpu", compute_type="int8")
+
+    @staticmethod
+    def _on_disk(name: str) -> bool:
+        from faster_whisper import download_model
+
+        try:
+            download_model(name, local_files_only=True)
+            return True
+        except Exception:
+            return False
+
+    def _fetch(self, name: str) -> None:
+        """Download a smaller model in the background (never in the way of the meeting); retried after 5 minutes."""
+        if time.monotonic() - self._fetch_at.get(name, -1e9) < 300:
+            return
+        self._fetch_at[name] = time.monotonic()
+        self.events.append(f"too slow ({self.rtf:.2f}s per second of speech): downloading the smaller {name} model")
+        log.warning("speech recognition too slow (RTF %.2f): downloading %s in the background", self.rtf, name)
+
+        def run() -> None:
+            from faster_whisper import download_model
+
+            try:
+                download_model(name)
+                log.info("downloaded the %s speech model", name)
+            except Exception as e:
+                log.warning("couldn't download the %s speech model: %s", name, e)
+
+        threading.Thread(target=run, name=f"fetch-{name}", daemon=True).start()
 
     def _fw_sync(self) -> None:
-        if self._fw_wanted() != self._fw_name:   # the speaker languages changed: English-only models know only English
-            from faster_whisper import WhisperModel
-
+        """Load the model _fw_wanted names when it changed: the speaker languages changed (English-only models know
+        only English), or this CPU proved too slow for the model. A smaller model is only ever loaded from disk:
+        _measure fetched it first."""
+        if self._fw_wanted() == self._fw_name:
+            return
+        try:
+            self._fw_model = self._fw_load(self._fw_wanted(), local_only=bool(self._step))
+        except Exception:
+            if not self._step:
+                raise
+            log.exception("couldn't load the smaller model %s: keeping %s", self._fw_wanted(), self._fw_name)
+            self._step -= 1     # e.g. not downloaded and offline
+        else:
             self._fw_name = self._fw_wanted()
-            self._fw_model = WhisperModel(self._fw_name, device="cpu", compute_type="int8")
 
     def detect(self, audio: np.ndarray, choices: list[str], prev: str = "") -> str:
         """Which of the meeting's speaker languages `audio` is in (one choice: that one, nothing is run)."""
@@ -171,9 +266,12 @@ class Transcriber:
 
     def transcribe(self, audio: np.ndarray, prompt: str = "", language: str | None = None) -> SttResult:
         t0 = time.monotonic()
+        reloaded = self.engine == "faster-whisper" and self._fw_wanted() != self._fw_name
         text, nsp, alp, cr = self._transcribe_raw(audio, prompt, language)
         res = SttResult(text=text, ms=(time.monotonic() - t0) * 1000, no_speech_prob=nsp, avg_logprob=alp,
                         language=language or self.cfg.language)
+        if not reloaded:   # a chunk that also loaded a model says nothing about its speed
+            self._measure(len(audio) / 16000, res.ms / 1000)
         low = text.lower().strip(" .!?,")
         if not text:
             res.dropped_reason = "empty"
