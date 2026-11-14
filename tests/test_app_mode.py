@@ -224,36 +224,85 @@ async def test_api_session_forgets_a_reply_with_markup():
     assert "antml" not in str(client.calls[2]["messages"])
 
 
-def test_speaker_language_switch(monkeypatch):
-    """French speaker: English turns on, French pauses (its phones are told), Wolof keeps translating."""
+
+def _meeting_engine(monkeypatch, settings):
+    """main with a pipeline of fake channels, nothing written to disk."""
     from app import main
-    from app.config import Settings
     from app.pipeline import Pipeline
 
-    settings = Settings()
     pipe = Pipeline.__new__(Pipeline)
-    pipe.settings, pipe.channels = settings, {}
+    pipe.settings, pipe.channels, pipe.source, pipe.glossaries = settings, {}, "", {}
     sent: dict[str, list] = {}
+    reloaded: list = []
 
-    def chan(code, on):
+    def chan(code):
         sent[code] = []
-        return SimpleNamespace(code=code, on=on, lang=SimpleNamespace(name=code), activate=lambda: None,
+        return SimpleNamespace(code=code, on=code in settings.meeting.targets, lang=SimpleNamespace(name=code),
+                               activate=lambda: None,
                                hub=SimpleNamespace(publish=lambda m, remember=False, c=code: sent[c].append(m)))
-    pipe.channels = {"fr": chan("fr", True), "wo": chan("wo", True), "en": chan("en", False)}
+    pipe.channels = {c: chan(c) for c in ("fr", "wo", "en", "lv", "ru")}
+    pipe.apply_settings = lambda st, g: reloaded.append(list(st.meeting.speakers))
+    saved: dict = {}
     monkeypatch.setattr(main.S, "pipeline", pipe, raising=False)
+    monkeypatch.setattr(main.S, "settings", settings, raising=False)
+    monkeypatch.setattr(main.S, "glossaries", {}, raising=False)
     monkeypatch.setattr(main.S, "operator", SimpleNamespace(publish=lambda m: None), raising=False)
+    monkeypatch.setattr(main.S, "engine_hub", SimpleNamespace(set_languages=lambda c: None), raising=False)
     monkeypatch.setattr(main, "full_status", lambda: {})
-    assert list(pipe.translating()) == ["fr", "wo"]
+    monkeypatch.setattr(main, "save_override", lambda k, v: saved.__setitem__(k, v))
+    return main, pipe, sent, saved, reloaded
 
-    settings.stt.language = "fr"
+
+def test_speaker_language_switch_legacy(monkeypatch):
+    """Older settings / the 0.2 Mac app: English follows the speaker; the speaker's own language now passes the
+    original through instead of pausing."""
+    from app.config import Settings
+
+    main, pipe, sent, saved, reloaded = _meeting_engine(monkeypatch, Settings(languages=["fr", "wo"]))
+    assert list(pipe.translating()) == ["fr", "wo"] and main.S.settings.meeting.auto_en
+
     main.set_speaker("fr")
-    assert pipe.channels["en"].on and list(pipe.translating()) == ["wo", "en"]
-    assert {"type": "speaker", "speaker": "fr", "name": "Français"} in sent["fr"]
-    assert [l["code"] for l in sent["fr"][-1]["languages"]] == ["fr", "wo", "en"]   # French is still offered
+    assert pipe.channels["en"].on and list(pipe.translating()) == ["fr", "wo", "en"]
+    assert main.S.settings.meeting.speakers == ["fr"] and main.S.settings.stt.language == "fr"
+    assert saved["meeting"]["targets"] == ["fr", "wo", "en"] and saved["languages"] == ["fr", "wo"]
+    msg = next(m for m in sent["fr"] if m.get("type") == "speaker")
+    assert msg["passthrough"] and msg["speakers"] == ["fr"]
+    assert reloaded == [["fr"]]   # interpreters learn the new source
 
-    main.set_languages(["wo"], persist=False)          # the operator's switches leave English alone
+    main.set_languages(["wo"], persist=False)          # the legacy switches leave English alone
     assert pipe.channels["en"].on and not pipe.channels["fr"].on
 
-    settings.stt.language = "en"
     main.set_speaker("en")
-    assert not pipe.channels["en"].on and list(pipe.translating()) == ["wo"]
+    assert not pipe.channels["en"].on and main.S.settings.meeting.targets == ["fr", "wo"]
+
+
+def test_meeting_sets_several_speakers_and_targets(monkeypatch):
+    """The new way: speakers and targets set explicitly; English is a target like any other, kept as chosen."""
+    from fastapi import HTTPException
+
+    from app.config import Settings
+
+    main, pipe, sent, saved, _ = _meeting_engine(monkeypatch, Settings(languages=["fr"]))
+    monkeypatch.setattr(main, "require_speaker", lambda r: "operator")
+    monkeypatch.setattr(main, "_public_settings", lambda: {})
+
+    class Req:
+        def __init__(self, body):
+            self.body = body
+
+        async def json(self):
+            return self.body
+
+    out = asyncio.run(main.api_settings(Req({"meeting": {"speakers": ["ru", "lv"], "targets": ["en", "lv"]}})))
+    assert out["ok"]
+    m = main.S.settings.meeting
+    assert (m.speakers, m.targets, m.auto_en) == (["ru", "lv"], ["en", "lv"], False)
+    assert [c for c, ch in pipe.channels.items() if ch.on] == ["en", "lv"]
+    assert saved["meeting"] == {"speakers": ["ru", "lv"], "targets": ["en", "lv"], "auto_en": False}
+    assert main.legacy_speaker() == "ru"   # old hubs pause nobody who gets the Latvian original
+    main.set_speaker("en")                 # auto_en is off: English stays a target with an English speaker
+    assert main.S.settings.meeting.targets == ["en", "lv"]
+    for bad in ({"speakers": []}, {"targets": ["xx"]}, {"speakers": ["wo"]}):   # Whisper has no Wolof
+        with pytest.raises(HTTPException):
+            asyncio.run(main.api_settings(Req({"meeting": bad})))
+    assert main.S.settings.meeting.targets == ["en", "lv"]

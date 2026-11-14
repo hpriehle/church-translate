@@ -145,9 +145,10 @@ def _engine(monkeypatch, on, running=False):
         removed.append(code)
 
     channels = {c: NS(on=c in on, lang=LANGUAGES[c], tts=NS(unload=lambda c=c: unloaded.append(c))) for c in ("fr", "es")}
-    monkeypatch.setattr(main, "S", NS(pipeline=NS(channels=channels, running=running), settings=NS(languages=list(on))))
+    monkeypatch.setattr(main, "S", NS(pipeline=NS(channels=channels, running=running),
+                                      settings=NS(languages=list(on), meeting=NS(targets=list(on)))))
     monkeypatch.setattr(main, "require_operator", lambda request: None)
-    monkeypatch.setattr(main, "set_languages", lambda codes: switched.append(codes))
+    monkeypatch.setattr(main, "set_targets", lambda codes: switched.append(codes))
     monkeypatch.setattr(packages.PACKAGES, "remove", remove)
     return main, removed, unloaded, switched
 

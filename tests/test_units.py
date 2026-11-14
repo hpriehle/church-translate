@@ -507,10 +507,10 @@ def test_english_reads_the_speakers_glossary_backwards():
     fr = {"terms": [{"en": "stake", "fr": "pieu"}], "local_names": ["Kouassi"]}
     ru = {"terms": [{"en": "Relief Society", "fr": "Общество милосердия"}], "local_names": ["Bērziņš"]}
     gs = {"fr": fr, "en": fr, "ru": ru, "wo": {}}
-    assert glossary_for("en", "en", gs) is fr                     # English speaker: English is paused anyway
-    assert glossary_for("ru", "en", gs) is ru and glossary_for("ru", "fr", gs) is ru   # other targets: unchanged
+    assert glossary_for("en", "en", gs)["terms"] == fr["terms"]   # English speaker: English is passed through
+    assert glossary_for("ru", "en", gs)["terms"] == ru["terms"] == glossary_for("ru", "fr", gs)["terms"]
     g = glossary_for("en", "ru", gs)
-    assert g["terms"] == ru["terms"] and g["local_names"] == ["Bērziņš", "Kouassi"]
+    assert g["terms"] == ru["terms"] and set(g["local_names"]) == {"Bērziņš", "Kouassi"}
     p = build_system_prompt(g, "", "en", "ru")
     assert "- Общество милосердия → Relief Society" in p and "pieu" not in p and "Kouassi" in p
     assert glossary_for("en", "fr", gs)["terms"] == fr["terms"]
