@@ -20,8 +20,12 @@ struct Profile: Codable {
     var lng: Double?
     var meetingTimes: [MeetingTime] = [MeetingTime()]
     var timezone: String = TimeZone.current.identifier
-    var languages: [String] = ["fr"]
-    var email: String = ""
+    var languages: [String] = ["fr"]       // before V3.3: the translation languages (English came by itself)
+    var speakers: [String] = ["en"]        // the meeting's speaker languages (docs/v3-languages.md)
+    var targets: [String] = ["fr"]         // its translation languages = the listen pills, in this order
+    var meetingPicked = false              // speakers/targets were chosen in this version (else taken from the engine)
+    var email: String = ""                 // the main (billing) e-mail
+    var extraEmails: [String] = []         // more addresses, given at sign-up
     var approved = false
     var slug: String = ""
     var claim: String = ""                  // while waiting for the e-mail link to be clicked
@@ -38,13 +42,15 @@ struct Profile: Codable {
         address = v(.address, ""); lat = v(.lat, nil); lng = v(.lng, nil)
         meetingTimes = v(.meetingTimes, [MeetingTime()]); timezone = v(.timezone, TimeZone.current.identifier)
         languages = v(.languages, ["fr"]); email = v(.email, ""); approved = v(.approved, false)
+        speakers = v(.speakers, ["en"]); targets = v(.targets, languages.isEmpty ? ["fr"] : languages)
+        meetingPicked = v(.meetingPicked, false); extraEmails = v(.extraEmails, [])
         slug = v(.slug, ""); claim = v(.claim, ""); languagesPicked = v(.languagesPicked, false)
         setupDone = v(.setupDone, false)
     }
 
     private enum CodingKeys: String, CodingKey {
         case church, unitType, name, stake, address, lat, lng, meetingTimes, timezone, languages, email, approved,
-             slug, claim, languagesPicked, setupDone
+             slug, claim, languagesPicked, setupDone, speakers, targets, meetingPicked, extraEmails
     }
 
     static var url: URL { AppPaths.home.appendingPathComponent("profile.json") }
@@ -76,7 +82,7 @@ enum Churches {
     static let all = [latterDaySaints, "Catholic", "Baptist", "Methodist", "Non-denominational"]
 }
 
-/// Output languages listeners can choose.
+/// The 12 languages: each can be a translation language (a listen pill); all but Wolof can be spoken.
 // Speech model download (app/packages.py): Intel Macs use the smaller CPU model.
 // Wolof needs torch, which has no current Intel Mac builds.
 #if arch(arm64)
@@ -107,10 +113,14 @@ struct OutputLanguage: Identifiable, Equatable {
         OutputLanguage(id: "ne", name: "Nepali", native: "नेपाली", flag: "🇳🇵", available: true, sizeMB: 63),
         OutputLanguage(id: "vi", name: "Vietnamese", native: "Tiếng Việt", flag: "🇻🇳", available: true, sizeMB: 63),
         OutputLanguage(id: "zh", name: "Chinese", native: "中文", flag: "🇨🇳", available: true, sizeMB: 377),  // voice and pronunciation model 176 + shared libraries 201
+        english,
+        OutputLanguage(id: "lv", name: "Latvian", native: "Latviešu", flag: "🇱🇻", available: true, sizeMB: 64),
     ]
-    /// Not one of the choices: English is translated by itself whenever the speaker isn't speaking it.
     static let english = OutputLanguage(id: "en", name: "English", native: "English", flag: "🇺🇸", available: true, sizeMB: 127)
-    static func name(_ code: String) -> String { (all + [english]).first { $0.id == code }?.name ?? code.uppercased() }
+    /// What people may speak at the microphone: Whisper has no Wolof.
+    static let speakers = all.filter { $0.id != "wo" }
+    static func name(_ code: String) -> String { all.first { $0.id == code }?.name ?? code.uppercased() }
+    static func native(_ code: String) -> String { all.first { $0.id == code }?.native ?? code.uppercased() }
 }
 
 enum AppPaths {

@@ -3,8 +3,9 @@ import CoreLocation
 import MapKit
 import SwiftUI
 
-/// First launch: describe the congregation, pick languages (they start downloading), allow the microphone,
-/// add a Claude key, sign up with hearchurch.com and get this Mac's device token.
+/// First launch: create a congregation (describe it, pick its languages, which start downloading, allow the
+/// microphone, credits or own key, its e-mails, then sign up with hearchurch.com for this Mac's device token), or
+/// connect to one that exists with a code (from "Add device" on another Mac, or e-mailed to the congregation).
 /// Billing: a congregation pays with credits, unless Harrison gave it a one-time own-key code. Until credits can be
 /// bought, the Claude step needs that code (or a congregation that already uses its own key) before it takes a key.
 struct OnboardingView: View {
@@ -13,17 +14,15 @@ struct OnboardingView: View {
     @State private var joined: Bool
     @State private var error: String?
     @State private var busy = false
-    // "I already set up my congregation"
-    @State private var joinSlug = ""
-    @State private var joinTitle = ""
+    // "Connect to my congregation"
     @State private var joinCode = ""
-    @State private var connectCode = Keychain.get(.connectCode) ?? ""
     @State private var ownKey = OnboardingProgress.ownKey   // this congregation may use its own Anthropic key
 
-    enum Step: String { case welcome, church, name, place, times, languages, microphone, claude, approval, email, connect, join, finish }
+    enum Step: String { case welcome, church, name, place, times, languages, microphone, claude, email, join, finish }
 
     /// Setting up a new congregation. (No "check your e-mail" step: the hub hands the device token back at once.)
-    private static let createOrder: [Step] = [.welcome, .church, .name, .place, .times, .languages, .microphone, .claude, .approval, .email, .connect, .finish]
+    /// No permission step: whoever sets it up is taken to have it.
+    private static let createOrder: [Step] = [.welcome, .church, .name, .place, .times, .languages, .microphone, .claude, .email, .finish]
     /// Connecting to one that already exists: the congregation's details come from the hub.
     private static let joinOrder: [Step] = [.welcome, .join, .languages, .microphone, .claude, .finish]
     private var order: [Step] { joined ? Self.joinOrder : Self.createOrder }
@@ -35,7 +34,7 @@ struct OnboardingView: View {
             if joined {
                 if s == .welcome || s == .join { s = .languages }
             } else if let i = Self.createOrder.firstIndex(of: s), i <= Self.createOrder.firstIndex(of: .email)! {
-                s = (Keychain.get(.connectCode) ?? "").isEmpty ? .finish : .connect
+                s = .finish
             }
         }
         if !joined && s == .join { s = .welcome }
@@ -57,14 +56,16 @@ struct OnboardingView: View {
             }
             Divider()
             HStack {
-                if step != .welcome && step != .connect && step != .finish {
+                if step != .welcome && step != .finish {
                     Button("Back") { move(-1) }
                 }
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
-                Button(buttonTitle) { Task { await next() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canContinue || busy)
+                if step != .welcome {   // the welcome step's two choices are its buttons
+                    Button(buttonTitle) { Task { await next() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!canContinue || busy)
+                }
             }
             .padding(16)
         }
@@ -75,7 +76,6 @@ struct OnboardingView: View {
 
     private var buttonTitle: String {
         switch step {
-        case .welcome: return "Get started"
         case .email: return "Sign up"
         case .join: return "Connect"
         case .finish: return "Open Hear Church"
@@ -87,7 +87,8 @@ struct OnboardingView: View {
     @ViewBuilder private var content: some View {
         switch step {
         case .welcome:
-            WelcomeStep(onJoin: { error = nil; joined = true; step = .join })
+            WelcomeStep(onCreate: { error = nil; joined = false; step = .church },
+                        onJoin: { error = nil; joined = true; step = .join })
         case .church: ChurchStep(profile: $model.profile)
         case .name: NameStep(profile: $model.profile)
         case .place: PlaceStep(profile: $model.profile)
@@ -95,10 +96,8 @@ struct OnboardingView: View {
         case .languages: LanguagesStep()
         case .microphone: MicrophoneStep()
         case .claude: ClaudeStep(ownKey: $ownKey)
-        case .approval: ApprovalStep(profile: $model.profile)
         case .email: EmailStep(profile: $model.profile)
-        case .connect: ConnectCodeStep(code: connectCode, congregation: model.profile.name)
-        case .join: JoinStep(slug: $joinSlug, title: $joinTitle, code: $joinCode)
+        case .join: JoinStep(code: $joinCode)
         case .finish: FinishStep()
         }
     }
@@ -109,13 +108,18 @@ struct OnboardingView: View {
         case .church: return !p.church.trimmingCharacters(in: .whitespaces).isEmpty
         case .name: return p.name.trimmingCharacters(in: .whitespaces).count >= 2
         case .place: return p.lat != nil
-        case .languages: return !p.languages.isEmpty
+        case .languages: return !p.speakers.isEmpty && !p.targets.isEmpty
         case .claude: return !ownKey || model.keyState == .ok   // credits need no key
-        case .approval: return p.approved
-        case .email: return p.email.contains("@") && p.email.contains(".")
-        case .join: return !joinSlug.isEmpty && joinCode.filter(\.isNumber).count == 6
+        case .email: return Self.isEmail(p.email) && p.extraEmails.allSatisfy { $0.trimmingCharacters(in: .whitespaces).isEmpty || Self.isEmail($0) }
+        case .join: return joinCode.filter { $0.isLetter || $0.isNumber }.count == 8
         default: return true
         }
+    }
+
+    static func isEmail(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard let at = t.firstIndex(of: "@"), at > t.startIndex else { return false }
+        return t[t.index(after: at)...].contains(".") && !t.contains(" ")
     }
 
     private static let keychainError = "Could not save to this Mac's Keychain. Unlock the Keychain (or allow access) and try again."
@@ -147,15 +151,10 @@ struct OnboardingView: View {
                 guard Keychain.set(.deviceToken, token) else { error = Self.keychainError; return }
                 model.profile.slug = r.slug
                 model.profile.claim = ""
+                model.profile.approved = true   // inferred: whoever sets it up has the leaders' go-ahead
+                model.profile.extraEmails = model.profile.extraEmails.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                 model.profile.save()
-                if let code = r.connectCode, !code.isEmpty {
-                    if !Keychain.set(.connectCode, code) { Keychain.delete(.connectCode) }
-                    connectCode = code
-                    step = .connect
-                } else {
-                    connectCode = ""
-                    step = .finish
-                }
+                step = .finish
                 if let e = await redeemOwnKeyCode() { error = e }   // tried again on the last step
             } catch {
                 self.error = error.localizedDescription
@@ -164,12 +163,16 @@ struct OnboardingView: View {
             busy = true
             defer { busy = false }
             do {
-                let j = try await HubClient.connect(slug: joinSlug, code: joinCode.filter(\.isNumber), deviceName: model.deviceName)
+                let j = try await HubClient.pair(code: joinCode, deviceName: model.deviceName)
                 guard Keychain.set(.deviceToken, j.token) else { error = Self.keychainError; return }
                 Keychain.delete(.connectCode)
                 model.profile.slug = j.slug
                 if !j.name.isEmpty { model.profile.name = j.name }
                 if !j.church.isEmpty { model.profile.church = j.church }
+                if !j.unitType.isEmpty { model.profile.unitType = j.unitType }
+                model.profile.stake = j.stake
+                if !j.address.isEmpty { model.profile.address = j.address }
+                Task { await model.pushChurch() }   // the glossary follows the congregation's church
                 model.profile.approved = true   // whoever set the congregation up already confirmed it
                 if j.billing == "own_key" { ownKey = true }
                 model.profile.claim = ""
@@ -179,8 +182,6 @@ struct OnboardingView: View {
             } catch {
                 self.error = error.localizedDescription
             }
-        case .connect:
-            move(1)
         case .finish:
             busy = true
             defer { busy = false }
@@ -222,19 +223,38 @@ private struct StepTitle: View {
 }
 
 private struct WelcomeStep: View {
+    let onCreate: () -> Void
     let onJoin: () -> Void
 
     var body: some View {
         StepTitle(title: "Welcome to Hear Church",
                   subtitle: "This Mac listens to your meeting and translates it live. Members hear the translation and read captions on their own phones, through hearchurch.com.")
-        Label("About 5 minutes to set up", systemImage: "clock")
-        Label("You'll need an Anthropic API key for Claude, which does the translating", systemImage: "key")
-        Label("Voices download while you finish setting up", systemImage: "arrow.down.circle")
-        Divider()
-        Button("I already set up my congregation", action: onJoin)
-        Text("Use this to connect another computer to a congregation that is already on hearchurch.com.")
-            .font(.callout).foregroundStyle(.secondary)
+        choice("Create a congregation", "plus.circle.fill",
+               "First time on Hear Church: describe your congregation and choose its languages. About 5 minutes.", onCreate)
+            .keyboardShortcut(.defaultAction)
+        choice("Connect to my congregation", "link.circle.fill",
+               "Your congregation already uses Hear Church on another Mac: connect this one with a code.", onJoin)
+        Divider().padding(.vertical, 4)
+        Label("Voices download while you finish setting up", systemImage: "arrow.down.circle").foregroundStyle(.secondary)
         HelpLinks()
+    }
+
+    private func choice(_ title: String, _ icon: String, _ detail: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon).font(.system(size: 30)).foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.title3.weight(.semibold))
+                    Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            .padding(16)
+            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -250,94 +270,60 @@ struct HelpLinks: View {
     }
 }
 
-/// Shown once after sign-up: the code another computer needs to connect to this congregation.
-private struct ConnectCodeStep: View {
-    let code: String
-    let congregation: String
-
-    var body: some View {
-        StepTitle(title: "Your connect code",
-                  subtitle: "You're signed up. Write this code down: you'll need it if you ever set up Hear Church on another computer.")
-        Text(HubClient.spaced(code))
-            .font(.system(size: 54, weight: .bold, design: .monospaced))
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
-        Text("Use this code to connect another computer to \(congregation.isEmpty ? "your congregation" : congregation). Keep it private.")
-            .foregroundStyle(.secondary)
-        Text("It is saved in this Mac's Keychain, and you can see it again or make a new one in Settings.")
-            .font(.callout).foregroundStyle(.secondary)
-    }
-}
-
-/// "I already set up my congregation": find it by name or pasted link, then the code.
+/// "Connect to my congregation": a code from Settings → Add device on a connected Mac, or one e-mailed to every
+/// address of the congregation.
 private struct JoinStep: View {
-    @Binding var slug: String
-    @Binding var title: String
     @Binding var code: String
-    @State private var query = ""
-    @State private var results: [HubClient.Match] = []
-    @State private var searching = false
-    @State private var note = ""
+    @State private var byEmail = false
+    @State private var email = ""
+    @State private var sent: String?
+    @State private var sending = false
+    @State private var problem: String?
 
     var body: some View {
         StepTitle(title: "Connect to your congregation",
-                  subtitle: "Find it by name, or paste its listener link (hearchurch.com/c/…). Then enter the connect code that came with the first setup.")
-        if slug.isEmpty {
+                  subtitle: "Enter a code to connect this Mac. Codes work once, for 15 minutes.")
+        Picker("", selection: $byEmail) {
+            Text("I have a code").tag(false)
+            Text("Email me a code").tag(true)
+        }
+        .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 320)
+        if byEmail {
+            Text("Enter one of your congregation's e-mail addresses. A code goes to every address of the congregation.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                TextField("Congregation name, town, or listener link", text: $query).onSubmit { Task { await find() } }
-                Button("Find") { Task { await find() } }.disabled(query.trimmingCharacters(in: .whitespaces).count < 2 || searching)
+                TextField("name@example.com", text: $email).textContentType(.emailAddress).onSubmit { Task { await send() } }
+                Button(sent == nil ? "Send code" : "Send again") { Task { await send() } }
+                    .disabled(!OnboardingView.isEmail(email) || sending)
+                if sending { ProgressView().controlSize(.small) }
             }
-            if searching { ProgressView().controlSize(.small) }
-            ForEach(results) { m in
-                Button { slug = m.slug; title = m.title } label: {
-                    HStack {
-                        Text(m.title)
-                        if !m.city.isEmpty { Text(m.city).foregroundStyle(.secondary) }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Divider()
-            }
-            if !note.isEmpty { Text(note).font(.callout).foregroundStyle(.secondary) }
+            if let sent { Label(sent, systemImage: "envelope").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            if let problem { Text(problem).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         } else {
-            LabeledContent("Congregation") {
-                HStack {
-                    Text(title.isEmpty ? slug : title).bold()
-                    Button("Change") { slug = ""; title = ""; code = "" }.buttonStyle(.link)
-                }
-            }
-            TextField("Connect code (6 digits)", text: $code)
-                .font(.system(.title2, design: .monospaced))
+            Text("On a Mac already connected to your congregation, open Hear Church → Settings → Congregation → Add device. Enter the code it shows.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        if !byEmail || sent != nil {
+            TextField("XXXX-XXXX", text: $code)
+                .font(.system(.title, design: .monospaced))
+                .frame(maxWidth: 260)
                 .onChange(of: code) { _, v in
-                    let digits = String(v.filter(\.isNumber).prefix(6))
-                    let shown = HubClient.spaced(digits)
+                    let shown = HubClient.pairingFormat(v)
                     if shown != v { code = shown }
                 }
-            Text("Ask whoever set up Hear Church for the current code.").font(.callout).foregroundStyle(.secondary)
         }
     }
 
-    private func find() async {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        note = ""
-        if let s = HubClient.slug(fromLink: q) {
-            slug = s
-            title = ""
-            if let m = (try? await HubClient.search(s))?.first(where: { $0.slug == s }) { title = m.title }
-            return
-        }
-        searching = true
-        defer { searching = false }
+    private func send() async {
+        let e = email.trimmingCharacters(in: .whitespaces)
+        guard OnboardingView.isEmail(e) else { return }
+        sending = true
+        defer { sending = false }
+        problem = nil
         do {
-            results = try await HubClient.search(q)
-            if results.isEmpty { note = "No congregation found. Try the town, or paste its listener link." }
+            sent = try await HubClient.emailCode(e)
         } catch {
-            note = error.localizedDescription
+            problem = error.localizedDescription
         }
     }
 }
@@ -347,7 +333,7 @@ private struct ChurchStep: View {
     @State private var choice = ""
 
     var body: some View {
-        StepTitle(title: "Your church", subtitle: "Shown to listeners next to your congregation's name.")
+        StepTitle(title: "Your church", subtitle: "Shown to listeners next to your congregation's name. It also chooses the glossary Claude follows: Christian terms for every church, and Latter-day Saint terms for The Church of Jesus Christ of Latter-day Saints.")
         Picker("Church", selection: $choice) {
             Text("Choose…").tag("")
             ForEach(Churches.all, id: \.self) { Text($0).tag($0) }
@@ -489,31 +475,6 @@ private struct TimesStep: View {
     }
 }
 
-/// A language row with its download size and state; used in setup and on the operator page.
-struct LanguageToggle: View {
-    @EnvironmentObject var model: AppModel
-    let language: OutputLanguage
-
-    var body: some View {
-        let on = model.profile.languages.contains(language.id)
-        let pkg = model.engine.packages.first { $0.id == language.id }
-        Toggle(isOn: Binding(get: { on }, set: { model.setLanguage(language.id, on: $0) })) {
-            HStack {
-                Text(language.flag)
-                Text(language.name)
-                Spacer()
-                if !language.available {
-                    Text(language.unavailableReason ?? "Not available").foregroundStyle(.secondary)
-                } else {
-                    PackageBadge(package: pkg, sizeMB: language.sizeMB)
-                }
-            }
-        }
-        .toggleStyle(.checkbox)
-        .disabled(!language.available || (on && model.profile.languages.count == 1 && model.profile.setupDone))
-    }
-}
-
 struct PackageBadge: View {
     let package: PackageStatus?
     let sizeMB: Double
@@ -533,19 +494,12 @@ struct PackageBadge: View {
 }
 
 private struct LanguagesStep: View {
-    @EnvironmentObject var model: AppModel
-
     var body: some View {
         StepTitle(title: "Languages",
-                  subtitle: "The meeting is in English; listeners pick one of these. A language starts downloading as soon as you choose it. Keep going while it does.")
-        ForEach(OutputLanguage.all) { LanguageToggle(language: $0) }
+                  subtitle: "Choose the languages people speak at the microphone, and the languages listeners can choose. Every language you choose downloads now: keep going while it does. You can change them before each meeting.")
+        LanguageSelector(showTitle: false)
         Divider()
-        HStack {
-            Text("Speech recognition").foregroundStyle(.secondary)
-            Text("needed for every language").font(.callout).foregroundStyle(.tertiary)
-            Spacer()
-            PackageBadge(package: model.engine.packages.first { $0.id == "speech" }, sizeMB: speechDownloadMB)
-        }
+        SpeechPackageRow()
     }
 }
 
@@ -658,28 +612,29 @@ private struct ClaudeStep: View {
     }
 }
 
-private struct ApprovalStep: View {
-    @Binding var profile: Profile
-
-    var body: some View {
-        StepTitle(title: "Permission",
-                  subtitle: "While a meeting is live, anyone nearby can find it on hearchurch.com and listen; there is no PIN. Anyone with your link or QR code can listen from anywhere.")
-        Toggle(profile.isLatterDaySaint ? "My bishop or branch president has approved translating and streaming this meeting."
-                                        : "My pastor or leader has approved translating and streaming this meeting.",
-               isOn: $profile.approved)
-        Text("Hear Church is an independent project, not affiliated with or endorsed by any church.")
-            .font(.callout).foregroundStyle(.secondary)
-    }
-}
-
 private struct EmailStep: View {
     @Binding var profile: Profile
 
     var body: some View {
-        StepTitle(title: "Your e-mail",
-                  subtitle: "In case we need to reach you about your congregation's page on hearchurch.com. We don't send newsletters.")
-        TextField("name@example.com", text: $profile.email)
-            .textContentType(.emailAddress)
+        StepTitle(title: "E-mail",
+                  subtitle: "The main e-mail gets the receipts when you buy credit. Add the addresses of others who look after Hear Church: any of them can get a code to connect another Mac. We don't send newsletters.")
+        LabeledContent("Main e-mail") {
+            TextField("name@example.com", text: $profile.email).textContentType(.emailAddress)
+        }
+        ForEach(profile.extraEmails.indices, id: \.self) { i in
+            LabeledContent(i == 0 ? "Also" : "") {
+                HStack {
+                    TextField("another@example.com", text: Binding(
+                        get: { i < profile.extraEmails.count ? profile.extraEmails[i] : "" },
+                        set: { if i < profile.extraEmails.count { profile.extraEmails[i] = $0 } }))
+                    Button(role: .destructive) { profile.extraEmails.remove(at: i) } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                }
+            }
+        }
+        if profile.extraEmails.count < 9 {
+            Button("Add another e-mail") { profile.extraEmails.append("") }
+        }
     }
 }
 

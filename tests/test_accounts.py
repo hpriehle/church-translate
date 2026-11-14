@@ -146,6 +146,26 @@ def test_add_device_code_connects_a_new_mac_once(client, hear):
     assert again.status_code == 403 and again.json()["error"] == "bad_code"
 
 
+def test_a_mac_revokes_another_mac_of_its_congregation(client, hear):
+    cong, token = make_cong(hear)
+    other_cong, other_token = make_cong(hear, name="Elsewhere")
+    code = client.post("/api/hc/pairing-code", headers=auth(token)).json()["code"]
+    second = client.post("/api/hc/pair", json={"code": code, "device_name": "Clerk's Mac"}).json()["device_token"]
+    acc = client.get("/api/hc/account", headers=auth(token)).json()
+    me = next(d["id"] for d in acc["devices"] if d["this"])
+    clerk = next(d["id"] for d in acc["devices"] if not d["this"])
+    stranger = hear.db.devices(other_cong["id"])[0]["id"]
+    assert client.post("/api/hc/devices/revoke", json={"id": clerk}).status_code == 403
+    r = client.post("/api/hc/devices/revoke", json={"id": me}, headers=auth(token))
+    assert r.status_code == 409 and r.json()["error"] == "this_device"
+    r = client.post("/api/hc/devices/revoke", json={"id": stranger}, headers=auth(token))
+    assert r.status_code == 404 and r.json()["error"] == "not_found"
+    r = client.post("/api/hc/devices/revoke", json={"id": clerk}, headers=auth(token))
+    assert r.status_code == 200 and [d["id"] for d in r.json()["devices"]] == [me]
+    assert client.get("/api/hc/account", headers=auth(second)).status_code == 403   # its token stops working
+    assert client.get("/api/hc/account", headers=auth(other_token)).status_code == 200
+
+
 def test_pairing_code_expires_and_a_new_one_replaces_it(client, hear, monkeypatch):
     cong, token = make_cong(hear)
     old = client.post("/api/hc/pairing-code", headers=auth(token)).json()["code"]

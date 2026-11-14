@@ -398,6 +398,8 @@ struct EngineStatus: Decodable, Equatable {
     struct EngineInfo: Decodable, Equatable { let client: Link? }
     struct Listeners: Decodable, Equatable { let stream: Int; let captions: Int }
     struct Switch: Decodable, Equatable { let code: String; let name: String; let on: Bool }
+    /// docs/v3-languages.md: the languages spoken at the microphone and the translation languages (listen pills).
+    struct Meeting: Decodable, Equatable { let speakers: [String]; let targets: [String] }
 
     let pipeline: Pipeline
     let translate: [String: Translate]
@@ -408,6 +410,8 @@ struct EngineStatus: Decodable, Equatable {
     let sharing: String?
     let claude_access: String?   // "credits": the engine translates through hearchurch.com, no key on this Mac
     let speaker: String?
+    let meeting: Meeting?      // engines before V3.1 don't send it
+    let source: String?        // the language of the last recognised chunk
     let mic_warning: String?   // the engine's sentence when the microphone has gone quiet or away
     let mic_name: String?      // the input the meeting is using
 }
@@ -439,6 +443,7 @@ struct EngineSettings: Decodable, Equatable {
         let voices: [String: Voice]
         let server: Server
         let stt: Stt?
+        let meeting: EngineStatus.Meeting?
     }
     struct Device: Decodable, Hashable { let name: String; let channels: Int; let `default`: Bool? }
     struct VoiceOption: Decodable, Hashable { let id: String; let engine: String; let voice: String; let label: String }
@@ -458,9 +463,12 @@ struct Chunk: Decodable, Equatable, Identifiable {
         let status: String     // pending|captioned|aired|dropped|skipped|failed|merged
         let note: String?
         let caption_lag: Double?
+        let engine: String?    // "original": pass-through, the speaker spoke this language
+        var original: Bool { engine == "original" }
     }
     let seq: Int
-    let en: String
+    let en: String             // what was said, as recognised, in `src`
+    let src: String?           // the chunk's language: one of the meeting's speaker languages
     let status: String
     let note: String?
     let wall_time: Double?

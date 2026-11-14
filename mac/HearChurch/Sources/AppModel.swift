@@ -33,7 +33,8 @@ final class AppModel: ObservableObject {
         network.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         Timer.publish(every: 3, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.tick() }.store(in: &bag)
         engine.$status.sink { [weak self] st in self?.micWarningChanged(st) }.store(in: &bag)
-        engine.onRunning = { [weak self] in self?.resumeDownloads() }
+        engine.$status.sink { [weak self] st in self?.followEngineMeeting(st) }.store(in: &bag)
+        engine.onRunning = { [weak self] in self?.engineStarted() }
         mic.onDevicesChanged = { [weak self] in Task { await self?.engine.loadSettings() } }
     }
 
@@ -81,22 +82,42 @@ final class AppModel: ObservableObject {
         if !running { relaunchEngine() }
     }
 
-    /// The language the speaker talks in (en, fr, es, ru). Switchable during the meeting.
-    var speaker: String { engine.status?.speaker ?? engine.settings?.settings.stt?.language ?? "en" }
-
-    func setSpeaker(_ code: String) async {
-        await engine.set(["stt": ["language": code]])
-        if code != "en" { await engine.download(["en"]) }   // listeners get English: its voice comes with the first use
-    }
-
     // MARK: engine
 
     /// The engine runs from the first launch, so voices can download while the operator is still in setup.
     func launch() {
-        engine.packageLanguages = OutputLanguage.all.map(\.id) + ["en"]
+        engine.packageLanguages = OutputLanguage.all.map(\.id)
         engine.start(environment: engineEnvironment())
         Task { await checkKey() }
         Task { await checkHub() }
+        Task { await checkDevice() }
+    }
+
+    /// A Mac revoked from another Mac (or the admin) goes back to first launch. Only a clear 403 counts: an
+    /// unreachable or older hub changes nothing.
+    func checkDevice() async {
+        guard profile.setupDone, let token = Keychain.get(.deviceToken), !token.isEmpty else { return }
+        do {
+            _ = try await HubClient.account(token: token)
+        } catch is HubClient.SignedOut {
+            signOut()
+            message = "This Mac was disconnected from the congregation. Set it up again to publish meetings."
+        } catch {}
+    }
+
+    /// Forget the congregation on this Mac (Settings, or the hub revoked it). The details entered and the API key
+    /// stay, so setting up again is quick.
+    func signOut() {
+        Keychain.delete(.deviceToken)
+        Keychain.delete(.connectCode)
+        OnboardingProgress.clear()
+        var p = profile
+        p.slug = ""
+        p.claim = ""
+        p.setupDone = false
+        profile = p
+        p.save()
+        relaunchEngine()   // without the device token; onboarding needs the engine for downloads
     }
 
     func relaunchEngine() {
@@ -122,34 +143,107 @@ final class AppModel: ObservableObject {
         return env
     }
 
-    // MARK: languages and downloads
+    // MARK: the meeting's languages and downloads
 
-    /// Switch a language on or off. During setup this only starts its download; afterwards it also switches the
-    /// translation on or off right away.
-    func setLanguage(_ code: String, on: Bool) {
-        profile.languages.removeAll { $0 == code }
-        if on { profile.languages.append(code) }
+    /// The languages spoken at the microphone, and the translation languages (= the listen pills), as chosen here.
+    /// The engine follows them (POST /api/settings {"meeting"}), live during a meeting too.
+    var speakers: [String] { profile.speakers }
+    var targets: [String] { profile.targets }
+
+    enum LanguageRole { case speaker, target }
+
+    func isOn(_ code: String, _ role: LanguageRole) -> Bool { (role == .speaker ? speakers : targets).contains(code) }
+
+    /// Downloaded and ready to use in a meeting.
+    func isReady(_ code: String) -> Bool { package(code)?.state == "ready" }
+
+    /// A toggle in a language grid. The last language of a set can't be switched off. A language that isn't
+    /// downloaded starts downloading; during a meeting it is switched on only once it is ready (a download must not
+    /// change what listeners get in the middle of a talk).
+    /// Returns why nothing changed, if so.
+    @discardableResult
+    func toggle(_ code: String, _ role: LanguageRole) -> String? {
+        var list = role == .speaker ? profile.speakers : profile.targets
+        if list.contains(code) {
+            guard list.count > 1 else {
+                return role == .speaker ? "At least one language must be spoken." : "Keep at least one translation language."
+            }
+            list.removeAll { $0 == code }
+        } else {
+            if running && !isReady(code) {
+                Task { await engine.download([code]) }
+                return "\(OutputLanguage.name(code)) is downloading. Switch it on when it's ready."
+            }
+            list.append(code)
+        }
+        var speakers = profile.speakers, targets = profile.targets
+        if role == .speaker { speakers = list } else { targets = list }
+        setMeeting(speakers: speakers, targets: targets)
+        return nil
+    }
+
+    func setMeeting(speakers: [String], targets: [String]) {
+        profile.speakers = speakers
+        profile.targets = targets
+        profile.meetingPicked = true
         profile.languagesPicked = true
         profile.save()
         Task {
-            if profile.setupDone && !profile.languages.isEmpty { await engine.set(["languages": profile.languages]) }
-            await engine.download(profile.languages)
+            if profile.setupDone { await pushMeeting() }
+            await engine.download(neededDownloads)
         }
+    }
+
+    private func pushMeeting() async {
+        if let e = await engine.set(["meeting": ["speakers": profile.speakers, "targets": profile.targets]]) { message = e }
+    }
+
+    /// Latter-day Saints get the Latter-day Saint glossary on top of the Christian one; other churches the Christian one.
+    func pushChurch() async {
+        guard !profile.church.isEmpty else { return }
+        await engine.set(["church": profile.church])
+    }
+
+    /// The engine (re)started: give it this Mac's meeting and church, and resume downloads. A profile from before V3.3
+    /// takes the engine's meeting instead (it was migrated from the old one-speaker settings).
+    private func engineStarted() {
+        Task {
+            await pushChurch()
+            if profile.setupDone {
+                if !profile.meetingPicked {
+                    await engine.loadSettings()
+                    if let m = engine.settings?.settings.meeting, !m.speakers.isEmpty, !m.targets.isEmpty {
+                        profile.speakers = m.speakers
+                        profile.targets = m.targets
+                    }
+                    profile.meetingPicked = true
+                    profile.save()
+                }
+                await pushMeeting()
+            }
+            if profile.setupDone || profile.languagesPicked { await engine.download(neededDownloads) }
+        }
+    }
+
+    private var lastEngineMeeting: EngineStatus.Meeting?
+
+    /// Someone changed the languages elsewhere (the speak page may): show what the engine does.
+    private func followEngineMeeting(_ st: EngineStatus?) {
+        guard profile.setupDone, let m = st?.meeting, m != lastEngineMeeting else { return }
+        let first = lastEngineMeeting == nil
+        lastEngineMeeting = m
+        guard !first, !m.speakers.isEmpty, !m.targets.isEmpty,
+              m.speakers != profile.speakers || m.targets != profile.targets else { return }
+        profile.speakers = m.speakers
+        profile.targets = m.targets
+        profile.save()
     }
 
     func package(_ code: String) -> PackageStatus? { engine.packages.first { $0.id == code } }
 
-    /// The checkboxes next to Start meeting: every language downloaded (or on its way), checked or not.
-    var downloadedLanguages: [OutputLanguage] {
-        OutputLanguage.all.filter { l in
-            profile.languages.contains(l.id) || ["ready", "downloading", "failed"].contains(package(l.id)?.state ?? "")
-        }
-    }
-
-    /// Download a language from Settings. It comes ready to use, except during a meeting: a download
-    /// must not change what listeners get in the middle of a talk, so there it waits unchecked.
+    /// Download a language from Settings. Before a meeting it is ready to use in the language grids.
     func downloadLanguage(_ code: String) {
-        if running || code == "en" { Task { await engine.download([code]) } } else { setLanguage(code, on: true) }
+        Task { await engine.download([code]) }
     }
 
     func manageLanguages() {
@@ -157,33 +251,36 @@ final class AppModel: ObservableObject {
         openSettings?()
     }
 
-    /// Delete a language's voice; nil if it worked, or why it couldn't. The engine unchecks it too.
+    /// Delete a language's voice; nil if it worked, or why it couldn't.
     func removeLanguage(_ code: String) async -> String? {
+        if profile.speakers == [code] || profile.targets == [code] {
+            return "\(OutputLanguage.name(code)) is the meeting's only \(profile.speakers == [code] ? "speaker" : "translation") language: choose another one first."
+        }
         let r = await engine.post("api/packages/remove", ["language": code])
         guard r.ok else { return r.message.isEmpty ? "Could not remove it." : r.message }
-        profile.languages.removeAll { $0 == code }
-        profile.save()
+        if isOn(code, .speaker) || isOn(code, .target) {
+            setMeeting(speakers: profile.speakers.filter { $0 != code }, targets: profile.targets.filter { $0 != code })
+        }
         await engine.refreshPackages()
         return nil
     }
 
-    /// After a (re)start of the engine, pick up downloads where they stopped.
-    private func resumeDownloads() {
-        guard profile.setupDone || profile.languagesPicked else { return }
-        Task { await engine.download(neededDownloads) }
+    /// Every language heard or spoken in the meeting is downloaded (speech recognition comes with any of them).
+    var neededDownloads: [String] {
+        var out = profile.speakers
+        for t in profile.targets where !out.contains(t) { out.append(t) }
+        return out
     }
-
-    /// What this Mac needs for the languages checked now, plus English while the speaker isn't speaking it.
-    private var neededDownloads: [String] { profile.languages + (speaker == "en" ? [] : ["en"]) }
 
     /// Downloads in progress (or failed), for the bar at the top of the window.
     var downloads: [PackageStatus] { engine.packages.filter { $0.state == "downloading" || $0.state == "failed" } }
 
-    /// The engine's starting languages are the ones chosen in setup (the operator page changes them later).
-    private func writeLanguages() {
+    /// The engine's starting meeting is the one chosen in setup.
+    private func writeMeeting() {
         let url = AppPaths.home.appendingPathComponent("data/overrides.darwin.json")
         var current = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] ?? [:]
-        current["languages"] = profile.languages
+        current["meeting"] = ["speakers": profile.speakers, "targets": profile.targets, "auto_en": false]
+        current.removeValue(forKey: "languages")   // legacy view: the engine derives it from the meeting
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? JSONSerialization.data(withJSONObject: current, options: [.prettyPrinted]) {
             try? data.write(to: url, options: .atomic)
@@ -192,8 +289,10 @@ final class AppModel: ObservableObject {
 
     func finishSetup() {
         profile.setupDone = true
+        profile.meetingPicked = true
+        profile.approved = true   // asking is inferred from setting it up (V3.3)
         profile.save()
-        writeLanguages()
+        writeMeeting()
         relaunchEngine()   // now with the device token, so meetings go to hearchurch.com
     }
 
@@ -343,10 +442,9 @@ final class AppModel: ObservableObject {
                                              action: ("Settings…", { self.openSettings?() })))
         }
         }
-        if profile.setupDone && profile.languages.isEmpty {
+        if profile.setupDone && (profile.speakers.isEmpty || profile.targets.isEmpty) {
             out.append(Check(id: "languages", title: "No language chosen", state: .bad,
-                             detail: "Download a language, or check one, to start a meeting.",
-                             action: ("Languages…", { self.manageLanguages() })))
+                             detail: "Choose a speaker language and a translation language to start a meeting."))
         }
         switch engine.state {
         case .running:

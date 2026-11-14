@@ -24,7 +24,7 @@ struct MainView: View {
                     .frame(width: 330)
                     .background(.background.secondary)
                 Divider()
-                TranscriptView()
+                if model.running { TranscriptView() } else { IdlePane() }
             }
         }
         // The microphone is only open while the checks can show its level (the orange dot; AirPods drop to call
@@ -43,8 +43,7 @@ private struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            StartButton()
-            SpeakerPicker()
+            if model.running { StartButton() }   // before a meeting it sits under the language selector
             MeetingState()
             HStack(spacing: 6) {
                 Image(systemName: "mic.fill").foregroundStyle(.secondary)
@@ -73,25 +72,34 @@ private struct TopBar: View {
     }
 }
 
-/// The language the speaker talks in. English is translated whenever the speaker isn't speaking English;
-/// the translation into the speaker's own language pauses and its phones are told to listen in the room.
-private struct SpeakerPicker: View {
+/// Before a meeting: the languages, large, with Start meeting under them; the last meeting's transcript below.
+private struct IdlePane: View {
     @EnvironmentObject var model: AppModel
-    static let options = [("en", "English"), ("fr", "Français"), ("es", "Español"), ("ru", "Русский")]
 
     var body: some View {
-        Picker("Speaker", selection: Binding(get: { model.speaker }, set: { code in
-            Task { await model.setSpeaker(code) }
-        })) {
-            ForEach(Self.options, id: \.0) { Text($0.1).tag($0.0) }
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 18) {
+                    LanguageSelector()
+                    StartButton(large: true)
+                    Button("Manage languages…") { model.manageLanguages() }.buttonStyle(.link).font(.callout)
+                }
+                .padding(24)
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(maxHeight: model.engine.chunks.isEmpty ? .infinity : 520)
+            if !model.engine.chunks.isEmpty {
+                Divider()
+                TranscriptView(title: "Last meeting")
+            }
         }
-        .fixedSize()
-        .help("The language the speaker is talking in. Switch it whenever the speaker changes, even during the meeting.")
     }
 }
 
 private struct StartButton: View {
     @EnvironmentObject var model: AppModel
+    var large = false
     @State private var confirmStop = false
     @State private var busy = false
 
@@ -100,8 +108,8 @@ private struct StartButton: View {
             if model.running { confirmStop = true } else { Task { busy = true; await model.startMeeting(); busy = false } }
         } label: {
             Label(model.running ? "Stop meeting" : "Start meeting", systemImage: model.running ? "stop.fill" : "play.fill")
-                .font(.title3.weight(.semibold))
-                .frame(minWidth: 170, minHeight: 34)
+                .font(large ? .title2.weight(.semibold) : .title3.weight(.semibold))
+                .frame(minWidth: large ? 260 : 170, minHeight: large ? 44 : 34)
         }
         .buttonStyle(.borderedProminent)
         .tint(model.running ? .red : .green)
@@ -174,8 +182,8 @@ private struct Sidebar: View {
                 Text(msg).foregroundStyle(.red).font(.callout)
             }
             if model.running { DuringMeeting() } else { BeforeMeeting() }
+            if model.running { LanguagesSection() }   // before a meeting the selector is large, above Start
             SoundSection()
-            LanguagesSection()
             ListenersSection()
         }
     }
@@ -213,12 +221,16 @@ private struct DuringMeeting: View {
     var body: some View {
         let st = model.engine.status
         SectionCard(title: "Translating") {
-            ForEach(model.profile.languages, id: \.self) { code in
+            ForEach(model.targets, id: \.self) { code in
                 let t = st?.translate[code]
                 HStack {
                     Text(OutputLanguage.name(code))
                     Spacer()
-                    Text(claude(t?.claude.state)).foregroundStyle(t?.claude.state == "ready" || t?.claude.state == "busy" ? .green : .orange)
+                    if st?.source == code {
+                        Text("Original").foregroundStyle(.secondary).help("The speaker is speaking \(OutputLanguage.name(code)): it goes out as spoken")
+                    } else {
+                        Text(claude(t?.claude.state)).foregroundStyle(t?.claude.state == "ready" || t?.claude.state == "busy" ? .green : .orange)
+                    }
                 }
                 if let e = t?.last_error, !e.isEmpty { Text(e).font(.caption).foregroundStyle(.orange) }
             }
@@ -294,22 +306,15 @@ private struct GainSlider: View {
     }
 }
 
+/// During a meeting: the same speaker / translation toggles as before it, small; changes apply live.
 private struct LanguagesSection: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
         SectionCard(title: "Languages") {
-            ForEach(model.downloadedLanguages) { LanguageToggle(language: $0) }
-            if model.downloadedLanguages.isEmpty {
-                Text("No languages downloaded yet.").font(.callout).foregroundStyle(.secondary)
-            }
-            Button("Manage languages…") { model.manageLanguages() }
-            .buttonStyle(.link).font(.callout)
-            if model.speaker != "en" {
-                let name = ["fr": "French", "es": "Spanish", "ru": "Russian"][model.speaker] ?? model.speaker
-                Text("The speaker talks \(name): English is added for listeners."
-                     + (OutputLanguage.all.contains { $0.id == model.speaker } ? " \(name) phones are told to listen in the room." : ""))
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            LanguageSelector(compact: true, showTitle: false)
+            if let src = model.engine.status?.source, model.speakers.count > 1 {
+                Text("Speaking now: \(OutputLanguage.name(src))").font(.caption).foregroundStyle(.secondary)
             }
             if let failed = model.engine.packages.first(where: { $0.state == "failed" }) {
                 Text("\(failed.name): \(failed.error)").font(.caption).foregroundStyle(.orange)
@@ -372,14 +377,17 @@ private struct ListenersSection: View {
 
 // MARK: - transcript
 
+/// What is said, in columns: the original (as spoken) and one per translation language, a row per sentence,
+/// newest at the top.
 private struct TranscriptView: View {
     @EnvironmentObject var model: AppModel
+    var title = "Transcript"
     @State private var showLog = false
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Transcript").font(.headline)
+                Text(title).font(.headline)
                 Text(summary).font(.callout).foregroundStyle(.secondary)
                 Spacer()
                 Toggle("Activity", isOn: $showLog).toggleStyle(.button).controlSize(.small).focusEffectDisabled()
@@ -395,8 +403,7 @@ private struct TranscriptView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(model.engine.chunks) { ChunkRow(chunk: $0, languages: model.profile.languages) }
-                    .listStyle(.plain)
+                TranscriptColumns(chunks: model.engine.chunks, targets: columns)
             }
             if showLog {
                 Divider()
@@ -410,6 +417,15 @@ private struct TranscriptView: View {
         }
     }
 
+    /// The meeting's translation languages, then any other language still in the shown sentences (switched off since).
+    private var columns: [String] {
+        var out = model.targets
+        for c in model.engine.chunks.prefix(50) {
+            for code in c.langs.keys.sorted() where !out.contains(code) { out.append(code) }
+        }
+        return out
+    }
+
     private var summary: String {
         let c = model.engine.chunks
         guard !c.isEmpty else { return "" }
@@ -419,42 +435,99 @@ private struct TranscriptView: View {
     }
 }
 
-private struct ChunkRow: View {
-    let chunk: Chunk
-    let languages: [String]
+private struct TranscriptColumns: View {
+    let chunks: [Chunk]
+    let targets: [String]
+    private static let minWidth: CGFloat = 200
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(chunk.en.isEmpty ? "…" : chunk.en).font(.body).textSelection(.enabled)
-                Spacer()
-                if let t = chunk.wall_time {
-                    Text(Date(timeIntervalSince1970: t), style: .time).font(.caption).foregroundStyle(.tertiary)
+        GeometryReader { g in
+            let count = CGFloat(targets.count + 1)
+            let width = max(Self.minWidth, (g.size.width - 1) / count)
+            ScrollView(.horizontal) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        header("Original", detail: "as spoken", width: width)
+                        ForEach(targets, id: \.self) { code in
+                            header("\(OutputLanguage.all.first { $0.id == code }?.flag ?? "") \(OutputLanguage.name(code))", detail: OutputLanguage.native(code), width: width)
+                        }
+                    }
+                    .background(.bar)
+                    Divider()
+                    ScrollView(.vertical) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(chunks) { chunk in
+                                ChunkRow(chunk: chunk, targets: targets, width: width)
+                                Divider()
+                            }
+                        }
+                    }
+                }
+                .frame(width: max(g.size.width, width * count), height: g.size.height, alignment: .topLeading)
+            }
+        }
+    }
+
+    private func header(_ title: String, detail: String, width: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .frame(width: width, alignment: .leading)
+    }
+}
+
+/// One sentence across the columns.
+private struct ChunkRow: View {
+    let chunk: Chunk
+    let targets: [String]
+    let width: CGFloat
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let src = chunk.src, !src.isEmpty {
+                        Text(src.uppercased()).font(.caption2.bold()).foregroundStyle(.secondary)
+                            .help("Spoken in \(OutputLanguage.name(src))")
+                    }
+                    if let t = chunk.wall_time {
+                        Text(Date(timeIntervalSince1970: t), style: .time).font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                Text(chunk.en.isEmpty ? "…" : chunk.en).textSelection(.enabled)
+                if chunk.status == "skipped" || chunk.status == "failed" {
+                    Text(chunk.note ?? chunk.status).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if chunk.status == "skipped" || chunk.status == "failed" {
-                Text(chunk.note ?? chunk.status).font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(languages, id: \.self) { code in
-                if let out = chunk.langs[code] {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(code.uppercased()).font(.caption2.bold()).foregroundStyle(.secondary).frame(width: 22, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 2) {
+            .cell(width)
+            ForEach(targets, id: \.self) { code in
+                Group {
+                    if let out = chunk.langs[code] {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if out.original {
+                                Text("Original").font(.caption2.bold()).foregroundStyle(.secondary)
+                                    .help("The speaker spoke \(OutputLanguage.name(code)): it goes out as spoken, not translated")
+                            }
                             Text(out.text.isEmpty ? (out.status == "pending" ? "…" : "—") : out.text)
                                 .foregroundStyle(color(out.status)).textSelection(.enabled)
                             if let note = note(out) { Text(note).font(.caption).foregroundStyle(.orange) }
                         }
+                    } else {
+                        Text("—").foregroundStyle(.tertiary)
                     }
                 }
+                .cell(width)
             }
         }
-        .padding(.vertical, 6)
     }
 
     private func color(_ status: String) -> Color {
         switch status {
         case "aired", "captioned": return .primary
-        case "pending": return .secondary
         default: return .secondary
         }
     }
@@ -466,6 +539,12 @@ private struct ChunkRow: View {
         case "merged": return out.note
         default: return nil
         }
+    }
+}
+
+private extension View {
+    func cell(_ width: CGFloat) -> some View {
+        padding(.horizontal, 12).padding(.vertical, 8).frame(width: width, alignment: .topLeading)
     }
 }
 
@@ -554,7 +633,7 @@ struct DownloadBar: View {
                         Label("Download failed: \(items.map(\.name).joined(separator: ", "))", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                         Spacer()
-                        Button("Try again") { Task { await model.engine.download(model.profile.languages) } }.controlSize(.small)
+                        Button("Try again") { Task { await model.engine.download(model.neededDownloads) } }.controlSize(.small)
                     } else {
                         Text("Downloading \(active.map { $0.name.lowercased() }.joined(separator: " and "))")
                         Spacer()

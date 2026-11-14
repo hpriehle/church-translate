@@ -11,7 +11,10 @@ enum HubClient {
     struct SignUpResult { let slug: String; let deviceToken: String?; let claim: String; let located: Bool; let connectCode: String? }
     struct Match: Identifiable, Hashable { let slug: String; let title: String; let city: String; var id: String { slug } }
     /// billing: how the congregation pays, "credits" or "own_key" (its own Anthropic key, through a one-time code).
-    struct Joined { let token: String; let slug: String; let name: String; let church: String; let billing: String }
+    struct Joined {
+        let token: String; let slug: String; let name: String; let church: String; let billing: String
+        var unitType = ""; var stake = ""; var address = ""
+    }
     enum ClaimResult { case pending; case token(String, slug: String, name: String) }
 
     static func signUp(_ p: Profile, deviceName: String) async throws -> SignUpResult {
@@ -21,6 +24,8 @@ enum HubClient {
             "meeting_times": p.meetingTimes.map { ["day": $0.day, "time": $0.time] },
         ]
         if !p.stake.isEmpty { body["stake"] = p.stake }
+        let more = p.extraEmails.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && $0 != p.email }
+        if !more.isEmpty { body["emails"] = more }
         if let lat = p.lat, let lng = p.lng { body["lat"] = lat; body["lng"] = lng }
         let (json, _) = try await post("/api/hc/signup", body)
         return SignUpResult(slug: json["slug"] as? String ?? "", deviceToken: json["device_token"] as? String,
@@ -75,6 +80,106 @@ enum HubClient {
         case 429: throw tooManyTries(json)
         default: throw Failure(message: detail(json) ?? "Server error \(status).")
         }
+    }
+
+    /// "Connect by code": a code from "Add device" on another Mac, or from the e-mail (POST /api/hc/pair).
+    static func pair(code: String, deviceName: String) async throws -> Joined {
+        let (json, status) = try await send("/api/hc/pair", ["code": code, "device_name": deviceName])
+        switch status {
+        case 200..<300:
+            let cong = json["congregation"] as? [String: Any] ?? [:]
+            let token = json["device_token"] as? String ?? ""
+            guard !token.isEmpty else { throw Failure(message: "The server did not send a device token. Try again.") }
+            return Joined(token: token, slug: json["slug"] as? String ?? "", name: cong["name"] as? String ?? "",
+                          church: cong["church"] as? String ?? "", billing: json["billing"] as? String ?? "credits",
+                          unitType: cong["unit_type"] as? String ?? "", stake: cong["stake"] as? String ?? "",
+                          address: cong["address"] as? String ?? "")
+        case 403 where json["error"] as? String == "bad_code":
+            throw Failure(message: "That code is wrong or has expired. Ask for a new one: codes work once, for 15 minutes.")
+        case 429: throw tooManyTries(json)
+        default: throw Failure(message: message(json) ?? "Server error \(status).")
+        }
+    }
+
+    /// "Email me a code": the hub sends a code to every address of the congregation this e-mail belongs to (and says
+    /// the same whether or not it does). Returns the hub's sentence.
+    static func emailCode(_ email: String) async throws -> String {
+        let (json, status) = try await send("/api/hc/email-code", ["email": email])
+        switch status {
+        case 200..<300: return json["message"] as? String ?? "If that e-mail belongs to a congregation, a code is on its way."
+        case 503: throw Failure(message: "Hear Church can't send e-mail yet. On a Mac that is already connected, open Settings → Congregation → Add device, and enter the code it shows.")
+        case 422: throw Failure(message: "That doesn't look like an e-mail address.")
+        case 429: throw Failure(message: "Too many codes asked for. Wait an hour, or use Add device on a connected Mac.")
+        default: throw Failure(message: message(json) ?? "Server error \(status).")
+        }
+    }
+
+    // MARK: the congregation's account (Settings): e-mails, Macs, "Add device"
+
+    struct Email: Identifiable, Hashable { let email: String; let main: Bool; var id: String { email } }
+    struct Device: Identifiable, Hashable {
+        let id: Int; let name: String; let createdAt: Date?; let lastSeen: Date?; let appVersion: String; let this: Bool
+    }
+    struct Account { let mainEmail: String; let emails: [Email]; let devices: [Device] }
+    /// The hub no longer knows this Mac's token (revoked, or the congregation is gone): set up again.
+    struct SignedOut: LocalizedError { var errorDescription: String? { "This Mac was disconnected from the congregation." } }
+
+    static func account(token: String) async throws -> Account {
+        try accountAnswer(try await get("/api/hc/account", token: token))
+    }
+    static func addEmail(_ email: String, main: Bool = false, token: String) async throws -> Account {
+        try accountAnswer(try await send("/api/hc/emails", ["email": email, "main": main], token: token))
+    }
+    static func setMainEmail(_ email: String, token: String) async throws -> Account {
+        try accountAnswer(try await send("/api/hc/emails/main", ["email": email], token: token))
+    }
+    static func removeEmail(_ email: String, token: String) async throws -> Account {
+        try accountAnswer(try await send("/api/hc/emails/remove", ["email": email], token: token))
+    }
+    static func revokeDevice(_ id: Int, token: String) async throws -> Account {
+        try accountAnswer(try await send("/api/hc/devices/revoke", ["id": id], token: token))
+    }
+
+    /// "Add device": a one-time code another Mac enters, and when it stops working.
+    static func pairingCode(token: String) async throws -> (code: String, expires: Date) {
+        let (json, status) = try await send("/api/hc/pairing-code", [:], token: token)
+        if status == 403 { throw SignedOut() }
+        if status == 429 { throw Failure(message: "Too many codes this hour. Try again later.") }
+        guard (200..<300).contains(status), let code = json["code"] as? String else {
+            throw Failure(message: message(json) ?? "Server error \(status).")
+        }
+        let secs = (json["expires_in"] as? Double) ?? (json["expires_in"] as? Int).map(Double.init) ?? 900
+        return (code, Date().addingTimeInterval(secs))
+    }
+
+    private static func accountAnswer(_ answer: ([String: Any], Int)) throws -> Account {
+        let (json, status) = answer
+        switch status {
+        case 200..<300: break
+        case 403: throw SignedOut()
+        case 422: throw Failure(message: "That doesn't look like an e-mail address.")
+        default: throw Failure(message: message(json) ?? "Server error \(status).")
+        }
+        func date(_ v: Any?) -> Date? { (v as? Double).map { Date(timeIntervalSince1970: $0) } }
+        let emails = (json["emails"] as? [[String: Any]] ?? []).compactMap { e -> Email? in
+            guard let a = e["email"] as? String else { return nil }
+            return Email(email: a, main: e["main"] as? Bool ?? false)
+        }
+        let devices = (json["devices"] as? [[String: Any]] ?? []).compactMap { d -> Device? in
+            guard let id = d["id"] as? Int else { return nil }
+            return Device(id: id, name: d["name"] as? String ?? "Mac", createdAt: date(d["created_at"]), lastSeen: date(d["last_seen"]),
+                          appVersion: d["app_version"] as? String ?? "", this: d["this"] as? Bool ?? false)
+        }
+        return Account(mainEmail: json["main_email"] as? String ?? emails.first { $0.main }?.email ?? "", emails: emails, devices: devices)
+    }
+
+    /// Hub errors are {"error": code, "message": text}, or FastAPI's {"detail": …}.
+    private static func message(_ json: [String: Any]) -> String? { json["message"] as? String ?? detail(json) }
+
+    /// "7kqm x2pa" → "7KQM-X2PA" while typing: letters and digits only, at most 8.
+    static func pairingFormat(_ text: String) -> String {
+        let chars = String(text.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }.prefix(8))
+        return chars.count > 4 ? String(chars.prefix(4)) + "-" + String(chars.dropFirst(4)) : chars
     }
 
     private static func tooManyTries(_ json: [String: Any]) -> Failure {
@@ -186,6 +291,19 @@ enum HubClient {
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         return (json, status)
+    }
+
+    private static func get(_ path: String, token: String) async throws -> ([String: Any], Int) {
+        var req = URLRequest(url: AppPaths.hub.appendingPathComponent(path))
+        req.timeoutInterval = 30
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let data: Data, resp: URLResponse
+        do {
+            (data, resp) = try await URLSession.shared.data(for: req)
+        } catch {
+            throw Failure(message: "Cannot reach \(AppPaths.hub.host ?? "hearchurch.com"). Is the internet connected?")
+        }
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:], (resp as? HTTPURLResponse)?.statusCode ?? 0)
     }
 
     private static func post(_ path: String, _ body: [String: Any], token: String? = nil) async throws -> ([String: Any], Int) {

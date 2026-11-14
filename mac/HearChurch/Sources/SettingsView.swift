@@ -28,7 +28,7 @@ private struct LanguageSettings: View {
     @State private var removing: OutputLanguage?
     @State private var problem: String?
 
-    private var everyLanguage: [OutputLanguage] { OutputLanguage.all.filter(\.available) + [.english] }
+    private var everyLanguage: [OutputLanguage] { OutputLanguage.all.filter(\.available) }
 
     private var shown: [OutputLanguage] {
         let q = search.trimmingCharacters(in: .whitespaces)
@@ -71,7 +71,7 @@ private struct LanguageSettings: View {
                 ForEach(shown) { row($0) }
                 if shown.isEmpty { Text("No language called “\(search)”.").foregroundStyle(.secondary) }
             } footer: {
-                Text("Downloaded languages appear as checkboxes next to Start meeting. Check the ones to translate.")
+                Text("Choose the meeting's languages in the main window, above Start meeting. Any language you choose there downloads by itself.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let problem { Text(problem).font(.callout).foregroundStyle(.orange) }
@@ -109,8 +109,8 @@ private struct LanguageSettings: View {
 
     /// The button always answers: with the question, or with the reason it can't be removed right now.
     private func askToRemove(_ language: OutputLanguage) {
-        if model.running && model.profile.languages.contains(language.id) {
-            problem = "\(language.name) is being translated: uncheck it first, or stop the meeting."
+        if model.running && (model.isOn(language.id, .speaker) || model.isOn(language.id, .target)) {
+            problem = "\(language.name) is in this meeting: switch it off first, or stop the meeting."
         } else {
             problem = nil
             removing = language
@@ -377,7 +377,7 @@ private struct GlossarySettings: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Picker("Language", selection: $lang) {
-                    ForEach(OutputLanguage.all.filter(\.available)) { Text($0.name).tag($0.id) }
+                    ForEach(OutputLanguage.all.filter { $0.available && $0.id != "en" }) { Text($0.name).tag($0.id) }
                 }
                 .frame(width: 220)
                 Spacer()
@@ -449,6 +449,9 @@ private struct GlossarySettings: View {
 private struct CongregationSettings: View {
     @EnvironmentObject var model: AppModel
     @State private var confirmSignOut = false
+    @State private var account: HubClient.Account?
+    @State private var loading = false
+    @State private var problem: String?
 
     var body: some View {
         Form {
@@ -456,92 +459,212 @@ private struct CongregationSettings: View {
                 LabeledContent("Name", value: model.profile.name)
                 if !model.profile.stake.isEmpty { LabeledContent("Stake", value: model.profile.stake) }
                 LabeledContent("Address", value: model.profile.address)
-                LabeledContent("E-mail", value: model.profile.email)
                 if let url = model.listenerURL { LabeledContent("Listener link") { Link(url.absoluteString, destination: url) } }
                 LabeledContent("Server", value: AppPaths.hub.host ?? "")
             }
-            Section("Connect code") { ConnectCodeRow() }
+            if model.profile.setupDone {
+                EmailsSection(account: $account, problem: $problem)
+                DevicesSection(account: $account, problem: $problem)
+                if let problem { Text(problem).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+                if loading && account == nil { ProgressView().controlSize(.small) }
+            }
             Section {
                 Button("Sign this Mac out…", role: .destructive) { confirmSignOut = true }
                     .disabled(model.running)
             }
         }
         .formStyle(.grouped)
+        .task { await load() }
         .confirmationDialog("Sign this Mac out of \(model.profile.name)?", isPresented: $confirmSignOut) {
-            Button("Sign Out", role: .destructive) { signOut() }
+            Button("Sign Out", role: .destructive) { model.signOut() }
         } message: {
-            Text("It stops publishing meetings until it is set up again. The details you entered and the API key stay, so setting up again is quick.")
+            Text("It stops publishing meetings until it is connected again (with a code from Add device on another Mac, or e-mailed). The API key stays.")
         }
     }
 
-    private func signOut() {
-        Keychain.delete(.deviceToken)
-        Keychain.delete(.connectCode)
-        OnboardingProgress.clear()
-        var p = model.profile   // keep what was entered, so setting up again (e.g. on another server) is quick
-        p.slug = ""
-        p.claim = ""
-        p.approved = false
-        p.setupDone = false
-        model.profile = p
-        p.save()
-        model.relaunchEngine()   // without the device token; onboarding needs the engine for downloads
+    private func load() async {
+        guard model.profile.setupDone, let token = Keychain.get(.deviceToken), !token.isEmpty else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            account = try await HubClient.account(token: token)
+            problem = nil
+        } catch is HubClient.SignedOut {
+            model.signOut()
+        } catch {
+            problem = error.localizedDescription
+        }
     }
 }
 
-/// The code another computer needs to connect to this congregation: hidden until "Show", replaceable.
-private struct ConnectCodeRow: View {
-    @State private var code = Keychain.get(.connectCode) ?? ""
-    @State private var shown = false
-    @State private var confirmNew = false
+/// Runs one account change against the hub; a revoked Mac is signed out.
+@MainActor
+private func accountChange(_ model: AppModel, _ account: Binding<HubClient.Account?>, _ problem: Binding<String?>,
+                           _ call: (String) async throws -> HubClient.Account) async -> Bool {
+    guard let token = Keychain.get(.deviceToken), !token.isEmpty else { problem.wrappedValue = "This Mac isn't connected to a congregation."; return false }
+    do {
+        account.wrappedValue = try await call(token)
+        problem.wrappedValue = nil
+        return true
+    } catch is HubClient.SignedOut {
+        model.signOut()
+        return false
+    } catch {
+        problem.wrappedValue = error.localizedDescription
+        return false
+    }
+}
+
+/// The congregation's e-mails: the main one (billing receipts) first. Add, remove, make main.
+private struct EmailsSection: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var account: HubClient.Account?
+    @Binding var problem: String?
+    @State private var newEmail = ""
     @State private var busy = false
-    @State private var error: String?
 
     var body: some View {
-        if !code.isEmpty {
-            LabeledContent("Code") {
-                HStack {
-                    Text(shown ? HubClient.spaced(code) : "••• •••")
-                        .font(.system(.title3, design: .monospaced)).textSelection(.enabled)
-                    Button(shown ? "Hide" : "Show") { shown.toggle() }.buttonStyle(.link)
+        Section {
+            if let account {
+                ForEach(account.emails) { e in
+                    HStack {
+                        Text(e.email).textSelection(.enabled)
+                        if e.main { Text("Main").font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.2), in: Capsule()) }
+                        Spacer()
+                        if !e.main {
+                            Button("Make main") { run { try await HubClient.setMainEmail(e.email, token: $0) } }
+                            Button(role: .destructive) { run { try await HubClient.removeEmail(e.email, token: $0) } } label: {
+                                Image(systemName: "minus.circle")
+                            }
+                            .buttonStyle(.borderless).help("Remove this e-mail")
+                        }
+                    }
+                    .disabled(busy)
                 }
+                if account.emails.count < 10 {
+                    HStack {
+                        TextField("Add an e-mail", text: $newEmail).onSubmit(add)
+                        Button("Add", action: add).disabled(!OnboardingView.isEmail(newEmail) || busy)
+                    }
+                }
+            } else {
+                Text("Loading…").foregroundStyle(.secondary)
             }
-            Text("Use this code to connect another computer to your congregation. Keep it private.")
-                .font(.callout).foregroundStyle(.secondary)
-        } else {
-            Text("Another computer needs a connect code to join your congregation.")
-                .font(.callout).foregroundStyle(.secondary)
+        } header: {
+            Text("E-mails")
+        } footer: {
+            Text("The main e-mail gets the receipts for credit. Any of these addresses can get a code to connect another Mac.")
+                .font(.caption).foregroundStyle(.secondary)
         }
-        HStack {
-            Button(code.isEmpty ? "Make a connect code" : "Make a new code") {
-                if code.isEmpty { Task { await make() } } else { confirmNew = true }
-            }
-            .disabled(busy)
-            if busy { ProgressView().controlSize(.small) }
-        }
-        .confirmationDialog("Make a new connect code?", isPresented: $confirmNew) {
-            Button("Make a new code", role: .destructive) { Task { await make() } }
-        } message: {
-            Text("The old code stops working. Computers already connected are not affected.")
-        }
-        if let error { Text(error).foregroundStyle(.red) }
     }
 
-    private func make() async {
-        error = nil
-        guard let token = Keychain.get(.deviceToken), !token.isEmpty else { error = "This Mac isn't signed in to a congregation."; return }
+    private func add() {
+        let e = newEmail.trimmingCharacters(in: .whitespaces)
+        guard OnboardingView.isEmail(e) else { return }
+        run({ try await HubClient.addEmail(e, token: $0) }, then: { newEmail = "" })
+    }
+
+    private func run(_ call: @escaping (String) async throws -> HubClient.Account, then: @escaping () -> Void = {}) {
+        Task {
+            busy = true
+            defer { busy = false }
+            if await accountChange(model, $account, $problem, call) {
+                then()
+                if let main = account?.mainEmail, !main.isEmpty { model.profile.email = main; model.profile.save() }
+            }
+        }
+    }
+}
+
+/// The congregation's Macs: this one, the others (revoke), and "Add device" for a new one.
+private struct DevicesSection: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var account: HubClient.Account?
+    @Binding var problem: String?
+    @State private var revoking: HubClient.Device?
+    @State private var code: String?
+    @State private var expires = Date()
+    @State private var busy = false
+
+    var body: some View {
+        Section {
+            if let account {
+                ForEach(account.devices) { d in
+                    HStack {
+                        Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(d.name)
+                                if d.this { Text("This Mac").font(.caption).foregroundStyle(.secondary) }
+                            }
+                            Text(detail(d)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if !d.this { Button("Revoke…") { revoking = d }.disabled(busy) }
+                    }
+                }
+            }
+            if let code {
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    let left = Int(expires.timeIntervalSince(ctx.date))
+                    VStack(alignment: .leading, spacing: 6) {
+                        if left > 0 {
+                            Text(code).font(.system(size: 40, weight: .bold, design: .monospaced)).textSelection(.enabled)
+                                .frame(maxWidth: .infinity)
+                            Text("On the new Mac: Connect to my congregation → I have a code. Works once, for \(left / 60):\(String(format: "%02d", left % 60)) more.")
+                                .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                        } else {
+                            Text("That code has expired.").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            HStack {
+                Button(code == nil ? "Add device" : "New code") { Task { await addDevice() } }.disabled(busy)
+                if busy { ProgressView().controlSize(.small) }
+            }
+        } header: {
+            Text("Devices")
+        } footer: {
+            Text("Add device shows a code to connect another Mac to this congregation. A revoked Mac stops publishing meetings at once.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .confirmationDialog("Revoke \(revoking?.name ?? "this Mac")?", isPresented: Binding(
+            get: { revoking != nil }, set: { if !$0 { revoking = nil } }), presenting: revoking) { d in
+            Button("Revoke", role: .destructive) {
+                Task {
+                    busy = true
+                    defer { busy = false }
+                    _ = await accountChange(model, $account, $problem) { try await HubClient.revokeDevice(d.id, token: $0) }
+                }
+            }
+        } message: { _ in
+            Text("It stops publishing meetings at once (a meeting it is running ends). It can connect again with a new code.")
+        }
+    }
+
+    private func detail(_ d: HubClient.Device) -> String {
+        var parts: [String] = []
+        if !d.appVersion.isEmpty { parts.append("Hear Church \(d.appVersion)") }
+        if let seen = d.lastSeen { parts.append("last seen \(seen.formatted(.relative(presentation: .named)))") }
+        else if let added = d.createdAt { parts.append("added \(added.formatted(date: .abbreviated, time: .omitted))") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func addDevice() async {
+        guard let token = Keychain.get(.deviceToken), !token.isEmpty else { problem = "This Mac isn't connected to a congregation."; return }
         busy = true
         defer { busy = false }
         do {
-            let new = try await HubClient.newConnectCode(token: token)
-            guard Keychain.set(.connectCode, new) else {
-                error = "Could not save the code in this Mac's Keychain. The new code is \(HubClient.spaced(new)): write it down."
-                return
-            }
-            code = new
-            shown = true
+            let c = try await HubClient.pairingCode(token: token)
+            code = c.code
+            expires = c.expires
+            problem = nil
+        } catch is HubClient.SignedOut {
+            model.signOut()
         } catch {
-            self.error = error.localizedDescription
+            problem = error.localizedDescription
         }
     }
 }

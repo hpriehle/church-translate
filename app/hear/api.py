@@ -498,6 +498,29 @@ async def emails_remove(request: Request, body: EmailChange):
     return {"ok": True, **_account(cong["id"], device["id"])}
 
 
+class DeviceRevoke(BaseModel):
+    id: int
+
+
+@router.post("/api/hc/devices/revoke")
+async def devices_revoke(request: Request, body: DeviceRevoke):
+    """(device token) Settings > Devices: revoke another Mac of this congregation (its token stops working, a meeting
+    it runs ends). 409 this_device for the Mac asking (it signs out instead), 404 not_found for any other id."""
+    device, cong = device_and_congregation(request)
+    h = _hear()
+    _limit(request, "emails", f"cong{cong['id']}")
+    if body.id == device["id"]:
+        return JSONResponse({"error": "this_device", "message": "This is the Mac you're using: sign it out instead."},
+                            status_code=409)
+    if body.id not in {d["id"] for d in h.db.devices(cong["id"])}:
+        return JSONResponse({"error": "not_found", "message": "That Mac isn't connected to this congregation."},
+                            status_code=404)
+    h.db.revoke_device(body.id)
+    h.live.revoked(body.id)
+    log.info("%s: device %d revoked by device %d", cong["slug"], body.id, device["id"])
+    return {"ok": True, **_account(cong["id"], device["id"])}
+
+
 @router.post("/api/hc/pairing-code")
 async def pairing_code(request: Request):
     """(device token) "Add device": a one-time code (8 letters/digits, 15 minutes) another Mac enters to join this
