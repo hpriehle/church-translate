@@ -507,7 +507,7 @@ private struct CongregationSettings: View {
                 DevicesSection(account: $account, problem: $problem)
                 if let problem {
                     // An older hearchurch.com without these calls yet is not a problem: say so quietly.
-                    Text(problem).foregroundStyle(problem == HubClient.NotAvailable().localizedDescription ? .secondary : .red)
+                    Text(problem).foregroundStyle(problem == HubClient.NotAvailable().localizedDescription ? Color.secondary : Color.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if loading && account == nil { ProgressView().controlSize(.small) }
@@ -749,7 +749,7 @@ private struct ListenerLinkSection: View {
                     if saving { ProgressView().controlSize(.small) }
                 }
                 if let problem {
-                    Text(problem).foregroundStyle(problem == HubClient.NotAvailable().localizedDescription ? .secondary : .red)
+                    Text(problem).foregroundStyle(problem == HubClient.NotAvailable().localizedDescription ? Color.secondary : Color.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
