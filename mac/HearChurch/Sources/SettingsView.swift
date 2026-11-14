@@ -20,7 +20,7 @@ struct SettingsView: View {
 }
 
 /// Every language: search for it, download it, delete it to get the disk space back, or open it to pick its voice.
-/// What's downloaded shows as a checkbox next to Start meeting, and that checkbox decides what's translated.
+/// Only downloaded languages show in the main window's speaker and translation grids, so this is where they're added.
 private struct LanguageSettings: View {
     @EnvironmentObject var model: AppModel
     @State private var search = ""
@@ -71,7 +71,7 @@ private struct LanguageSettings: View {
                 ForEach(shown) { row($0) }
                 if shown.isEmpty { Text("No language called “\(search)”.").foregroundStyle(.secondary) }
             } footer: {
-                Text("Choose the meeting's languages in the main window, above Start meeting. Any language you choose there downloads by itself.")
+                Text("Downloaded languages appear in the main window's speaker and translation grids, above Start meeting. Download a language here to add it there; remove it to free the space.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let problem { Text(problem).font(.callout).foregroundStyle(.orange) }

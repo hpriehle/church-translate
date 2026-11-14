@@ -496,8 +496,8 @@ struct PackageBadge: View {
 private struct LanguagesStep: View {
     var body: some View {
         StepTitle(title: "Languages",
-                  subtitle: "Choose the languages people speak at the microphone, and the languages listeners can choose. Every language you choose downloads now: keep going while it does. You can change them before each meeting.")
-        LanguageSelector(showTitle: false)
+                  subtitle: "Choose the languages people speak at the microphone, and the languages listeners can choose. Every language you choose downloads now: keep going while it does. You can add or remove languages later in Settings.")
+        LanguageSelector(showTitle: false, everyLanguage: true)
         Divider()
         SpeechPackageRow()
     }

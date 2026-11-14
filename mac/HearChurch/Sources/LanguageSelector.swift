@@ -3,10 +3,14 @@ import SwiftUI
 /// The meeting's languages (docs/v3-languages.md): "Select speaker language" and "Select translation language",
 /// two grids of toggles with the direction between them. Whatever is on defines the meeting. Used large above
 /// Start meeting, compact in the sidebar during a meeting, and in setup.
+/// The grids show only downloaded languages (plus any the meeting already has, while they finish downloading);
+/// languages are added and removed in Settings → Languages. Setup's first pick (`everyLanguage`) shows all of them,
+/// and what's picked there downloads and fills the grids.
 struct LanguageSelector: View {
     @EnvironmentObject var model: AppModel
     var compact = false
     var showTitle = true
+    var everyLanguage = false
     @State private var note: String?
 
     var body: some View {
@@ -14,23 +18,38 @@ struct LanguageSelector: View {
             if showTitle {
                 Text("Translation").font(compact ? .headline : .largeTitle.bold())
             }
-            section("Select speaker language:", OutputLanguage.speakers, .speaker)
+            section("Select speaker language:", shown(OutputLanguage.speakers, .speaker), .speaker)
             Image(systemName: "arrow.down")
                 .font(compact ? .body.weight(.semibold) : .title.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
                 .frame(maxWidth: .infinity)
                 .accessibilityLabel("translated into")
-            section("Select translation language:", OutputLanguage.all, .target)
+            section("Select translation language:", shown(OutputLanguage.all, .target), .target)
             if let note { Text(note).font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
             if !compact, let summary { Text(summary).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+            if !everyLanguage {
+                Button(compact ? "Add or remove languages…" : "Add or remove languages in Settings…") { model.manageLanguages() }
+                    .buttonStyle(.link).font(.callout)
+                    .frame(maxWidth: .infinity, alignment: compact ? .leading : .center)
+            }
         }
         .onChange(of: model.speakers) { note = nil }
         .onChange(of: model.targets) { note = nil }
     }
 
+    /// Downloaded languages, and the ones this meeting already has (still downloading, or failed: so they can be seen
+    /// and switched off). In setup, every language.
+    private func shown(_ languages: [OutputLanguage], _ role: AppModel.LanguageRole) -> [OutputLanguage] {
+        everyLanguage ? languages : languages.filter { model.isReady($0.id) || model.isOn($0.id, role) }
+    }
+
     private func section(_ title: String, _ languages: [OutputLanguage], _ role: AppModel.LanguageRole) -> some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 8) {
             Text(title).font(compact ? .callout.weight(.semibold) : .title3.weight(.semibold))
+            if languages.isEmpty {
+                Text(model.engine.packages.isEmpty ? "The translation engine is starting…" : "No language downloaded yet: add one in Settings → Languages.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: compact ? 92 : 128), spacing: compact ? 6 : 8)], spacing: compact ? 6 : 8) {
                 ForEach(languages) { l in
                     LanguageCell(language: l, on: model.isOn(l.id, role), compact: compact) { note = model.toggle(l.id, role) }

@@ -82,7 +82,6 @@ private struct IdlePane: View {
                 VStack(spacing: 18) {
                     LanguageSelector()
                     StartButton(large: true)
-                    Button("Manage languages…") { model.manageLanguages() }.buttonStyle(.link).font(.callout)
                 }
                 .padding(24)
                 .frame(maxWidth: 760)
