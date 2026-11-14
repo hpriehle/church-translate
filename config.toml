@@ -84,6 +84,7 @@ max_speed = 1.3
 condense_on_s = 15.0    # ask the translator for shorter translations above this
 condense_off_s = 9.0
 drop_above_s = 25.0     # hard cap: drop the oldest waiting audio (captions still show)
+stt_behind_s = 12.0     # CPU speech recognition only: skip speech older than this when newer speech waits (0 = off)
 
 [stream]
 bitrate_kbps = 64

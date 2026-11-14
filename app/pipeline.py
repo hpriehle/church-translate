@@ -66,6 +66,9 @@ class Pipeline:
         self.library = Library(HOME / "scripture")   # published scripture wording (see scripture.py)
         self.refs = RefDetector(settings.scripture.max_verses)
         self._installing: dict[str, asyncio.Task] = {}
+        self.stt_skipped = 0            # chunks skipped because CPU speech recognition fell behind
+        self._behind_logged = -1e9
+        self._stepped_announced = ""
 
     def add_channel(self, ch: Channel) -> None:
         self.channels[ch.code] = ch
@@ -170,6 +173,8 @@ class Pipeline:
             raise ValueError(f"unknown source {kind!r}")
         self.vad.reset()
         self.refs.reset()
+        self.stt_skipped = 0
+        self.stt.events.clear()
         chunker = Chunker(self.settings.vad, self.vad)
         if self.metrics:
             self.metrics.close()
@@ -283,6 +288,9 @@ class Pipeline:
             self.records[rec.seq] = rec
             try:
                 await self.stt_ready.wait()
+                if self._behind(chunk, rec):
+                    self._finalize(rec)
+                    continue
                 prompt = build_prompt(self.hints, self.prev_en, self.speaker)
                 res = await self.loop.run_in_executor(self.stt_exec, self.stt.transcribe, chunk.audio, prompt)
             except Exception as e:
@@ -292,6 +300,9 @@ class Pipeline:
                 continue
             rec.stt_ms = round(res.ms, 1)
             rec.t_stt_done = time.monotonic()
+            if self.stt.stepped_down and self.stt.stepped_down != self._stepped_announced:
+                self._stepped_announced = self.stt.stepped_down
+                self.operator.publish({"type": "log", "level": "warning", "text": self.stt.stepped_down})
             if not res.text:
                 rec.status, rec.note = "skipped", res.dropped_reason
                 self._finalize(rec)
@@ -318,6 +329,26 @@ class Pipeline:
             for ch in chans.values():
                 ch.mt_q.put_nowait(rec)
 
+    def _behind(self, chunk: Chunk, rec: ChunkRecord) -> bool:
+        """CPU speech recognition slower than the speaker: skip this chunk (marked on `rec`) when it
+        was said long ago and newer speech is waiting, so captions catch up instead of drifting a minute behind.
+        Apple Silicon (mlx) is many times faster than real time and never skips."""
+        if self.stt.engine != "faster-whisper":
+            return False
+        behind = time.monotonic() - chunk.t_speech_end
+        if not BacklogPolicy.stt_skip(behind, not self.chunk_q.empty(), self.settings.backlog.stt_behind_s):
+            return False
+        rec.status, rec.note = "skipped", f"behind: said {behind:.0f}s ago, skipped to newer speech"
+        self.stt_skipped += 1
+        now = time.monotonic()
+        if now - self._behind_logged >= 60:
+            self._behind_logged = now
+            log.warning("speech recognition %.0fs behind: skipping to newer speech", behind)
+            self.operator.publish({"type": "log", "level": "warning",
+                                   "text": f"Speech recognition is {behind:.0f}s behind on this computer: "
+                                           "skipping to the newest speech"})
+        return True
+
     # ------------------------------------------------------------ misc
     def _hold_awake(self) -> None:
         """While a run is active, keep the Mac awake and its screen on (not while the server just waits).
@@ -340,7 +371,7 @@ class Pipeline:
     def _run_info(self) -> dict[str, Any]:
         st = self.settings
         stt_engine = resolve_engine(st.stt.engine)
-        stt_model = st.stt.model if stt_engine == "mlx" else st.stt.faster_whisper_model
+        stt_model = st.stt.model if stt_engine == "mlx" else (self.stt.model_name or st.stt.faster_whisper_model)
         langs = {}
         for code, ch in self.channels.items():
             u = ch.translator.usage()
@@ -354,6 +385,7 @@ class Pipeline:
             "translator": (f"Claude {st.translate.claude_model} (effort {st.translate.claude_effort}), French fallback "
                            f"after {st.translate.claude_timeout_s:g}s to Ollama {st.translate.ollama_model}"),
             "languages": langs,
+            "stt_events": list(self.stt.events),
         }
 
     def _write_report(self) -> None:
@@ -401,6 +433,8 @@ class Pipeline:
             "queues": {"stt": self.chunk_q.qsize()},
             "stt_ready": self.stt.ready,
             "stt_engine": self.stt.engine,
+            "stt_rtf": round(self.stt.rtf, 2),
+            "stt_skipped": self.stt_skipped,
             "channels": chans,
             "metrics_file": str(self.metrics.path.name) if self.metrics else "",
             "last_error": self.last_error,

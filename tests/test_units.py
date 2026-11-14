@@ -573,6 +573,15 @@ def test_apple_silicon_never_measures_or_steps_down():
     assert t.rtf == 0.0 and not t.stepped_down and t._step == 0
 
 
+def test_speech_recognition_catches_up_when_far_behind():
+    skip = BacklogPolicy.stt_skip
+    assert skip(20.0, True, 12.0)                # said 20 s ago, newer speech waiting: skip it
+    assert not skip(20.0, False, 12.0)           # the newest chunk is always heard
+    assert not skip(8.0, True, 12.0)             # a few seconds behind is normal
+    assert not skip(60.0, True, 0)               # 0 switches it off
+    assert BacklogCfg().stt_behind_s == 12.0
+
+
 def test_too_slow_without_the_smaller_model_fetches_it_and_steps_down_once_it_lands(monkeypatch):
     from app.config import SttCfg
     from app.stt import Transcriber
@@ -600,3 +609,18 @@ def test_intel_speech_package_lists_the_smaller_model_without_requiring_it():
     apple = package_for("speech", "mlx-community/whisper-large-v3-turbo")
     assert apple.hf_extra == () and apple.size_mb == SIZES_MB["speech"]
     assert package_for("speech", "Systran/faster-whisper-base").hf_extra == ()
+
+
+def test_report_counts_catch_up_skips_apart_from_non_speech():
+    from app.report import build_report
+
+    def rec(seq, status, note="", t_cut=100.0, t_done=0.0, stt_ms=0.0):
+        return {"seq": seq, "status": status, "note": note, "audio_start_s": seq * 5.0, "audio_dur_s": 5.0,
+                "en": "", "t_cut": t_cut, "t_stt_done": t_done, "stt_ms": stt_ms, "langs": {}}
+
+    recs = [rec(1, "done", t_done=104.0, stt_ms=3000), rec(2, "skipped", "empty"),
+            rec(3, "skipped", "behind: said 14s ago, skipped to newer speech"),
+            rec(4, "skipped", "behind: said 13s ago, skipped to newer speech")]
+    md = build_report(recs, {"languages": {"en": {}}, "stt_events": ["model small → base (it needed 1.10s per second of speech)"]})
+    assert "skipped as non-speech: 1" in md
+    assert "2 chunks skipped to catch up · model small → base" in md
