@@ -14,6 +14,17 @@ Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
   POST /api/hc/connect      {slug, code, device_name} → like claim's answer; 404 not_found, 403 bad_code,
                             429 {error: locked, retry_after}. Signup (verify_email off) also returns connect_code.
                             The answer carries the congregation's billing ("credits" or "own_key").
+Accounts (V3.2, docs/v3-languages.md "Accounts"): several e-mails per congregation, one main (billing) one;
+  sign-up's `email` is the main one, `emails` adds more.
+  GET  /api/hc/account      (device token) → {emails: [{email, main}], main_email, devices: [{…, this}]}
+  POST /api/hc/emails       (device token) {email, main?} add (main: true also makes it main); 409 too_many
+  POST /api/hc/emails/main  (device token) {email} → 404 not_found unless it is one of them
+  POST /api/hc/emails/remove (device token) {email} → 409 main, 404 not_found
+  POST /api/hc/pairing-code (device token) → {code: "7KQM-X2PA", expires_at, expires_in}: "Add device", 15 min, once
+  POST /api/hc/email-code   {email} → always {ok, message}: a code to every address of the congregation that has it
+                            (Resend; 503 not_configured without RESEND_API_KEY; 429 per IP and per address)
+  POST /api/hc/pair         {code, device_name} → {device_token, slug, congregation, billing}; 403 bad_code,
+                            429 locked. Takes both kinds of code.
 Billing (prepaid credits, or the congregation's own Anthropic key through a one-time code Harrison makes):
   POST /api/hc/own-key-code/check {code} → {ok} or 403 bad_code / 429 locked. Doesn't use the code up: onboarding
                             asks for the code before the key, and the congregation only exists after sign-up.
@@ -57,15 +68,15 @@ from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Query, Request, WebSocket
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import HOME, LOG_DIR, WEB_DIR
-from .db import CENTS_PER_LANGUAGE_HOUR, RESERVED_SLUGS, Database
+from .db import CENTS_PER_LANGUAGE_HOUR, DEVICE_CODE_TTL_S, RESERVED_SLUGS, Database
 from .geo import Geocoder, bounding_box, hide_coordinates_in_access_log, in_box
 from .live import Live
-from .mail import Mailer, RateLimiter
+from .mail import Mailer, RateLimiter, Resend
 
 log = logging.getLogger("hear")
 router = APIRouter()
@@ -81,17 +92,21 @@ hide_coordinates_in_access_log()
 
 class Hear:
     def __init__(self, db: Database, mailer: Mailer, live: Live, geocoder: Geocoder | None = None,
-                 verify_email: bool = True):
+                 verify_email: bool = True, resend: Resend | None = None):
         self.db, self.mailer, self.live = db, mailer, live
+        self.resend = resend or Resend()
         self.verify_email = verify_email
         self.geocoder = geocoder or Geocoder()
         self.connect_ip = FailureLimiter(5, 15 * 60)     # wrong codes per IP
         self.connect_cong = FailureLimiter(10, 3600)     # wrong codes per congregation, then it is locked
         self.own_key_ip = FailureLimiter(10, 3600)       # wrong own-key codes per IP
+        self.pair_ip = FailureLimiter(10, 15 * 60)       # wrong add-a-Mac codes per IP
         self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
                        "signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
                        "email_addr": RateLimiter(3, 3600), "claim": RateLimiter(1200, 3600),
-                       "verify": RateLimiter(60, 3600), "checkout": RateLimiter(20, 3600)}
+                       "verify": RateLimiter(60, 3600), "checkout": RateLimiter(20, 3600),
+                       "email_code": RateLimiter(10, 3600), "email_code_addr": RateLimiter(3, 3600),
+                       "pair_code": RateLimiter(30, 3600), "emails": RateLimiter(60, 3600)}
 
 
 class FailureLimiter:
@@ -169,6 +184,13 @@ class MeetingTime(BaseModel):
     time: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
+def email_address(v: str) -> str:
+    v = (v or "").strip()
+    if len(v) > 120 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v):
+        raise ValueError("not an e-mail address")
+    return v.lower()
+
+
 class SignUp(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     church: str = Field(min_length=1, max_length=80)
@@ -182,13 +204,17 @@ class SignUp(BaseModel):
     meeting_times: Annotated[list[MeetingTime], Field(max_length=14)] = []
     timezone: str = Field(default="", max_length=60)
     device_name: str = Field(default="Mac", max_length=60)
+    emails: Annotated[list[str], Field(max_length=9)] = []   # more addresses besides the main one (`email`)
 
     @field_validator("email")
     @classmethod
     def _email(cls, v: str) -> str:
-        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v):
-            raise ValueError("not an e-mail address")
-        return v.lower()
+        return email_address(v)
+
+    @field_validator("emails")
+    @classmethod
+    def _emails(cls, v: list[str]) -> list[str]:
+        return [email_address(e) for e in v]
 
     @field_validator("timezone")
     @classmethod
@@ -201,7 +227,7 @@ class SignUp(BaseModel):
         return v
 
 
-def _send_link(request: Request, cong: dict[str, Any], purpose: str, device_name: str) -> str:
+def _send_link(request: Request, cong: dict[str, Any], purpose: str, device_name: str, to: str = "") -> str:
     """E-mail a link; returns the claim secret for the app that asked."""
     h = _hear()
     token, claim = h.db.add_email_token(cong["id"], purpose, device_name, LINK_TTL_S)
@@ -210,7 +236,7 @@ def _send_link(request: Request, cong: dict[str, Any], purpose: str, device_name
         subject, what = "Confirm your e-mail for Hear Church", f"set up {cong['name']} on Hear Church"
     else:
         subject, what = "Add a Mac to your Hear Church congregation", f"add a Mac for {cong['name']}"
-    h.mailer.send(cong["email"], subject, f"Open this link to {what}:\n\n{link}\n\n"
+    h.mailer.send(to or cong["email"], subject, f"Open this link to {what}:\n\n{link}\n\n"
                   "It works for 24 hours. If you did not ask for this, ignore this e-mail.")
     return claim
 
@@ -229,15 +255,17 @@ async def signup(request: Request, body: SignUp):
         church=body.church, name=body.name, unit_type=body.unit_type, email=body.email, stake=body.stake,
         address=body.address, lat=lat, lng=lng, timezone=body.timezone, city=await _town(lat, lng),
         meeting_times=[m.model_dump() for m in body.meeting_times])
+    for e in body.emails:   # the main one (`email`) was added with the congregation
+        h.db.add_email(cong["id"], e)
     located = {"located": lat is not None, "lat": lat, "lng": lng}
     pin_note = "" if lat is not None else " We could not find the building on the map: please place its pin."
     if not h.verify_email:  # no e-mail confirmation for now: the congregation is live-capable at once
         h.db.set_verified(cong["id"])
         return {"ok": True, "slug": cong["slug"], "device_token": h.db.add_device(cong["id"], body.device_name),
-                "connect_code": h.db.new_connect_code(cong["id"]),
+                "connect_code": h.db.new_connect_code(cong["id"]), "emails": h.db.emails(cong["id"]),
                 "congregation": _public(cong), **located, "message": "Signed up." + pin_note}
     claim = _send_link(request, cong, "verify", body.device_name)
-    return {"ok": True, "slug": cong["slug"], "claim": claim, **located,
+    return {"ok": True, "slug": cong["slug"], "claim": claim, "emails": h.db.emails(cong["id"]), **located,
             "message": "Check your e-mail for the verification link." + pin_note}
 
 
@@ -357,10 +385,10 @@ async def device_link(request: Request, body: DeviceLink):
     email = body.email.lower()
     _limit(request, "email_addr", email)
     h = _hear()
-    matches = [c for c in h.db.by_email(email) if not c["hidden"] and (not body.slug or c["slug"] == body.slug)]
+    matches = [c for c in h.db.congregations_with_email(email) if not body.slug or c["slug"] == body.slug]
     if len(matches) > 1:
         raise HTTPException(400, "More than one congregation uses that e-mail: say which one with slug.")
-    claim_secret = _send_link(request, matches[0], "device", body.device_name) if matches else secrets.token_urlsafe(24)
+    claim_secret = _send_link(request, matches[0], "device", body.device_name, email) if matches else secrets.token_urlsafe(24)
     return {"ok": True, "claim": claim_secret, "message": "If that e-mail belongs to a congregation, a link was sent."}
 
 
@@ -401,6 +429,155 @@ async def connect(request: Request, body: Connect):
         return JSONResponse({"error": "bad_code"}, status_code=403)
     return {"ok": True, "device_token": h.db.add_device(cong["id"], body.device_name or "Mac"), "slug": cong["slug"],
             "congregation": _public(cong), "billing": cong["billing"]}
+
+
+# ------------------------------------------------------------------ accounts (V3.2): e-mails, add-a-Mac codes
+
+def _account(cid: int, device_id: int | None = None) -> dict[str, Any]:
+    h = _hear()
+    return {"emails": h.db.emails(cid), "main_email": h.db.main_email(cid),
+            "devices": [{**d, "this": d["id"] == device_id} for d in h.db.devices(cid)]}
+
+
+@router.get("/api/hc/account")
+async def account(request: Request):
+    """(device token) The congregation's e-mails (main first) and its Macs; "this" marks the one asking."""
+    device, cong = device_and_congregation(request)
+    return {"ok": True, "slug": cong["slug"], **_account(cong["id"], device["id"])}
+
+
+class EmailChange(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    email: str = Field(max_length=120)
+    main: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, v: str) -> str:
+        return email_address(v)
+
+
+@router.post("/api/hc/emails")
+async def emails_add(request: Request, body: EmailChange):
+    """(device token) Add an address; main: true also makes it the main (billing) one. Adding one that is
+    already there is fine (and with main: true just moves the main mark)."""
+    device, cong = device_and_congregation(request)
+    _limit(request, "emails", f"cong{cong['id']}")
+    try:
+        added = _hear().db.add_email(cong["id"], body.email, main=body.main)
+    except ValueError as e:
+        return JSONResponse({"error": "too_many", "message": str(e)}, status_code=409)
+    log.info("%s: e-mail %s%s", cong["slug"], "added" if added else "kept", " as main" if body.main else "")
+    return {"ok": True, "added": added, **_account(cong["id"], device["id"])}
+
+
+@router.post("/api/hc/emails/main")
+async def emails_main(request: Request, body: EmailChange):
+    """(device token) Make one of the congregation's addresses the main one. 404 not_found if it isn't one."""
+    device, cong = device_and_congregation(request)
+    _limit(request, "emails", f"cong{cong['id']}")
+    if not _hear().db.set_main_email(cong["id"], body.email):
+        return JSONResponse({"error": "not_found", "message": "Add that address first."}, status_code=404)
+    log.info("%s: main e-mail changed", cong["slug"])
+    return {"ok": True, **_account(cong["id"], device["id"])}
+
+
+@router.post("/api/hc/emails/remove")
+async def emails_remove(request: Request, body: EmailChange):
+    """(device token) Remove an address. 409 main (make another one main first), 404 not_found."""
+    device, cong = device_and_congregation(request)
+    _limit(request, "emails", f"cong{cong['id']}")
+    state = _hear().db.remove_email(cong["id"], body.email)
+    if state == "main":
+        return JSONResponse({"error": "main", "message": "That is the main e-mail: make another one main first."},
+                            status_code=409)
+    if state == "unknown":
+        return JSONResponse({"error": "not_found", "message": "That address isn't on this congregation."},
+                            status_code=404)
+    log.info("%s: e-mail removed", cong["slug"])
+    return {"ok": True, **_account(cong["id"], device["id"])}
+
+
+@router.post("/api/hc/pairing-code")
+async def pairing_code(request: Request):
+    """(device token) "Add device": a one-time code (8 letters/digits, 15 minutes) another Mac enters to join this
+    congregation. A new code replaces the previous unused one."""
+    cong = _device_congregation(request)
+    _limit(request, "pair_code", f"cong{cong['id']}")
+    code, expires = _hear().db.new_device_code(cong["id"], "pair")
+    log.info("%s: pairing code made", cong["slug"])
+    return {"ok": True, "code": code, "expires_at": expires, "expires_in": int(expires - time.time())}
+
+
+class Pair(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    code: str = Field(max_length=40)
+    device_name: str = Field(default="Mac", max_length=60)
+
+
+@router.post("/api/hc/pair")
+async def pair(request: Request, body: Pair):
+    """A new Mac enters a pairing code ("Add device" on another Mac) or a code from the e-mail: it gets a device token
+    for that congregation. 403 bad_code (unknown, used, or expired), 429 locked after too many wrong codes."""
+    h = _hear()
+    ip = _ip(request)
+    if wait := h.pair_ip.locked(ip):
+        return _locked(wait)
+    got = h.db.redeem_device_code(body.code, body.device_name or "Mac")
+    if got is None:
+        h.pair_ip.fail(ip)
+        return JSONResponse({"error": "bad_code", "message": "That code is wrong or has expired: ask for a new one."},
+                            status_code=403)
+    cong, token = got
+    log.info("%s: a Mac connected by code", cong["slug"])
+    return {"ok": True, "device_token": token, "slug": cong["slug"], "congregation": _public(cong),
+            "billing": cong["billing"]}
+
+
+class EmailCode(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    email: str = Field(max_length=120)
+
+
+CODE_EMAIL_SUBJECT = "Your Hear Church code"
+
+
+def code_email_text(cong: dict[str, Any], code: str) -> str:
+    return (f"Your code to connect a Mac to {display_name(cong)} on Hear Church:\n\n    {code}\n\n"
+            f"Enter it in the Hear Church app under \"Connect by code\". It works once, for "
+            f"{DEVICE_CODE_TTL_S // 60} minutes.\n\nSomeone asked for this code on a new Mac. The same e-mail went to "
+            "every address of your congregation. If nobody in your congregation asked for it, ignore this e-mail: "
+            "without the code nothing happens.\n\nHear Church\n")
+
+
+async def _send_codes(cong: dict[str, Any]) -> None:
+    """Make an e-mail code and send it to each of the congregation's addresses (separately: they don't see each
+    other). Runs after the answer went out, so the answer's timing doesn't tell whether the address is known."""
+    h = _hear()
+    code, _ = h.db.new_device_code(cong["id"], "email")
+    to = [e["email"] for e in h.db.emails(cong["id"])]
+    sent = 0
+    for addr in to:
+        sent += await h.resend.send(addr, CODE_EMAIL_SUBJECT, code_email_text(cong, code))
+    log.info("%s: device code e-mailed to %d of %d addresses", cong["slug"], sent, len(to))
+
+
+@router.post("/api/hc/email-code")
+async def email_code(request: Request, body: EmailCode, tasks: BackgroundTasks):
+    """"Email me a code" on a new Mac: if the address belongs to a congregation, a one-time code goes to ALL of that
+    congregation's addresses; the Mac then sends it to /api/hc/pair. The answer is the same either way (no probing
+    which addresses exist). 503 not_configured without RESEND_API_KEY; 429 past the limits per IP and per address."""
+    h = _hear()
+    if not h.resend.configured():
+        return JSONResponse({"error": "not_configured", "message": "E-mail isn't set up on this server yet: use a "
+                             "code from \"Add device\" on a Mac that is already connected."}, status_code=503)
+    _limit(request, "email_code")
+    email = body.email.strip().lower()
+    _limit(request, "email_code_addr", email)
+    for cong in h.db.congregations_with_email(email)[:3]:
+        tasks.add_task(_send_codes, cong)
+    return {"ok": True, "message": "If that e-mail belongs to a congregation, a code was sent to all of its "
+                                   "addresses. It works for 15 minutes."}
 
 
 # ------------------------------------------------------------------ billing: one-time own-key codes
@@ -518,6 +695,9 @@ async def checkout(request: Request, body: Buy):
         "success_url": f"{base}/api/hc/checkout/done",
         "cancel_url": f"{base}/api/hc/checkout/cancelled",
     }
+    main_email = _hear().db.main_email(cong["id"])
+    if main_email:   # the main (billing) e-mail: Checkout fills it in and Stripe's receipts go there
+        params["customer_email"] = main_email
     pmc = os.environ.get("STRIPE_PAYMENT_METHOD_CONFIG", "").strip()   # Hear Church's own set: card, wallets, Link
     if pmc:
         params["payment_method_configuration"] = pmc
@@ -763,7 +943,7 @@ async def ws_listen(ws: WebSocket, slug: str):
     lang = hello.get("lang") if hello.get("lang") in s.offered else s.offered[0]
     same = hello.get("boot") == h.live.started and hello.get("session") == s.code and hello.get("lang") == lang
     last = int(hello.get("last_seq") or 0) if same else 0
-    init.update(session=s.code, live=True, lang=lang, languages=s.languages_public(), speaker=s.speaker,
+    init.update(session=s.code, live=True, lang=lang, languages=s.languages_public(), **s.listen_state(),
                 history=s.hubs[lang].replay_after(last))
     await s.hubs[lang].serve(ws, [init])
 

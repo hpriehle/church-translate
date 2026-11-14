@@ -1,6 +1,7 @@
 # V3.1 languages: any-to-any, several speaker languages, Latvian
 
-Status: engine side built on `chat/hc-v3-engine` (V3.1). Hub/listen page = V3.2, Mac app UI = V3.3.
+Status: engine side built on `chat/hc-v3-engine` (V3.1). Hub, listen pages and accounts on `chat/hc-v3-hub`
+(V3.2). Mac app UI = V3.3.
 
 ## What changes
 
@@ -91,9 +92,17 @@ Captions relayed to the hub (`{"type": "hub", "lang", "msg"}`) carry `msg.src` (
 
 Listener WebSocket `init` (local pages, and relayed status on the hub) adds `speakers`, `passthrough: true`.
 
-V3.2 (hub) must: accept `lv` in its language list (name "Latviešu"), read `targets`/`speakers`, stop the
-"listen in the room" pause when `passthrough` is true, and show pills = `targets`. The local listener page in this
-repo already does the last two.
+### What the hub does with it (V3.2, `app/hear/live.py`)
+
+- Pills = `targets` (or `languages` from a Mac without `targets`), in that order, limited to what the Mac's
+  `hello.languages` can produce. Same list on the congregation's page (`hearchurch.com/<slug>`), in
+  `/api/hc/c/<slug>`, and on `/listen` (live rows show the pills; `/api/live` and `/api/hc/search` give
+  `languages`). `lv` shows as "Latviešu".
+- Listener `init` adds `speakers` and `passthrough`; a `speaker` message to phones always carries `speaker`,
+  `speakers`, `passthrough`. With `passthrough: true` the page never shows "listen in the room".
+- A `languages` update with a new `speakers` list sends phones a `speaker` message, then `languages`.
+- Old Macs (0.1.x/0.2.x: `languages` + `speaker`, no `passthrough`) work as before: pills = `languages`, and the
+  phones in the speaker's language are told to listen in the room.
 
 ## Billing (unchanged in principle)
 
@@ -134,3 +143,50 @@ language Y, "Y term → X term" pairs joined on the English key (e.g. Russian �
    (flag 🇱🇻, 64 MB) and to the speaker list.
 4. Onboarding: send the chosen church to the engine (`{"church": profile.church}`) on start and when it changes.
 5. Columns UI (V3.4) can key columns on `chunk.src` and `chunk.langs[code].engine == "original"`.
+
+## Accounts on the hub (V3.2): API for the Mac app (V3.3)
+
+A congregation has 1 to 10 e-mail addresses, exactly one of them **main** (billing: Stripe Checkout gets it as
+`customer_email`, so receipts go there). Macs are devices with their own token (`Authorization: Bearer hcd_…`).
+All bodies are JSON. Errors are `{"error": "<code>", "message": "…"}` unless noted.
+
+### First launch: "Create congregation"
+
+`POST /api/hc/signup` as before. `email` is the **main** address (required); `emails: ["…"]` (optional, up to 9)
+adds more. The answer adds `emails: [{email, main, added_at}]`. Old apps send only `email`: still works.
+
+### First launch: "Connect by code"
+
+`POST /api/hc/pair {"code": "7KQM-X2PA", "device_name": "Clerk's Mac"}` →
+`{ok, device_token, slug, congregation, billing}`. Takes a code from "Add device" or from the e-mail; case,
+spaces and the dash don't matter. `403 bad_code` (unknown, used, expired, or the congregation is hidden),
+`429 {"error": "locked", "retry_after": s}` after 10 wrong codes from one IP in 15 minutes. Codes are 8 characters
+from `ABCDEFGHJKMNPQRSTVWXYZ23456789`, work once, for 15 minutes.
+
+### First launch: "Email me a code"
+
+`POST /api/hc/email-code {"email": "…"}` → always `{ok: true, message}` (the same whether or not the address
+belongs to a congregation). If it does, a code goes to **every** address of that congregation (one e-mail each,
+from "Hear Church <no-reply@hearchurch.com>"). The Mac then shows a code field and calls `/api/hc/pair`. A new
+request replaces the previous e-mailed code. `503 not_configured` while the hub has no `RESEND_API_KEY` (the app
+should then suggest "Add device" on a connected Mac). `429` after 3 requests per address or 10 per IP in an hour.
+
+### Settings: "Add device"
+
+`POST /api/hc/pairing-code` (device token) → `{ok, code: "7KQM-X2PA", expires_at, expires_in: 900}`. Show the
+code with a 15-minute countdown. A new code replaces the previous unused one. 30 per hour per congregation.
+
+### Settings: e-mails
+
+- `GET /api/hc/account` (device token) → `{ok, slug, main_email, emails: [{email, main, added_at}],
+  devices: [{id, name, created_at, last_seen, app_version, revoked_at, this}]}` (main first; `this` = the Mac asking;
+  revoked Macs aren't listed).
+- `POST /api/hc/emails {"email": "…", "main": false}` → add (`main: true` also makes it main). Answer:
+  `{ok, added, emails, main_email, devices}`. `409 too_many` past 10, `422` for a malformed address.
+- `POST /api/hc/emails/main {"email": "…"}` → make one of them main; `404 not_found` if it isn't one.
+- `POST /api/hc/emails/remove {"email": "…"}` → `409 main` (make another main first), `404 not_found`.
+
+Every one of these answers 403 for an unknown or revoked device token; the app should then go back to first launch
+("Create congregation" / "Connect by code"). The older routes (`/api/hc/connect-code` + `/api/hc/connect` with a
+6-digit code and the slug, `/api/hc/device-link` magic links) still work for 0.2.x apps; V3.3 should use the ones
+above.

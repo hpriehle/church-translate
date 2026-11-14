@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS devices (
     token_hash TEXT NOT NULL UNIQUE,
     created_at REAL NOT NULL,
     last_seen REAL,
-    app_version TEXT
+    app_version TEXT,
+    revoked_at REAL
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,7 +118,27 @@ CREATE TABLE IF NOT EXISTS refunds (
     source TEXT NOT NULL DEFAULT 'stripe',
     stripe_refund_id TEXT
 );
+CREATE TABLE IF NOT EXISTS congregation_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+    email TEXT NOT NULL,
+    is_main INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    UNIQUE (congregation_id, email)
+);
+CREATE TABLE IF NOT EXISTS device_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_hash TEXT NOT NULL UNIQUE,
+    congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+    kind TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    used_at REAL,
+    device_id INTEGER
+);
 CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
+CREATE INDEX IF NOT EXISTS emails_address ON congregation_emails(email);
+CREATE INDEX IF NOT EXISTS device_codes_cong ON device_codes(congregation_id, kind);
 CREATE INDEX IF NOT EXISTS devices_cong ON devices(congregation_id);
 CREATE INDEX IF NOT EXISTS credits_cong ON credits(congregation_id);
 CREATE INDEX IF NOT EXISTS refunds_credit ON refunds(credit_id);
@@ -176,6 +197,11 @@ CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"
 CODE_LEN = 12   # 30^12, about 59 bits: unguessable behind the hub's failure limits
 
 
+MAX_EMAILS = 10              # addresses per congregation
+DEVICE_CODE_LEN = 8          # add-a-Mac codes "7KQM-X2PA": 30^8, ~39 bits, short-lived and behind failure limits
+DEVICE_CODE_TTL_S = 15 * 60
+
+
 def new_own_key_code() -> str:
     c = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LEN))
     return f"HC-{c[:4]}-{c[4:8]}-{c[8:]}"
@@ -215,7 +241,13 @@ class Database:
         self._lock = threading.Lock()
         with self._lock:
             self._db.execute("PRAGMA foreign_keys = ON")
+            had_emails = bool(self._db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'"
+                                               " AND name = 'congregation_emails'").fetchone())
             self._db.executescript(SCHEMA)
+            if not had_emails:   # databases made before several e-mails: the sign-up address becomes the main one
+                self._db.execute("INSERT OR IGNORE INTO congregation_emails (congregation_id, email, is_main,"
+                                 " created_at) SELECT id, lower(trim(email)), 1, created_at FROM congregations"
+                                 " WHERE trim(email) != ''")
             cols = {r[1] for r in self._db.execute("PRAGMA table_info(congregations)")}
             if "city" not in cols:   # databases made before search showed the town
                 self._db.execute("ALTER TABLE congregations ADD COLUMN city TEXT NOT NULL DEFAULT ''")
@@ -243,6 +275,8 @@ class Database:
             dcols = {r[1] for r in self._db.execute("PRAGMA table_info(devices)")}
             if "app_version" not in dcols:   # databases made before the app said its version
                 self._db.execute("ALTER TABLE devices ADD COLUMN app_version TEXT")
+            if "revoked_at" not in dcols:    # databases made before a device could be revoked
+                self._db.execute("ALTER TABLE devices ADD COLUMN revoked_at REAL")
             kcols = {r[1] for r in self._db.execute("PRAGMA table_info(own_key_codes)")}
             if "voided_at" not in kcols:   # databases made before codes could be voided
                 self._db.execute("ALTER TABLE own_key_codes ADD COLUMN voided_at REAL")
@@ -278,6 +312,8 @@ class Database:
                     " meeting_times, timezone, email, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (slug, church, name, unit_type, stake or None, address, city or city_of(address), lat, lng,
                      json.dumps(meeting_times or []), timezone, email.lower(), time.time()))
+                if email.strip():
+                    self.add_email(cur.lastrowid, email, main=True)
                 return self.congregation(cur.lastrowid)
             except sqlite3.IntegrityError:
                 continue
@@ -351,6 +387,120 @@ class Database:
             return False
         return hmac.compare_digest(stored, hash_token(digits))
 
+    # ------------------------------------------------------------ e-mails (several per congregation, one main)
+    def emails(self, cid: int) -> list[dict[str, Any]]:
+        """The congregation's addresses, the main (billing) one first."""
+        return [{"email": r["email"], "main": bool(r["is_main"]), "added_at": r["created_at"]}
+                for r in self._q("SELECT email, is_main, created_at FROM congregation_emails WHERE congregation_id = ?"
+                                 " ORDER BY is_main DESC, id", (cid,))]
+
+    def main_email(self, cid: int) -> str | None:
+        rows = self._q("SELECT email FROM congregation_emails WHERE congregation_id = ? AND is_main = 1", (cid,))
+        return rows[0]["email"] if rows else None
+
+    def add_email(self, cid: int, email: str, main: bool = False) -> bool:
+        """Add an address (lowercased). The first address, or main=True, becomes the main one; the main address is
+        also kept in congregations.email (what the older routes read). Returns True if it was new. ValueError past
+        MAX_EMAILS."""
+        email = email.strip().lower()
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                rows = self._db.execute("SELECT email FROM congregation_emails WHERE congregation_id = ?",
+                                        (cid,)).fetchall()
+                known = {r["email"] for r in rows}
+                new = email not in known
+                if new and len(known) >= MAX_EMAILS:
+                    raise ValueError(f"at most {MAX_EMAILS} e-mail addresses per congregation")
+                if new:
+                    self._db.execute("INSERT INTO congregation_emails (congregation_id, email, is_main, created_at)"
+                                     " VALUES (?,?,0,?)", (cid, email, time.time()))
+                if main or not known:
+                    self._set_main(cid, email)
+                self._db.execute("COMMIT")
+                return new
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+
+    def _set_main(self, cid: int, email: str) -> None:   # inside a transaction
+        self._db.execute("UPDATE congregation_emails SET is_main = (email = ?) WHERE congregation_id = ?", (email, cid))
+        self._db.execute("UPDATE congregations SET email = ? WHERE id = ?", (email, cid))
+
+    def set_main_email(self, cid: int, email: str) -> bool:
+        """Make one of the congregation's addresses the main one. False when it isn't one of them."""
+        email = email.strip().lower()
+        with self._lock:
+            if not self._db.execute("SELECT 1 FROM congregation_emails WHERE congregation_id = ? AND email = ?",
+                                    (cid, email)).fetchone():
+                return False
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                self._set_main(cid, email)
+                self._db.execute("COMMIT")
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+            return True
+
+    def remove_email(self, cid: int, email: str) -> str:
+        """"removed", "unknown", or "main" (the main address can't be removed: make another one main first)."""
+        email = email.strip().lower()
+        rows = self._q("SELECT is_main FROM congregation_emails WHERE congregation_id = ? AND email = ?", (cid, email))
+        if not rows:
+            return "unknown"
+        if rows[0]["is_main"]:
+            return "main"
+        self._x("DELETE FROM congregation_emails WHERE congregation_id = ? AND email = ? AND is_main = 0", (cid, email))
+        return "removed"
+
+    def congregations_with_email(self, email: str) -> list[dict[str, Any]]:
+        """Visible (not hidden, verified) congregations that list this address, oldest first."""
+        rows = self._q("SELECT c.* FROM congregations c JOIN congregation_emails e ON e.congregation_id = c.id"
+                       " WHERE e.email = ? AND c.hidden = 0 AND c.email_verified = 1 ORDER BY c.id",
+                       (email.strip().lower(),))
+        return [_cong(r) for r in rows]
+
+    # ------------------------------------------------------------ device codes (add a Mac: pairing or e-mailed)
+    def new_device_code(self, cid: int, kind: str, ttl_s: float = DEVICE_CODE_TTL_S) -> tuple[str, float]:
+        """A one-time code that connects a new Mac to congregation `cid`: kind "pair" (shown by a Mac that is
+        already in, "Add device") or "email" (sent to the congregation's addresses). Earlier unused codes of the
+        same kind stop working. Returns (code as shown "ABCD-EFGH", expires_at); only its hash is kept."""
+        if kind not in ("pair", "email"):
+            raise ValueError(kind)
+        c = "".join(secrets.choice(CODE_ALPHABET) for _ in range(DEVICE_CODE_LEN))
+        now = time.time()
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                self._db.execute("UPDATE device_codes SET expires_at = ? WHERE congregation_id = ? AND kind = ?"
+                                 " AND used_at IS NULL AND expires_at > ?", (now, cid, kind, now))
+                self._db.execute("INSERT INTO device_codes (code_hash, congregation_id, kind, created_at, expires_at)"
+                                 " VALUES (?,?,?,?,?)", (hash_token(c), cid, kind, now, now + ttl_s))
+                self._db.execute("COMMIT")
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+        return f"{c[:4]}-{c[4:]}", now + ttl_s
+
+    def redeem_device_code(self, code: str, device_name: str) -> tuple[dict[str, Any], str] | None:
+        """Use a pairing or e-mailed code: a new device for its congregation. Returns (congregation, device token),
+        or None for a code that is unknown, used, expired, or whose congregation is hidden. Single use, atomically."""
+        c = re.sub(r"[\s-]", "", code or "").upper()
+        if len(c) != DEVICE_CODE_LEN or any(ch not in CODE_ALPHABET for ch in c):
+            return None
+        now = time.time()
+        with self._lock:
+            row = self._db.execute("SELECT d.id, d.congregation_id FROM device_codes d JOIN congregations c"
+                                   " ON c.id = d.congregation_id WHERE d.code_hash = ? AND d.used_at IS NULL"
+                                   " AND d.expires_at > ? AND c.hidden = 0", (hash_token(c), now)).fetchone()
+            if row is None or self._db.execute("UPDATE device_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
+                                               (now, row["id"])).rowcount == 0:
+                return None
+        token, did = self._add_device(row["congregation_id"], device_name)
+        self._x("UPDATE device_codes SET device_id = ? WHERE id = ?", (did, row["id"]))
+        return self.congregation(row["congregation_id"]), token
+
     # ------------------------------------------------------------ own-key codes
     def mint_own_key_code(self, label: str) -> str:
         """A new one-time code for a church (label: who it's for, e.g. "Dakar Ward"). Only its hash is kept, so
@@ -419,14 +569,30 @@ class Database:
     # ------------------------------------------------------------ devices
     def add_device(self, cid: int, name: str) -> str:
         """Create a device and return its token (the only time it exists in clear)."""
+        return self._add_device(cid, name)[0]
+
+    def _add_device(self, cid: int, name: str) -> tuple[str, int]:
         token = new_token("hcd")
-        self._x("INSERT INTO devices (congregation_id, name, token_hash, created_at) VALUES (?,?,?,?)",
-                (cid, name[:60] or "Mac", hash_token(token), time.time()))
-        return token
+        cur = self._x("INSERT INTO devices (congregation_id, name, token_hash, created_at) VALUES (?,?,?,?)",
+                      (cid, (name or "")[:60] or "Mac", hash_token(token), time.time()))
+        return token, cur.lastrowid
 
     def device_by_token(self, token: str) -> dict[str, Any] | None:
-        rows = self._q("SELECT id, congregation_id, name FROM devices WHERE token_hash = ?", (hash_token(token),))
+        """The device with this token; None for an unknown or revoked one."""
+        rows = self._q("SELECT id, congregation_id, name FROM devices WHERE token_hash = ? AND revoked_at IS NULL",
+                       (hash_token(token),))
         return dict(rows[0]) if rows else None
+
+    def device(self, did: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT id, congregation_id, name, created_at, last_seen, app_version, revoked_at FROM devices"
+                       " WHERE id = ?", (did,))
+        return dict(rows[0]) if rows else None
+
+    def revoke_device(self, did: int) -> bool:
+        """The device's token stops working for good (the row stays, for the history). False for an unknown id;
+        revoking again is fine."""
+        self._x("UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", (time.time(), did))
+        return self.device(did) is not None
 
     def touch_device(self, did: int, app_version: str | None = None) -> None:
         """The Mac connected (or said hello): last seen now, and its app version when it told us one."""
@@ -434,9 +600,11 @@ class Database:
         self._x("UPDATE devices SET last_seen = ?, app_version = COALESCE(?, app_version) WHERE id = ?",
                 (time.time(), v, did))
 
-    def devices(self, cid: int) -> list[dict[str, Any]]:
-        return [dict(r) for r in self._q("SELECT id, name, created_at, last_seen, app_version FROM devices"
-                                         " WHERE congregation_id = ?", (cid,))]
+    def devices(self, cid: int, revoked: bool = False) -> list[dict[str, Any]]:
+        """The congregation's devices; revoked ones (with revoked_at) only when asked."""
+        return [dict(r) for r in self._q("SELECT id, name, created_at, last_seen, app_version, revoked_at FROM devices"
+                                         " WHERE congregation_id = ?" + ("" if revoked else " AND revoked_at IS NULL"),
+                                         (cid,))]
 
     def all_devices(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self._q("SELECT id, congregation_id, name, created_at, last_seen, app_version"

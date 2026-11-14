@@ -25,7 +25,7 @@ header {
 .pill.wait::before { content: "● "; color: #e0a030; }
 .pill.bad::before { content: "● "; color: #e05050; }
 
-.langs { display: flex; justify-content: center; gap: .4rem; padding: .55rem 1rem 0; }
+.langs { display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem; padding: .55rem 1rem 0; }
 .langs[hidden] { display: none; }
 .langs button {
   background: transparent; color: var(--dim); border: 1px solid #2c2c2c; border-radius: 999px;

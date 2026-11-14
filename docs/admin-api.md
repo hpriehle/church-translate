@@ -176,7 +176,9 @@ One church in one call.
              "balance": {"free_left_min": 0.0, "used_min": 90.0, "metered_min": 90.0, "bought_usd": 20.0, "…": "…"},
              "message": "Credit $17.50 · 3.5 language-hours left.", "…": "…"},
  "live": false, "wifi_only": false, "listeners": 0,
- "devices": [{"id": 1, "name": "Chapel Mac", "created_at": 1794635908.34, "last_seen": 1794635908.35, "app_version": "1.4.0"}],
+ "devices": [{"id": 1, "name": "Chapel Mac", "created_at": 1794635908.34, "last_seen": 1794635908.35, "app_version": "1.4.0",
+              "revoked_at": null}],
+ "emails": [{"email": "bishop@example.org", "main": true, "added_at": 1794635908.33}],
  "own_key_codes": [],
  "meetings": [{"session_id": 1, "code": "20261109-100012", "started_at": 1794635908.37, "ended_at": 1794635908.38,
                "billing": "credits", "languages": ["fr", "es"], "language_minutes": {"es": 45.0, "fr": 45.0},
@@ -191,7 +193,35 @@ One church in one call.
 - `meetings`: the newest first, including meetings with no speech (which show 0 minutes). `languages` are the
   languages offered, and `language_minutes` are the ones actually heard.
 - `own_key_codes`: the codes this congregation used.
+- `devices`: every Mac, revoked ones too (`revoked_at` set, listed last). `emails`: the main (billing) one first.
 - For more transactions, call `/api/admin/transactions?congregation={id}&before=<next_before>`.
+
+## E-mails and devices (V3.2)
+
+### GET /api/admin/congregations/{id}/account
+
+```json
+{"congregation": {"id": 1, "slug": "riga", "name": "Riga Ward"},
+ "main_email": "bishop@example.org",
+ "emails": [{"email": "bishop@example.org", "main": true, "added_at": 1794635908.33},
+            {"email": "clerk@example.org", "main": false, "added_at": 1794636000.1}],
+ "devices": [{"id": 2, "name": "Clerk's Mac", "created_at": 1794636100.0, "last_seen": 1794636200.0,
+              "app_version": "0.3.0", "revoked_at": null},
+             {"id": 1, "name": "Chapel Mac", "created_at": 1794635908.34, "last_seen": 1794635908.35,
+              "app_version": "0.2.1", "revoked_at": 1794637000.0}]}
+```
+
+404 for an unknown congregation. A congregation has 1 to 10 addresses. Exactly one is `main`: Stripe Checkout
+sends its receipts there, and `congregation.email` elsewhere in this API is the same address. Congregations from
+before V3.2 got their sign-up address as the main one. The church changes its addresses from the Mac (no admin
+route for that).
+
+### POST /api/admin/devices/{id}/revoke
+
+→ `{"ok": true, "device": {…, "revoked_at": 1794637000.0}}`. 404 for an unknown device. Revoking again is fine.
+The device's token stops working for good: its app calls get 403, a meeting it is running ends ("This Mac was
+removed from the congregation."), and its link to the hub closes. The row stays for the history. To use that Mac
+again, connect it with a new code (Add device or Email me a code).
 
 ## Older admin routes (unchanged)
 

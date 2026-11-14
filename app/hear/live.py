@@ -7,10 +7,12 @@ An engine (the congregation's Mac) connects to /ws/engine with "Authorization: B
 (the legacy engine token path in app/engine.py is separate and unchanged) and then:
   engine → hub   {"type": "hello", name, languages, stream, busy, app_version}   (languages = every language it can
                      produce; the binary frames index into this list; stream must match this server's)
-                 {"type": "session_start", languages, speaker?, trial?, resume?, private?}   languages = the ones
-                     offered; resume = the session code from an earlier "session_started" (reconnect within the
-                     grace); private = a "this Wi-Fi only" meeting (see below)
-                 {"type": "languages", languages}      (offered languages changed during the meeting)
+                 {"type": "session_start", languages, targets?, speakers?, speaker?, passthrough?, trial?, resume?,
+                     private?}   targets (V3, else languages) = the ones offered = the listen pills, in that order;
+                     speakers = the languages spoken at the microphone; passthrough (V3) = a listener in a speaker
+                     language gets the original (never "listen in the room"); resume = the session code from an
+                     earlier "session_started" (reconnect within the grace); private = a "this Wi-Fi only" meeting
+                 {"type": "languages", languages, targets?, speakers?}   (changed during the meeting)
                  {"type": "hub", lang, msg, remember}  (a caption etc. for that language's listeners)
                  binary: one byte = index into hello.languages, then MP3 bytes
                  {"type": "session_stop"}
@@ -57,6 +59,20 @@ LISTENERS_EVERY_S = 5.0   # how often a live session tells its engine how many p
 METER_MAX_ITEMS = 500     # items taken from one meter message (the engine sends far fewer)
 
 
+def _targets(m: dict[str, Any]) -> list[str]:
+    """The offered languages of a session_start / languages message: V3 engines send targets (the listen pills, in
+    order), older ones only languages (the same list under its old name)."""
+    t = m.get("targets") if isinstance(m.get("targets"), list) else m.get("languages")
+    return list(dict.fromkeys(c for c in (t or []) if isinstance(c, str)))[:20]
+
+
+async def _close(ws) -> None:
+    try:
+        await ws.close(code=4403)
+    except Exception:
+        pass
+
+
 class Link:
     """One engine connection."""
 
@@ -84,6 +100,8 @@ class LiveSession:
         self.db_id, self.code, self.offered = db_id, code, offered
         self.private = False  # "this Wi-Fi only": a billing link, never listed or reachable by phones here
         self.speaker = "en"   # the speaker's language: the phones in that language are told to listen in the room
+        self.speakers: list[str] = []   # V3: every language spoken at the microphone
+        self.passthrough = False        # V3: phones in a speaker language get the original, never paused
         self.started = time.time()
         self.grace = None  # timer handle while the engine is away
         self.hubs = {c: Hub(f"live-{self.slug}-{c}", history=300, queue_size=400) for c in all_langs}
@@ -91,6 +109,10 @@ class LiveSession:
 
     def languages_public(self) -> list[dict[str, str]]:
         return [{"code": c, "name": LANGUAGES[c].name if c in LANGUAGES else c} for c in self.offered]
+
+    def listen_state(self) -> dict[str, Any]:
+        """What a listener page needs besides the pills: who speaks, and whether the original is passed through."""
+        return {"speaker": self.speaker, "speakers": self.speakers or [self.speaker], "passthrough": self.passthrough}
 
     def listeners(self) -> int:
         return sum(b.listeners for b in self.streams.values())
@@ -109,6 +131,7 @@ class Live:
         self.sessions: dict[int, LiveSession] = {}
         self.waiting: dict[int, Hub] = {}   # listeners of a congregation that isn't live yet
         self.started = time.time()          # "boot": caption numbers restart when the server does
+        self.links: set[Link] = set()       # engine connections now (a revoked device's are closed)
 
     def get(self, cid: int) -> LiveSession | None:
         """The congregation's public live session, for listeners and listings (never a private one)."""
@@ -128,6 +151,7 @@ class Live:
     async def serve_device(self, ws, device: dict[str, Any]) -> None:
         await ws.accept()
         link = Link(ws, device)
+        self.links.add(link)
         self.db.touch_device(device["id"])
         sender = asyncio.create_task(self._sender(link))
         try:
@@ -145,6 +169,7 @@ class Live:
         except Exception as e:
             log.info("device link closed: %s", e)
         finally:
+            self.links.discard(link)
             sender.cancel()
             self.db.touch_device(device["id"])
             self.lost(link)
@@ -183,7 +208,10 @@ class Live:
         elif t == "session_start":
             self._start(link, m)
         elif t == "languages" and link.session:
-            self._set_offered(link.session, [c for c in (m.get("languages") or []) if c in link.session.hubs])
+            s = link.session
+            if self._set_speakers(s, m):
+                self._announce_speaker(s)
+            self._set_offered(s, [c for c in _targets(m) if c in s.hubs])
         elif t == "session_stop" and link.session:
             self.end(link.session, notify=False)
         elif t == "hub" and link.session and not link.session.private:
@@ -200,7 +228,9 @@ class Live:
         cong = self.db.congregation(link.device["congregation_id"])
         if cong is None or cong["hidden"] or not cong["email_verified"]:
             return refuse("This congregation is not active.")
-        offered = [c for c in (m.get("languages") or []) if c in link.languages]
+        if (self.db.device(link.device["id"]) or {}).get("revoked_at"):
+            return refuse("This Mac was removed from the congregation: connect it again.")
+        offered = [c for c in _targets(m) if c in link.languages]
         if not offered:
             return refuse("Choose at least one language.")
         old = self.sessions.get(cong["id"])
@@ -210,6 +240,8 @@ class Live:
             same = old.device_id == link.device["id"]
             if m.get("resume") == old.code and (old.link is None or same) and old.private == bool(m.get("private")):
                 old.speaker = str(m.get("speaker") or old.speaker)[:8]
+                self._set_speakers(old, m)
+                old.passthrough = bool(m.get("passthrough"))
                 self._resume(old, link, offered)
                 return
             if old.link is None and same:
@@ -231,6 +263,8 @@ class Live:
                                      device_id=link.device["id"])
         s = LiveSession(cong, link, db_id, code, offered, link.languages, self.stream)
         s.speaker = str(m.get("speaker") or "en")[:8]
+        self._set_speakers(s, m)
+        s.passthrough = bool(m.get("passthrough"))
         s.private = bool(m.get("private"))
         self.sessions[cong["id"]] = s
         link.session = s
@@ -254,6 +288,20 @@ class Live:
         link.send({"type": "session_started", "session": s.code, "resumed": True})
         log.info("%s resumed on %s", s.slug, link.name)
 
+    @staticmethod
+    def _set_speakers(s: LiveSession, m: dict[str, Any]) -> bool:
+        """Take the V3 speaker list from a session_start / languages message; True when it changed."""
+        if not isinstance(m.get("speakers"), list):
+            return False
+        new = [c[:8] for c in m["speakers"] if isinstance(c, str)][:20]
+        changed, s.speakers = new != s.speakers, new
+        return changed
+
+    def _announce_speaker(self, s: LiveSession) -> None:
+        if not s.private:
+            for h in s.hubs.values():
+                h.publish({"type": "speaker", **s.listen_state()})
+
     def _set_offered(self, s: LiveSession, codes: list[str]) -> None:
         s.offered = codes
         for h in s.hubs.values():
@@ -268,6 +316,11 @@ class Live:
             msg = {**msg, "session": s.code}  # phones compare this with the session they joined
         elif msg.get("type") == "speaker":
             s.speaker = str(msg.get("speaker") or "en")[:8]
+            if isinstance(msg.get("speakers"), list):
+                self._set_speakers(s, msg)
+            if "passthrough" in msg:
+                s.passthrough = bool(msg["passthrough"])
+            msg = {**msg, **s.listen_state()}
         hub.publish(msg, remember=bool(m.get("remember")))
 
     def _meter(self, link: Link, m: dict[str, Any]) -> None:
@@ -290,6 +343,13 @@ class Live:
             b.feed_mp3(data[1:])
 
     # ------------------------------------------------------------ ending
+    def revoked(self, did: int) -> None:
+        """Device `did` was revoked: its meeting ends and its engine links close (its token no longer opens one)."""
+        for s in [s for s in self.sessions.values() if s.device_id == did]:
+            self.end(s, why="This Mac was removed from the congregation.")
+        for link in [l for l in self.links if l.device["id"] == did]:
+            asyncio.ensure_future(_close(link.ws))
+
     def lost(self, link: Link) -> None:
         """The engine's link closed: keep the session open for a while so it can reconnect."""
         s = link.session

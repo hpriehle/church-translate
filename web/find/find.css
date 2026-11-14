@@ -29,6 +29,8 @@ main { max-width: 34rem; margin: 0 auto; padding: 1.2rem 1.1rem 3rem; }
 .when { font-size: .9rem; text-align: right; color: var(--dim); white-space: nowrap; grid-column: 2; }
 .badge { color: #fff; background: var(--live); font-weight: 700; font-size: .8rem; padding: .1rem .5rem; border-radius: 999px; }
 .soon { color: var(--accent); }
+.langs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .3rem; }
+.lang { font-size: .8rem; color: var(--dim); border: 1px solid #2c2c2c; border-radius: 999px; padding: .1rem .55rem; }
 .search label { display: block; color: var(--dim); font-size: .95rem; margin-bottom: .35rem; }
 .search input {
   width: 100%; padding: .8rem 1rem; font: inherit; font-size: 1.1rem; color: var(--fg); background: #111;

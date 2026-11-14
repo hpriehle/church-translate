@@ -1,8 +1,9 @@
 """E-mail out, and per-IP rate limits for the sign-up endpoints.
 
-Mailer: SMTP when a host is configured (settings [hearchurch] or HEARCHURCH_SMTP_* variables);
-otherwise each message is appended to a log file (logs/outbox.log), which is how it is tested.
-No paid provider is built in.
+Mailer (the older magic links): SMTP when a host is configured (settings [hearchurch] or HEARCHURCH_SMTP_*
+variables); otherwise each message is appended to a log file (logs/outbox.log), which is how it is tested.
+Resend (device codes, "Email me a code"): Resend's HTTP API with RESEND_API_KEY, from
+"Hear Church <no-reply@hearchurch.com>". Without the key the routes that need it answer 503 not_configured.
 """
 from __future__ import annotations
 
@@ -52,6 +53,50 @@ class Mailer:
         self.outbox.parent.mkdir(parents=True, exist_ok=True)
         with open(self.outbox, "a", encoding="utf-8") as f:
             f.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}\nTo: {to}\nSubject: {subject}\n\n{body}\n\n")
+
+
+RESEND_URL = "https://api.resend.com/emails"
+RESEND_FROM = "Hear Church <no-reply@hearchurch.com>"
+
+
+def resend_key() -> str:
+    """RESEND_API_KEY from the environment (on the hub: from ~/.config/hearchurch/resend.env via the service's
+    environment file); "" when not set."""
+    return os.environ.get("RESEND_API_KEY", "").strip()
+
+
+class Resend:
+    """Sends the account e-mails (device codes) through Resend's HTTP API, from no-reply@hearchurch.com. Never logs
+    the key, the code or the message body."""
+
+    def __init__(self, key: str | None = None, sender: str = RESEND_FROM):
+        self._key, self.sender = key, sender
+
+    @property
+    def key(self) -> str:
+        return self._key if self._key is not None else resend_key()
+
+    def configured(self) -> bool:
+        return bool(self.key)
+
+    async def send(self, to: str, subject: str, text: str) -> bool:
+        """One message to one address. True when Resend took it; failures are logged (status only) and False."""
+        import httpx
+
+        key = self.key
+        if not key:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=15) as http:
+                r = await http.post(RESEND_URL, headers={"Authorization": f"Bearer {key}"},
+                                    json={"from": self.sender, "to": [to], "subject": subject, "text": text})
+        except Exception as e:
+            log.warning("resend: no answer (%s)", type(e).__name__)
+            return False
+        if r.status_code >= 300:
+            log.warning("resend: HTTP %d", r.status_code)
+            return False
+        return True
 
 
 class RateLimiter:

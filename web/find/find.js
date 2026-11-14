@@ -98,6 +98,14 @@
     } else if (c.next_meeting) {
       when.textContent = nextLabel(c.next_meeting);
     }
+    if (c.live && c.languages && c.languages.length) {
+      // the meeting's translation languages: the same pills as on its own page
+      const langs = a.appendChild(span("langs", ""));
+      for (const l of c.languages) {
+        const p = langs.appendChild(span("lang", l.name));
+        p.dataset.code = l.code;
+      }
+    }
     li.append(a);
     return li;
   }

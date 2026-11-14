@@ -7,6 +7,8 @@ docs/admin-api.md:
   POST /api/admin/refunds {payment_id, cents?}
   POST /api/admin/own-key-codes/{id}/void
   GET  /api/admin/congregations/{id}
+  GET  /api/admin/congregations/{id}/account   its e-mails (main first) and devices (revoked ones too)
+  POST /api/admin/devices/{id}/revoke          the device's token stops working; its meeting ends
 
 The ledger has no table of its own: top-ups and manual credits are `credits` rows, refunds are `refunds` rows (one per
 change of a top-up's refunded total), and usage is the metered speech of each meeting. The free first language-hour
@@ -334,8 +336,40 @@ async def admin_congregation(request: Request, cid: int, meetings: int = Query(d
                          "title": api.display_name(c)},
         "billing": api.billing_info(c),
         "live": s is not None, "wifi_only": bool(s and s.private), "listeners": s.listeners() if s else 0,
-        "devices": sorted(h.db.devices(cid), key=lambda d: d["last_seen"] or 0, reverse=True),
+        "devices": _devices(h, cid),
+        "emails": h.db.emails(cid),
         "own_key_codes": h.db.own_key_codes(cid),
         "meetings": recent, "meetings_total": len(h.db.sessions(cid)),
         **_page(rows, "", transactions, ""),
     }
+
+
+# ------------------------------------------------------------------ e-mails and devices
+
+def _devices(h: api.Hear, cid: int) -> list[dict[str, Any]]:
+    """Every device of a congregation, revoked ones too (revoked_at set), most recently seen first."""
+    return sorted(h.db.devices(cid, revoked=True), key=lambda d: (d["revoked_at"] is None, d["last_seen"] or 0),
+                  reverse=True)
+
+
+@router.get("/api/admin/congregations/{cid}/account")
+async def admin_account(request: Request, cid: int):
+    h = _operator(request)
+    c = h.db.congregation(cid)
+    if c is None:
+        raise HTTPException(404, "No such congregation.")
+    return {"congregation": _who(c, cid), "emails": h.db.emails(cid), "main_email": h.db.main_email(cid),
+            "devices": _devices(h, cid)}
+
+
+@router.post("/api/admin/devices/{did}/revoke")
+async def admin_revoke_device(request: Request, did: int):
+    """The device's token stops working for good (revoking again is fine); a meeting it is running ends and its link
+    closes. The Mac can join again with a new code."""
+    h = _operator(request)
+    if not h.db.revoke_device(did):
+        raise HTTPException(404, "No such device.")
+    h.live.revoked(did)
+    d = h.db.device(did)
+    log.info("device %d of congregation %d revoked", did, d["congregation_id"])
+    return {"ok": True, "device": d}
