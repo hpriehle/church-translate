@@ -526,3 +526,77 @@ def test_english_only_speech_model_is_not_used_for_another_language():
     assert t._fw_wanted() == "small"
     t.cfg.faster_whisper_model = "large-v3"
     assert t._fw_wanted() == "large-v3"
+
+
+def test_slow_cpu_steps_down_one_model_size_and_no_further():
+    from app.config import SttCfg
+    from app.stt import Transcriber
+
+    t = Transcriber(SttCfg(engine="faster-whisper", faster_whisper_model="small", language="ru"))
+    for _ in range(5):
+        t._measure(6.0, 6.0)                     # RTF 1.0, but not enough chunks yet to judge
+    assert t._fw_wanted() == "small" and not t.stepped_down
+    t._measure(6.0, 6.0)
+    assert t._fw_wanted() == "base" and "small" in t.stepped_down and "base" in t.stepped_down
+    for _ in range(10):
+        t._measure(6.0, 9.0)                     # still too slow: base is the floor
+    assert t._fw_wanted() == "base"
+    t.cfg.language = "en"
+    assert t._fw_wanted() == "base"              # the multilingual model stays multilingual
+
+
+def test_fast_cpu_or_short_chunks_keep_the_model():
+    from app.config import SttCfg
+    from app.stt import Transcriber
+
+    t = Transcriber(SttCfg(engine="faster-whisper", faster_whisper_model="small.en", language="en"))
+    for _ in range(20):
+        t._measure(6.0, 3.5)                     # RTF 0.58: what small measured on a 4-core Intel N95
+        t._measure(0.8, 2.0)                     # a cough: too short to say anything about speed
+    assert t._fw_wanted() == "small.en" and not t.stepped_down and abs(t.rtf - 0.583) < 0.01
+    t._measure(6.0, 9.0)                         # one slow chunk (a temperature retry): still fine
+    assert t._fw_wanted() == "small.en" and t.rtf < 0.8
+    for _ in range(3):
+        t._measure(6.0, 7.0)
+    assert t._fw_wanted() == "base.en"           # slower than 0.8 over the last 8 chunks: steps down
+    t.cfg.language = "ru"
+    assert t._fw_wanted() == "base"
+
+
+def test_apple_silicon_never_measures_or_steps_down():
+    from app.config import SttCfg
+    from app.stt import Transcriber
+
+    t = Transcriber(SttCfg(engine="mlx", language="ru"))
+    for _ in range(10):
+        t._measure(6.0, 12.0)
+    assert t.rtf == 0.0 and not t.stepped_down and t._step == 0
+
+
+def test_too_slow_without_the_smaller_model_fetches_it_and_steps_down_once_it_lands(monkeypatch):
+    from app.config import SttCfg
+    from app.stt import Transcriber
+
+    t = Transcriber(SttCfg(engine="faster-whisper", faster_whisper_model="small", language="ru"))
+    on_disk, fetched = {"base": False}, []
+    monkeypatch.setattr(t, "_on_disk", lambda name: on_disk[name])
+    monkeypatch.setattr("threading.Thread", lambda target, **kw: type("T", (), {"start": lambda self: fetched.append(kw["name"])})())
+    for _ in range(10):
+        t._measure(6.0, 7.0)
+    assert t._fw_wanted() == "small" and fetched == ["fetch-base"]     # fetched once, not on every slow chunk
+    on_disk["base"] = True
+    t._measure(6.0, 7.0)
+    assert t._fw_wanted() == "base"
+    assert any("downloading" in e for e in t.events) and any("small → base" in e for e in t.events)
+
+
+def test_intel_speech_package_lists_the_smaller_model_without_requiring_it():
+    from app.packages import FASTER_WHISPER_MB, FASTER_WHISPER_STEP_MB, SIZES_MB, package_for
+
+    p = package_for("speech", "Systran/faster-whisper-small")
+    assert p.hf_repos == ("Systran/faster-whisper-small",)          # what makes it "ready" (0.2.0 installs: unchanged)
+    assert p.hf_extra == ("Systran/faster-whisper-base",)
+    assert p.size_mb == FASTER_WHISPER_MB + FASTER_WHISPER_STEP_MB
+    apple = package_for("speech", "mlx-community/whisper-large-v3-turbo")
+    assert apple.hf_extra == () and apple.size_mb == SIZES_MB["speech"]
+    assert package_for("speech", "Systran/faster-whisper-base").hf_extra == ()
