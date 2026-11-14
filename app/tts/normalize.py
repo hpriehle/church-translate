@@ -42,7 +42,8 @@ def speechify_wo(text: str) -> str:
 # How a reference like 3:16 is read aloud: the voices would otherwise read it as a time of day.
 _CHAPTER_VERSE = {"es": "capítulo {c}, versículo {v}", "ru": "глава {c}, стих {v}", "pt": "capítulo {c}, versículo {v}",
                   "uk": "розділ {c}, вірш {v}", "fa": "باب {c}، آیه {v}", "ne": "अध्याय {c}, पद {v}",
-                  "vi": "chương {c}, câu {v}", "zh": "第{c}章第{v}节"}
+                  "vi": "chương {c}, câu {v}", "zh": "第{c}章第{v}节",
+                  "lv": "{c}. nodaļa, {v}. pants"}
 
 
 def speechify_refs(code: str, text: str) -> str:

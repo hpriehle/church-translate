@@ -54,7 +54,7 @@ def _resample(pcm: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
 
 DEFAULT_PIPER_VOICES = {"fr_FR-tom-medium", "es_MX-ald-medium", "ru_RU-denis-medium", "pt_BR-cadu-medium",
                         "uk_UA-tetiana-high", "fa_IR-amir-medium", "ne_NP-chitwan-medium", "vi_VN-vais1000-medium",
-                        "zh_CN-chaowen-medium", "en_US-joe-medium"}
+                        "zh_CN-chaowen-medium", "en_US-joe-medium", "lv_LV-aivars-medium"}
 # What the operator sees for each voice: a common first name for that language, never a model or engine name.
 _VOICE_PEOPLE = {
     "fr": [("fr_FR-tom-medium", "Male", "Julien"), ("fr_FR-siwis-medium", "Female", "Camille")],
@@ -68,6 +68,7 @@ _VOICE_PEOPLE = {
     "vi": [("vi_VN-vais1000-medium", "Female", "Lan")],
     "zh": [("zh_CN-chaowen-medium", "Female", "Mei")],
     "en": [("en_US-joe-medium", "Male", "James"), ("en_US-kristin-medium", "Female", "Mary")],
+    "lv": [("lv_LV-aivars-medium", "Male", "Jānis")],
 }
 _PIPER_LOADED: dict[str, object] = {}
 

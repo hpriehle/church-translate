@@ -41,7 +41,8 @@ PIPER_VOICES = {
     "ne": ("Nepali voice", ("ne_NP-chitwan-medium",)),
     "vi": ("Vietnamese voice", ("vi_VN-vais1000-medium",)),
     "zh": ("Chinese voice", ("zh_CN-chaowen-medium",)),
-    "en": ("English voices", ("en_US-joe-medium", "en_US-kristin-medium")),  # when the speaker isn't speaking English
+    "en": ("English voices", ("en_US-joe-medium", "en_US-kristin-medium")),
+    "lv": ("Latvian voice", ("lv_LV-aivars-medium",)),   # CC0 1.0; the only Latvian voice in piper-voices
 }
 WOLOF_REPOS = ("bilalfaye/speecht5_tts-wolof", "microsoft/speecht5_hifigan")
 # What Piper's Chinese voice needs beyond the voice itself. Piper would fetch these on the first sentence, into the
@@ -58,7 +59,7 @@ LIBS_USERS = ("wo", "zh")       # these two share the downloaded libraries (the 
 # Download sizes in MB (measured), shown before a download starts and used for its progress.
 # The speech figure is the mlx model; Intel Macs use the smaller CPU model (FASTER_WHISPER_MB).
 FASTER_WHISPER_MB = 486
-SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127, "pt": 126, "uk": 228, "fa": 127, "ne": 63, "vi": 63, "zh": 176, "en": 127}
+SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127, "pt": 126, "uk": 228, "fa": 127, "ne": 63, "vi": 63, "zh": 176, "en": 127, "lv": 64}
 LIBS_MANIFEST = ROOT / "wolof_libs.json"
 LIBS_DIR = HOME / "packages"
 
