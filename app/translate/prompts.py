@@ -161,10 +161,10 @@ def build_system_prompt(glossary: dict[str, Any], audience: str, lang: str = "fr
             "\n".join(f"- {n}" for n in local if n)
     if lang == "en":
         gloss = ""
-        if src == "fr":  # the congregation's French glossary, read the other way round
-            parts = [("GLOSSARY (official Church French → English)", glossary.get("terms", [])),
-                     ("NAMES (French → English)", glossary.get("names", [])),
-                     ("SCRIPTURE BOOKS (French → English)", glossary.get("books", []))]
+        if src != "en":  # the speaker's language glossary (glossary_for), read the other way round
+            parts = [(f"GLOSSARY (official Church {src_name} → English)", glossary.get("terms", [])),
+                     (f"NAMES ({src_name} → English)", glossary.get("names", [])),
+                     (f"SCRIPTURE BOOKS ({src_name} → English)", glossary.get("books", []))]
             gloss = "".join(f"\n{title}\n{_lines(items, reverse=True)}\n" for title, items in parts if _lines(items))
         return _TEMPLATE_EN.format(src=src_name, condense=CONDENSE_TAG, skip=SKIP, glossary=gloss, local=local_txt)
     if lang == "wo":

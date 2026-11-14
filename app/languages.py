@@ -54,6 +54,18 @@ SPEAKER_NAMES_EN = {"en": "English", "fr": "French", "es": "Spanish", "ru": "Rus
 AUTO = {"en"}
 
 
+def glossary_for(code: str, speaker: str, glossaries: dict) -> dict:
+    """The glossary a language's interpreter gets. English, translated from another speaker language, reads that
+    language's glossary the other way round (its "fr" side holds the official terms in that language), keeping the
+    congregation's local names from both."""
+    own = glossaries.get(code) or {}
+    if code != "en" or speaker == "en" or speaker not in glossaries:
+        return own
+    src = glossaries[speaker] or {}
+    local = list(dict.fromkeys([n for n in (src.get("local_names") or []) + (own.get("local_names") or []) if n]))
+    return {**src, "local_names": local}
+
+
 def enabled(codes: list[str]) -> list[Language]:
     out = [LANGUAGES[c] for c in codes if c in LANGUAGES]
     return out or [LANGUAGES["fr"]]

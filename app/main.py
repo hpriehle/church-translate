@@ -30,7 +30,7 @@ from .hear import api as hear_api
 from .hear import proxy as hear_proxy
 from .config import (HOME, ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
-from .languages import AUTO, LANGUAGES, SPEAKER_LANGUAGES
+from .languages import AUTO, LANGUAGES, SPEAKER_LANGUAGES, glossary_for
 from .pipeline import Pipeline
 from .stt import Transcriber
 from .translate.router import Translator
@@ -312,7 +312,8 @@ async def lifespan(app: FastAPI):
         b = Mp3Broadcaster(sr, st.stream.bitrate_kbps, st.stream.burst_s)
         m = Mixer(sr, on_frame=b.feed)
         m.volume = st.tts.volume
-        tr = Translator(st.translate, S.glossaries[lang.code], HOME / "data" / "claude-workdir", lang)
+        tr = Translator(st.translate, glossary_for(lang.code, st.stt.language, S.glossaries),
+                        HOME / "data" / "claude-workdir", lang, st.stt.language)
         tts = TtsRunner(tts_for(st, lang.code), sr, lazy=True)
         ch = Channel(S.pipeline, lang, tr, tts, m, b, Hub(f"listen-{lang.code}", history=300, queue_size=400))
         S.pipeline.add_channel(ch)

@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
+from .languages import glossary_for
 from .profanity import censor
 from .scripture import SOURCES, Library, RefDetector, ScriptureFeed, bible_for, install
 from .audio_in import CaptureWorker, FileSource, MicSource, Source
@@ -384,7 +385,7 @@ class Pipeline:
             new_tts = tts_for(settings, code)
             if new_tts.model_dump() != ch.tts.cfg.model_dump():
                 ch.tts.reload(new_tts)
-            ch.translator.reload(settings.translate, glossaries.get(code, {}), self.speaker)
+            ch.translator.reload(settings.translate, glossary_for(code, self.speaker, glossaries), self.speaker)
         self._setup_scripture()
 
     def status(self) -> dict[str, Any]:

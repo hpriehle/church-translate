@@ -481,8 +481,11 @@ def test_prompts_follow_the_speakers_language():
     assert "talk in French" in fr_en and "Your English" in fr_en
     assert "- pieu → stake" in fr_en and "- Ésaïe → Isaiah" in fr_en and "- Jean → John" in fr_en
     assert "Kouassi" in fr_en
-    ru_en = build_system_prompt(g, "", "en", "ru")
-    assert "talk in Russian" in ru_en and "pieu" not in ru_en      # the French glossary only helps from French
+    ru_g = {"terms": [{"en": "Relief Society", "fr": "Общество милосердия"}], "local_names": ["Kalniņš"]}
+    ru_en = build_system_prompt(ru_g, "", "en", "ru")
+    assert "talk in Russian" in ru_en and "pieu" not in ru_en
+    assert "official Church Russian → English" in ru_en and "- Общество милосердия → Relief Society" in ru_en
+    assert "Kalniņš" in ru_en
     fr_wo = build_system_prompt(g, "", "wo", "fr")
     assert "talk in French" in fr_wo and "Your Wolof" in fr_wo
     for p in (en_fr, es_fr, fr_en, ru_en, fr_wo):
@@ -496,3 +499,30 @@ def test_whisper_prompt_has_no_english_words_before_another_language():
     assert build_prompt(["Kouassi"], "Mes frères", "fr") == "Kouassi. Mes frères"
 
 
+
+
+def test_english_reads_the_speakers_glossary_backwards():
+    from app.languages import glossary_for
+
+    fr = {"terms": [{"en": "stake", "fr": "pieu"}], "local_names": ["Kouassi"]}
+    ru = {"terms": [{"en": "Relief Society", "fr": "Общество милосердия"}], "local_names": ["Bērziņš"]}
+    gs = {"fr": fr, "en": fr, "ru": ru, "wo": {}}
+    assert glossary_for("en", "en", gs) is fr                     # English speaker: English is paused anyway
+    assert glossary_for("ru", "en", gs) is ru and glossary_for("ru", "fr", gs) is ru   # other targets: unchanged
+    g = glossary_for("en", "ru", gs)
+    assert g["terms"] == ru["terms"] and g["local_names"] == ["Bērziņš", "Kouassi"]
+    p = build_system_prompt(g, "", "en", "ru")
+    assert "- Общество милосердия → Relief Society" in p and "pieu" not in p and "Kouassi" in p
+    assert glossary_for("en", "fr", gs)["terms"] == fr["terms"]
+
+
+def test_english_only_speech_model_is_not_used_for_another_language():
+    from app.config import SttCfg
+    from app.stt import Transcriber
+
+    t = Transcriber(SttCfg(engine="faster-whisper", faster_whisper_model="small.en", language="en"))
+    assert t._fw_wanted() == "small.en"
+    t.cfg.language = "ru"
+    assert t._fw_wanted() == "small"
+    t.cfg.faster_whisper_model = "large-v3"
+    assert t._fw_wanted() == "large-v3"

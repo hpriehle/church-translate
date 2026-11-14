@@ -61,6 +61,7 @@ class Transcriber:
         self.cfg = cfg
         self.engine = resolve_engine(cfg.engine)
         self._fw_model = None
+        self._fw_name = ""
         self.ready = False
         self.load_s = 0.0
 
@@ -73,13 +74,19 @@ class Transcriber:
         elif self.engine == "faster-whisper":
             from faster_whisper import WhisperModel
 
-            self._fw_model = WhisperModel(self.cfg.faster_whisper_model, device="cpu", compute_type="int8")
+            self._fw_name = self._fw_wanted()
+            self._fw_model = WhisperModel(self._fw_name, device="cpu", compute_type="int8")
             self._transcribe_raw(np.zeros(16000, dtype=np.float32), None)
         else:
             raise ValueError(f"unknown stt engine {self.engine!r}")
         self.load_s = time.monotonic() - t0
         self.ready = True
         log.info("STT ready (%s) in %.1fs", self.engine, self.load_s)
+
+    def _fw_wanted(self) -> str:
+        """The faster-whisper model for the speaker's language: "small.en" becomes "small" for other languages."""
+        name = self.cfg.faster_whisper_model
+        return name[:-3] if self.cfg.language != "en" and name.endswith(".en") else name
 
     def _transcribe_raw(self, audio: np.ndarray, prompt: str | None) -> tuple[str, float, float, float]:
         """Returns (text, max no_speech_prob, mean avg_logprob, max compression ratio)."""
@@ -102,6 +109,11 @@ class Transcriber:
             segs = r.get("segments", [])
             text = r.get("text", "")
         else:
+            if self._fw_wanted() != self._fw_name:   # the speaker switched language: English-only models know only English
+                from faster_whisper import WhisperModel
+
+                self._fw_name = self._fw_wanted()
+                self._fw_model = WhisperModel(self._fw_name, device="cpu", compute_type="int8")
             seg_iter, _info = self._fw_model.transcribe(
                 audio, language=self.cfg.language, initial_prompt=prompt or None,
                 condition_on_previous_text=False, beam_size=1, temperature=[0.0, 0.2, 0.4],
