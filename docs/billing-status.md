@@ -280,7 +280,8 @@ same 5 known Linux failures.
 ## Still missing
 
 - After a refusal the Mac doesn't ask again for that run: after a top-up the operator stops and restarts the meeting.
-- Refunds are still made by hand in the Stripe dashboard (the ledger follows by itself now). A refund that fails
+- Refunds: from Siteboard through `POST /api/admin/refunds` (chat/hc-admin-api), or by hand in the Stripe
+  dashboard (the ledger follows either way). A refund that fails
   later (`charge.refund.updated` → failed) doesn't give the credit back: add it by hand with the admin route.
 - No per-congregation record of what the proxy cost us (tokens / dollars per meeting); the hub log has nothing
   but sizes and timing at debug level.
@@ -292,3 +293,13 @@ same 5 known Linux failures.
 
 ## Stripe payment methods (chat/hc-checkoutfix, Nov 12)
 Stripe refuses `payment_method_types` on Checkout now. The hub passes `payment_method_configuration` from env `STRIPE_PAYMENT_METHOD_CONFIG` (optional). Test mode: "Hear Church" config pmc_1UbAjMK0BHzgWcTPV0fZxOrY (card, Apple Pay, Google Pay, Link). Live mode needs its own config (and Harrison's yes). Delayed payments credit on `checkout.session.async_payment_succeeded`; the test webhook listens to checkout.session.completed, checkout.session.async_payment_succeeded, charge.refunded.
+
+## Admin API for Siteboard (chat/hc-admin-api, Nov 14; nothing pushed or deployed)
+Operator-only JSON in `app/hear/admin.py`, documented with examples in `docs/admin-api.md`: `GET /api/admin/stats`
+(billing modes, sign-ups, active congregations and meetings, paid/free/own-key language-hours, credit
+sold/refunded/outstanding, installs by app version), `GET /api/admin/transactions` (the whole ledger, paged),
+`POST /api/admin/refunds` (Stripe Refunds API with an idempotency key; defaults to the unused part, warns past it,
+never beyond the top-up; the later `charge.refunded` changes nothing), `POST /api/admin/own-key-codes/{id}/void`,
+`GET /api/admin/congregations/{id}`. Schema: `devices.app_version`, `own_key_codes.voided_at`, and a `refunds` log
+(added on open, as with the other columns). The Mac app now passes `HEARCHURCH_APP_VERSION` to the engine, which
+sends it in its hub hello (Swift not compiled here). Tests: `tests/test_admin_api.py`.

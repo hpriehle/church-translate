@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS devices (
     name TEXT NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
     created_at REAL NOT NULL,
-    last_seen REAL
+    last_seen REAL,
+    app_version TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,11 +105,22 @@ CREATE TABLE IF NOT EXISTS own_key_codes (
     label TEXT NOT NULL,
     created_at REAL NOT NULL,
     used_at REAL,
-    congregation_id INTEGER REFERENCES congregations(id)
+    congregation_id INTEGER REFERENCES congregations(id),
+    voided_at REAL
+);
+CREATE TABLE IF NOT EXISTS refunds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    credit_id INTEGER NOT NULL REFERENCES credits(id),
+    cents INTEGER NOT NULL,
+    total_cents INTEGER NOT NULL,
+    created_at REAL NOT NULL,
+    source TEXT NOT NULL DEFAULT 'stripe',
+    stripe_refund_id TEXT
 );
 CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
 CREATE INDEX IF NOT EXISTS devices_cong ON devices(congregation_id);
 CREATE INDEX IF NOT EXISTS credits_cong ON credits(congregation_id);
+CREATE INDEX IF NOT EXISTS refunds_credit ON refunds(credit_id);
 """
 
 # Prices (decided Nov 8): $5 per language-hour of speech, the first language-hour free per congregation.
@@ -228,6 +240,12 @@ class Database:
             if "refunded_cents" not in ccols:   # databases made before refunds were taken off the ledger
                 self._db.execute("ALTER TABLE credits ADD COLUMN refunded_cents INTEGER NOT NULL DEFAULT 0")
                 self._db.execute("ALTER TABLE credits ADD COLUMN refunded_at REAL")
+            dcols = {r[1] for r in self._db.execute("PRAGMA table_info(devices)")}
+            if "app_version" not in dcols:   # databases made before the app said its version
+                self._db.execute("ALTER TABLE devices ADD COLUMN app_version TEXT")
+            kcols = {r[1] for r in self._db.execute("PRAGMA table_info(own_key_codes)")}
+            if "voided_at" not in kcols:   # databases made before codes could be voided
+                self._db.execute("ALTER TABLE own_key_codes ADD COLUMN voided_at REAL")
             self._db.execute("CREATE INDEX IF NOT EXISTS sessions_code ON sessions(congregation_id, code)")
         if close_stale:
             self.close_stale_sessions()
@@ -348,7 +366,8 @@ class Database:
     def own_key_code_ok(self, code: str) -> bool:
         """True for a code that exists and hasn't been used. Doesn't use it up."""
         c = normalize_own_key_code(code)
-        return bool(c and self._q("SELECT 1 FROM own_key_codes WHERE code_hash = ? AND used_at IS NULL", (hash_token(c),)))
+        return bool(c and self._q("SELECT 1 FROM own_key_codes WHERE code_hash = ? AND used_at IS NULL"
+                                    " AND voided_at IS NULL", (hash_token(c),)))
 
     def redeem_own_key_code(self, code: str, cid: int) -> bool:
         """Use the code up and switch the congregation to its own key, in one transaction. Asking again for the
@@ -360,9 +379,10 @@ class Database:
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
             try:
-                row = self._db.execute("SELECT used_at, congregation_id FROM own_key_codes WHERE code_hash = ?",
-                                       (h,)).fetchone()
-                if row is None or (row["used_at"] is not None and row["congregation_id"] != cid):
+                row = self._db.execute("SELECT used_at, congregation_id, voided_at FROM own_key_codes"
+                                       " WHERE code_hash = ?", (h,)).fetchone()
+                if (row is None or (row["used_at"] is None and row["voided_at"] is not None)
+                        or (row["used_at"] is not None and row["congregation_id"] != cid)):
                     self._db.execute("ROLLBACK")
                     return False
                 if row["used_at"] is None:
@@ -375,12 +395,26 @@ class Database:
                 self._db.execute("ROLLBACK")
                 raise
 
-    def own_key_codes(self) -> list[dict[str, Any]]:
-        """Every code made, newest first, with who used it (never the code itself: only its hash is kept)."""
-        rows = self._q("SELECT k.id, k.label, k.created_at, k.used_at, c.slug FROM own_key_codes k"
-                       " LEFT JOIN congregations c ON c.id = k.congregation_id ORDER BY k.id DESC")
+    def own_key_codes(self, cid: int | None = None) -> list[dict[str, Any]]:
+        """Every code made (or those congregation `cid` used), newest first, with its status ("unused", "used",
+        "void") and who used it. Never the code itself: only its hash is kept."""
+        rows = self._q("SELECT k.id, k.label, k.created_at, k.used_at, k.voided_at, k.congregation_id, c.slug, c.name"
+                       " FROM own_key_codes k LEFT JOIN congregations c ON c.id = k.congregation_id"
+                       + (" WHERE k.congregation_id = ?" if cid is not None else "") + " ORDER BY k.id DESC",
+                       (cid,) if cid is not None else ())
         return [{"id": r["id"], "label": r["label"], "created_at": r["created_at"], "used_at": r["used_at"],
-                 "used_by": r["slug"]} for r in rows]
+                 "voided_at": r["voided_at"],
+                 "status": "used" if r["used_at"] else "void" if r["voided_at"] else "unused",
+                 "used_by": r["slug"], "used_by_id": r["congregation_id"], "used_by_name": r["name"]} for r in rows]
+
+    def void_own_key_code(self, kid: int) -> str | None:
+        """Void an unused code so it stops working. Returns its status after ("void"; voiding again is fine), "used"
+        when it was already used (nothing changes), None for an unknown id."""
+        with self._lock:
+            self._db.execute("UPDATE own_key_codes SET voided_at = ? WHERE id = ? AND used_at IS NULL"
+                             " AND voided_at IS NULL", (time.time(), kid))
+            row = self._db.execute("SELECT used_at FROM own_key_codes WHERE id = ?", (kid,)).fetchone()
+        return None if row is None else "used" if row["used_at"] else "void"
 
     # ------------------------------------------------------------ devices
     def add_device(self, cid: int, name: str) -> str:
@@ -394,11 +428,19 @@ class Database:
         rows = self._q("SELECT id, congregation_id, name FROM devices WHERE token_hash = ?", (hash_token(token),))
         return dict(rows[0]) if rows else None
 
-    def touch_device(self, did: int) -> None:
-        self._x("UPDATE devices SET last_seen = ? WHERE id = ?", (time.time(), did))
+    def touch_device(self, did: int, app_version: str | None = None) -> None:
+        """The Mac connected (or said hello): last seen now, and its app version when it told us one."""
+        v = (app_version or "").strip()[:40] or None
+        self._x("UPDATE devices SET last_seen = ?, app_version = COALESCE(?, app_version) WHERE id = ?",
+                (time.time(), v, did))
 
     def devices(self, cid: int) -> list[dict[str, Any]]:
-        return [dict(r) for r in self._q("SELECT id, name, created_at, last_seen FROM devices WHERE congregation_id = ?", (cid,))]
+        return [dict(r) for r in self._q("SELECT id, name, created_at, last_seen, app_version FROM devices"
+                                         " WHERE congregation_id = ?", (cid,))]
+
+    def all_devices(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._q("SELECT id, congregation_id, name, created_at, last_seen, app_version"
+                                         " FROM devices ORDER BY id")]
 
     # ------------------------------------------------------------ e-mail links
     def add_email_token(self, cid: int, purpose: str, device_name: str, ttl_s: float) -> tuple[str, str]:
@@ -541,12 +583,14 @@ class Database:
                 self._db.execute("ROLLBACK")
                 raise
 
-    def refund_credit(self, payment_id: str, refunded_cents: int) -> tuple[dict[str, Any], bool]:
+    def refund_credit(self, payment_id: str, refunded_cents: int, source: str = "stripe",
+                      stripe_refund_id: str | None = None) -> tuple[dict[str, Any], bool]:
         """Stripe refunded `refunded_cents` in all (cumulative, as on the charge) of the top-up paid with
         `payment_id`: that much comes back off the balance, at the rate the top-up was bought at. Idempotent and
         order-proof: the refunded total only ever grows (a resent or late event changes nothing) and never exceeds
         the top-up. Returns (credit, changed). KeyError for a payment that was never credited, ValueError for a bad
-        amount. The balance may go negative when credit already used is refunded."""
+        amount. The balance may go negative when credit already used is refunded. Each change is also written to
+        `refunds` (source "stripe" = the charge.refunded webhook, "admin" = POST /api/admin/refunds) for the history."""
         pid = (payment_id or "").strip()
         if not isinstance(refunded_cents, int) or isinstance(refunded_cents, bool) or refunded_cents < 0:
             raise ValueError("the refunded amount must be a whole number of cents")
@@ -559,8 +603,12 @@ class Database:
                 total = min(row["cents"], refunded_cents)
                 changed = total > row["refunded_cents"]
                 if changed:
+                    now = time.time()
                     self._db.execute("UPDATE credits SET refunded_cents = ?, refunded_at = ? WHERE id = ?",
-                                     (total, time.time(), row["id"]))
+                                     (total, now, row["id"]))
+                    self._db.execute("INSERT INTO refunds (credit_id, cents, total_cents, created_at, source,"
+                                     " stripe_refund_id) VALUES (?,?,?,?,?,?)",
+                                     (row["id"], total - row["refunded_cents"], total, now, source, stripe_refund_id))
                     row = self._db.execute("SELECT * FROM credits WHERE id = ?", (row["id"],)).fetchone()
                 self._db.execute("COMMIT")
                 return dict(row), changed
@@ -568,8 +616,32 @@ class Database:
                 self._db.execute("ROLLBACK")
                 raise
 
-    def credits(self, cid: int) -> list[dict[str, Any]]:
+    def credits(self, cid: int | None = None) -> list[dict[str, Any]]:
+        """A congregation's top-ups (every congregation's with cid None), oldest first."""
+        if cid is None:
+            return [dict(r) for r in self._q("SELECT * FROM credits ORDER BY id")]
         return [dict(r) for r in self._q("SELECT * FROM credits WHERE congregation_id = ? ORDER BY id", (cid,))]
+
+    def credit_by_payment(self, payment_id: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT * FROM credits WHERE payment_id = ?", ((payment_id or "").strip(),))
+        return dict(rows[0]) if rows else None
+
+    def refunds(self) -> list[dict[str, Any]]:
+        """Every refund taken off the ledger, oldest first, with its top-up's payment id and congregation."""
+        return [dict(r) for r in self._q(
+            "SELECT r.*, c.payment_id, c.congregation_id FROM refunds r JOIN credits c ON c.id = r.credit_id"
+            " ORDER BY r.id")]
+
+    def all_sessions(self) -> list[dict[str, Any]]:
+        rows = self._q("SELECT * FROM sessions ORDER BY id")
+        return [{**dict(r), "languages": json.loads(r["languages"]), "trial": bool(r["trial"])} for r in rows]
+
+    def speech_by_session(self) -> dict[int, dict[str, float]]:
+        """Seconds of heard speech per language, per session id (sessions with any speech only)."""
+        out: dict[int, dict[str, float]] = {}
+        for r in self._q("SELECT session_id, lang, SUM(seconds) AS s FROM speech GROUP BY session_id, lang"):
+            out.setdefault(r["session_id"], {})[r["lang"]] = r["s"]
+        return out
 
     def balance(self, cid: int) -> dict[str, Any]:
         """Where a congregation stands, in language-minutes (and dollars for what was bought):

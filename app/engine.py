@@ -529,7 +529,8 @@ class PublishClient(EngineClient):
         sender = asyncio.create_task(self._sender(ws, self._out))
         st = M.S.settings.stream
         self._send({"type": "hello", "name": self.name, "languages": list(M.S.pipeline.channels),
-                    "stream": {"sample_rate": st.sample_rate, "bitrate_kbps": st.bitrate_kbps}, "busy": False})
+                    "stream": {"sample_rate": st.sample_rate, "bitrate_kbps": st.bitrate_kbps}, "busy": False,
+                    "app_version": os.environ.get("HEARCHURCH_APP_VERSION", "")})
         self._attach()
         watcher = asyncio.create_task(self._publish_watch())
         billing = asyncio.create_task(self._learn_billing())

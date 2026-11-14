@@ -105,6 +105,8 @@ final class AppModel: ObservableObject {
 
     private func engineEnvironment() -> [String: String] {
         var env: [String: String] = ["HEARCHURCH_DEVICE_NAME": deviceName]
+        // The hub records it per Mac (the operator's install stats by app version).
+        if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String { env["HEARCHURCH_APP_VERSION"] = v }
         if let key = Keychain.get(.apiKey) {
             // Unadvertised: a Claude subscription token runs through Claude Code instead of the API.
             env[HubClient.isSubscriptionToken(key) ? "CLAUDE_CODE_OAUTH_TOKEN" : "ANTHROPIC_API_KEY"] = key

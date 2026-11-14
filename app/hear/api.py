@@ -31,7 +31,8 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
                             top-up. Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
                             payment's id); 409 when that id was credited with another amount or congregation.
   POST /api/admin/own-key-codes {label} (operator) → {code, label}: the only time the code is shown.
-  GET  /api/admin/own-key-codes (operator) → {codes: [{label, created_at, used_at, used_by}]}
+  GET  /api/admin/own-key-codes (operator) → {codes: [{id, label, created_at, used_at, voided_at, status, used_by…}]}
+  More operator JSON for Siteboard (stats, ledger, refunds, void a code, one congregation): app/hear/admin.py.
 The claim secret stays with the app that asked, so a link opened by a mail scanner yields no token.
 Sign-up geocodes an address that came without lat/lng (Nominatim, or Mapbox with HEARCHURCH_MAPBOX_TOKEN). The
 answer says whether it worked ("located"); if not, lat/lng stay empty and the app should ask for a map pin and
