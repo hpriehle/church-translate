@@ -308,3 +308,13 @@ def test_old_databases_get_the_new_columns(tmp_path):
     con.close()
     db = Database(path)
     assert db.all_devices() == [] and db.own_key_codes() == [] and db.refunds() == []
+
+
+def test_the_operator_password_works_in_a_header(client):
+    """Siteboard calls from a server: X-Operator-Key instead of ?key= keeps the password out of URLs."""
+    from app import main
+    want = dict(main._passwords()).get(main.OPERATOR)
+    assert want, "the test hub has an operator password"
+    r = client.get("/api/admin/stats", headers={"X-Operator-Key": want, "X-Forwarded-For": "1.2.3.4"})
+    assert r.status_code == 200
+    assert client.get("/api/admin/stats", headers={"X-Operator-Key": "wrong", "X-Forwarded-For": "1.2.3.4"}).status_code == 403

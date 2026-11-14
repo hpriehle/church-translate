@@ -18,6 +18,8 @@ top-up, and a $5 manual credit.
 
 ---
 
+Auth: send the operator password in the `X-Operator-Key` header (preferred: keeps it out of URLs and logs). `?key=` still works.
+
 ## GET /api/admin/stats
 
 ```json

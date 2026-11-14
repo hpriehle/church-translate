@@ -526,7 +526,8 @@ def _role(host: str | None, headers, query, cookies) -> str | None:
     proxied = any(h in headers for h in _PROXY_HEADERS)
     if not proxied and host and host.split("%")[0] in S.local_addrs:
         return OPERATOR
-    given = query.get("key") or query.get("pin") or ""
+    # a server (Siteboard) sends the password in a header, so it stays out of URLs and access logs
+    given = headers.get("x-operator-key") or query.get("key") or query.get("pin") or ""
     cookie = cookies.get("op_pin") or ""
     for role, want in _passwords():
         if given and hmac.compare_digest(given, want):
