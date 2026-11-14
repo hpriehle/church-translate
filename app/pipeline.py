@@ -1,6 +1,9 @@
-"""Orchestrates: capture → VAD chunks → speech-to-text (once) → one Channel per output language.
+"""Orchestrates: capture → VAD chunks → speech-to-text (once) → one Channel per translation language.
 
-Each Channel (see channel.py) translates, voices and streams its language on its own, in order.
+Speech recognition finds each chunk's language among the meeting's speaker languages (its source). Every
+translation language that is switched on gets every chunk: translated, or passed through when the chunk is
+already in that language. Each Channel (see channel.py) translates, voices and streams its language on its own,
+in order.
 A chunk's record is complete when every language has finished with it (aired, dropped, skipped…).
 """
 from __future__ import annotations
@@ -51,7 +54,9 @@ class Pipeline:
         self.started_at = 0.0
         self.level_db = -90.0
         self.metrics: MetricsLog | None = None
-        self.prev_en = ""
+        self.prev_en = ""               # the last recognised text (any language), for Whisper's prompt
+        self.prev_lang = ""             # its language
+        self.source = ""                # the language of the last recognised chunk ("" before the first)
         self._seq = 0
         self.session_id: str | None = None  # one per run; listeners only ever see the current one
         self._tasks: list[asyncio.Task] = []
@@ -106,13 +111,28 @@ class Pipeline:
         return {c: ch for c, ch in self.channels.items() if ch.on}
 
     @property
+    def speakers(self) -> list[str]:
+        """The meeting's speaker languages: each chunk is recognised as one of these."""
+        return list(self.settings.meeting.speakers)
+
+    @property
     def speaker(self) -> str:
-        """The language the speaker talks in (en, fr, es, ru)."""
-        return self.settings.stt.language
+        """The language being spoken now: the last chunk's, or the first speaker language before any speech."""
+        return self.source if self.source in self.speakers else self.speakers[0]
 
     def translating(self) -> dict[str, "Channel"]:
-        """The channels that get each sentence: on, and not in the speaker's own language (that one pauses)."""
-        return {c: ch for c, ch in self.on_channels.items() if c != self.speaker}
+        """The channels that get each chunk: every translation language switched on (the chunk's own language
+        passes it through)."""
+        return self.on_channels
+
+    def glossary(self, code: str) -> dict[str, Any]:
+        return glossary_for(code, self.speakers, self.glossaries, self.settings.church)
+
+    def _recognise(self, audio, prev_src: str):
+        """Speech-recognition thread: the chunk's language among the speaker languages, then its words."""
+        lang = self.stt.detect(audio, self.speakers, prev_src)
+        prompt = build_prompt(self.hints, self.prev_en if self.prev_lang == lang else "", lang)
+        return self.stt.transcribe(audio, prompt, lang)
 
     def _hints(self) -> list[str]:
         hints: list[str] = []
@@ -170,6 +190,7 @@ class Pipeline:
             raise ValueError(f"unknown source {kind!r}")
         self.vad.reset()
         self.refs.reset()
+        self.source = ""
         chunker = Chunker(self.settings.vad, self.vad)
         if self.metrics:
             self.metrics.close()
@@ -283,8 +304,7 @@ class Pipeline:
             self.records[rec.seq] = rec
             try:
                 await self.stt_ready.wait()
-                prompt = build_prompt(self.hints, self.prev_en, self.speaker)
-                res = await self.loop.run_in_executor(self.stt_exec, self.stt.transcribe, chunk.audio, prompt)
+                res = await self.loop.run_in_executor(self.stt_exec, self._recognise, chunk.audio, self.source)
             except Exception as e:
                 log.exception("stt failed")
                 rec.status, rec.note = "failed", f"stt: {e}"
@@ -296,20 +316,29 @@ class Pipeline:
                 rec.status, rec.note = "skipped", res.dropped_reason
                 self._finalize(rec)
                 continue
-            rec.en = censor(res.text, self.speaker)   # masked before translation: no translation can carry it
-            self.prev_en = res.text
+            src = res.language or self.speaker
+            if src != self.source:
+                if self.source:
+                    log.info("#%d: now %s", rec.seq, src)
+                self.source = src
+            rec.src = src
+            rec.en = censor(res.text, src)   # masked before translation: no translation can carry it
+            self.prev_en, self.prev_lang = res.text, src
             chans = self.translating()
             rec.out = {code: LangResult() for code in chans}
-            if not chans:  # every language switched off: the operator still sees the English
+            if not chans:  # every language switched off: the operator still sees what was said
                 self._finalize(rec)
                 continue
             self.publish_rec(rec)
+            # Billed: the languages this chunk is translated into. One passed through (the chunk is already in
+            # that language) is not a translation.
+            translated = [c for c in chans if c != src]
             for tap in self.speech_taps:
                 try:
-                    tap(rec.seq, rec.voiced_s, list(chans))
+                    tap(rec.seq, rec.voiced_s, translated)
                 except Exception:  # pragma: no cover - metering never stops a meeting
                     log.exception("speech tap failed")
-            if self.speaker == "en" and any(ch.scripture.enabled for ch in chans.values()):
+            if src == "en" and any(ch.scripture.enabled for ch in chans.values()):
                 refs = self.refs.feed(rec.en)
                 if refs:
                     log.info("scripture #%d: %s", rec.seq, ", ".join(r.usfm for r in refs))
@@ -385,14 +414,17 @@ class Pipeline:
             new_tts = tts_for(settings, code)
             if new_tts.model_dump() != ch.tts.cfg.model_dump():
                 ch.tts.reload(new_tts)
-            ch.translator.reload(settings.translate, glossary_for(code, self.speaker, glossaries), self.speaker)
+            ch.translator.reload(settings.translate, self.glossary(code), self.speakers)
         self._setup_scripture()
 
     def status(self) -> dict[str, Any]:
-        chans = {code: {**ch.status(), "paused": code == self.speaker} for code, ch in self.on_channels.items()}
+        chans = {code: {**ch.status(), "paused": False, "passthrough": code == self.source}
+                 for code, ch in self.on_channels.items()}
         return {
             "running": self.running,
             "speaker": self.speaker,
+            "speakers": self.speakers,
+            "source": self.source or None,
             "capturing": self.capturing,
             "source": self.source_label,
             "started_at": self.started_at,

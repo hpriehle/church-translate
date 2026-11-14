@@ -54,7 +54,8 @@ class ChunkRecord:
     t_speech_start: float         # monotonic
     t_speech_end: float
     t_cut: float
-    en: str = ""
+    en: str = ""                  # what was said, as recognised (in `src`, not only English)
+    src: str = ""                 # its language: one of the meeting's speaker languages
     note: str = ""
     stt_ms: float = 0.0
     t_stt_done: float = 0.0

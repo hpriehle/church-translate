@@ -356,7 +356,7 @@ class EngineClient:
             M.S.pipeline.start("browser", source=src, record=bool(msg.get("record")))
         except Exception as e:
             self._detach()
-            M.set_languages(self._prev_langs, persist=False)
+            M.set_targets(self._prev_langs, persist=False)
             self._prev_langs = None
             self._send({"type": "error", "message": str(e)})
             return
@@ -412,7 +412,7 @@ class EngineClient:
         self.running, self._src = False, None
         self._detach()
         if self._prev_langs is not None:
-            M.set_languages(self._prev_langs, persist=False)
+            M.set_targets(self._prev_langs, persist=False)
             self._prev_langs = None
         if not lost:
             self._send({"type": "done"})
@@ -436,6 +436,7 @@ class PublishClient(EngineClient):
         self.session_code = ""            # the hub's code for the running session, for resuming after a drop
         self.refused_run = 0.0            # started_at of a meeting the hub refused (not asked again)
         self._offered: list[str] = []
+        self._speakers: list[str] = []
         self.notice = ""                  # the hub's last refusal / ending of our session, for the operator page
         self.listeners = {"stream": 0, "captions": 0}  # phones on the hub, as it reports them
         self.heard: set[str] = set()      # languages with a phone on them, as the hub reports them: only these are billed
@@ -646,10 +647,12 @@ class PublishClient(EngineClient):
                 self._send({"type": "session_stop"})
                 self.announced, self.running, self.session_code, self.heard = False, False, "", set()
             elif p.running and not self.announced and p.started_at != self.refused_run:
-                self._offered = list(p.on_channels)
+                self._offered, self._speakers = list(p.on_channels), self._speaker_set()
                 self.announced, self.private = True, local
+                # docs/v3-languages.md: "languages" (= targets) and "speaker" are what hubs before V3.2 read.
                 start = {"type": "session_start", "languages": self._offered, "resume": self.session_code,
-                         "speaker": getattr(p, "speaker", "en")}
+                         "targets": self._offered, "speakers": self._speakers, "speaker": self._legacy_speaker(),
+                         "passthrough": True}
                 if local:
                     start["private"] = True
                 self._send(start)
@@ -657,9 +660,23 @@ class PublishClient(EngineClient):
                 self._send({"type": "session_stop"})
                 self.announced, self.running, self.session_code = False, False, ""
                 log.info("meeting over: session stopped on %s", urlparse(self.url).hostname)
-            elif self.announced and list(p.on_channels) != self._offered:
-                self._offered = list(p.on_channels)
-                self._send({"type": "languages", "languages": self._offered})
+            elif self.announced and (list(p.on_channels) != self._offered or self._speaker_set() != self._speakers):
+                self._offered, self._speakers = list(p.on_channels), self._speaker_set()
+                self._send({"type": "languages", "languages": self._offered, "targets": self._offered,
+                            "speakers": self._speakers})
+
+    @staticmethod
+    def _speaker_set() -> list[str]:
+        return list(getattr(_m().S.pipeline, "speakers", None) or [getattr(_m().S.pipeline, "speaker", "en")])
+
+    @staticmethod
+    def _legacy_speaker() -> str:
+        M = _m()
+        f = getattr(M, "legacy_speaker", None)
+        try:
+            return f() if f else getattr(M.S.pipeline, "speaker", "en")
+        except Exception:   # a test double without settings
+            return getattr(M.S.pipeline, "speaker", "en")
 
     def _finish(self, lost: bool) -> None:
         """The link dropped: stop relaying, keep the session code so the reconnect can resume the session. Unsent

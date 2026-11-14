@@ -30,7 +30,8 @@ from .hear import api as hear_api
 from .hear import proxy as hear_proxy
 from .config import (HOME, ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
-from .languages import AUTO, LANGUAGES, SPEAKER_LANGUAGES, glossary_for
+from .config import apply_auto_en
+from .languages import LANGUAGES, SPEAKER_LANGUAGES
 from .pipeline import Pipeline
 from .stt import Transcriber
 from .translate.router import Translator
@@ -86,13 +87,27 @@ def languages_public() -> list[dict[str, str]]:
     return [{"code": c, "name": ch.lang.name} for c, ch in S.pipeline.on_channels.items()]
 
 
-def set_languages(codes: list[str], persist: bool = True) -> list[str]:
-    """Switch languages on/off live, remember the choice (unless persist=False: a meeting handed over by
-    another server), and tell every phone and the operator."""
-    on = [c for c in S.pipeline.channels if c in codes and c not in AUTO]
+def _save_meeting() -> None:
+    """Persist the meeting and its legacy views (an older version reading the same settings sees the same)."""
+    st = S.settings
+    S.settings = st = Settings.model_validate(st.model_dump())   # re-syncs stt.language / languages
+    save_override("meeting", st.meeting.model_dump())
+    save_override("languages", st.languages)
+    save_override("stt", {"language": st.stt.language})
+
+
+def legacy_speaker() -> str:
+    """For hubs and pages from before several speaker languages: the phones in this language are told to listen
+    in the room. The first speaker language nobody is translated into, so no pass-through listener is paused."""
+    m = S.settings.meeting
+    return next((c for c in m.speakers if c not in m.targets), m.speakers[0])
+
+
+def set_targets(codes: list[str], persist: bool = True) -> list[str]:
+    """Switch the translation languages (the listen pills) live, remember them (unless persist=False: a meeting
+    handed over by another server), and tell every phone and the operator."""
+    on = [c for c in dict.fromkeys(codes) if c in S.pipeline.channels]
     for c, ch in S.pipeline.channels.items():
-        if c in AUTO:   # English follows the speaker, not the switches
-            continue
         was, ch.on = ch.on, c in on
         if ch.on:
             ch.activate()
@@ -100,8 +115,8 @@ def set_languages(codes: list[str], persist: bool = True) -> list[str]:
             ch.hub.publish({"type": "lang_state", "on": ch.on})
             log.info("%s translation switched %s", ch.lang.name, "on" if ch.on else "off")
     if persist:
-        S.settings.languages = on
-        save_override("languages", on)
+        S.settings.meeting.targets = on
+        _save_meeting()
         S.engine_hub.set_languages(list(S.pipeline.on_channels))  # a meeting running on the engine follows
     for ch in S.pipeline.channels.values():
         ch.hub.publish({"type": "languages", "languages": languages_public()})
@@ -109,26 +124,41 @@ def set_languages(codes: list[str], persist: bool = True) -> list[str]:
     return on
 
 
-def auto_on(code: str) -> bool:
-    """English is translated whenever the speaker isn't speaking English."""
-    return code != S.pipeline.speaker
+def set_languages(codes: list[str], persist: bool = True) -> list[str]:
+    """Legacy switches (older pages, the 0.2 Mac app, a hub handing over a meeting): the languages without English.
+    While meeting.auto_en is on, English follows the speakers as it always did; otherwise it stays as it is."""
+    m = S.settings.meeting
+    codes = [c for c in codes if c in LANGUAGES]
+    if m.auto_en:
+        codes = apply_auto_en(codes, m.speakers)
+    elif "en" in m.targets and "en" not in codes:
+        codes.append("en")
+    set_targets(codes, persist)
+    return S.settings.languages
 
 
-def set_speaker(code: str) -> None:
-    """The speaker switched language: English follows, the speaker's own language pauses, phones are told."""
-    for c, ch in S.pipeline.channels.items():
-        if c in AUTO:
-            was, ch.on = ch.on, auto_on(c)
-            if ch.on:
-                ch.activate()
-            if ch.on != was:
-                ch.hub.publish({"type": "lang_state", "on": ch.on})
-    msg = {"type": "speaker", "speaker": code, "name": SPEAKER_LANGUAGES.get(code, code)}
+def set_speakers(codes: list[str]) -> None:
+    """The speaker languages changed (live): speech recognition picks among the new set from the next chunk,
+    interpreters learn the new sources, English follows in legacy mode, phones are told."""
+    m = S.settings.meeting
+    m.speakers = [c for c in dict.fromkeys(codes) if c in SPEAKER_LANGUAGES] or m.speakers
+    _save_meeting()
+    S.pipeline.apply_settings(S.settings, S.glossaries)
+    if S.settings.meeting.auto_en:
+        set_targets(S.settings.meeting.targets)
+    msg = {"type": "speaker", "speaker": legacy_speaker(), "speakers": S.settings.meeting.speakers,
+           "passthrough": True, "name": SPEAKER_LANGUAGES.get(legacy_speaker(), legacy_speaker())}
     for ch in S.pipeline.channels.values():
         ch.hub.publish(msg)
         ch.hub.publish({"type": "languages", "languages": languages_public()})
+    S.engine_hub.set_languages(list(S.pipeline.on_channels))
     S.operator.publish(full_status())
-    log.info("the speaker now talks in %s", SPEAKER_LANGUAGES.get(code, code))
+    log.info("speaker languages: %s", ", ".join(SPEAKER_LANGUAGES.get(c, c) for c in S.settings.meeting.speakers))
+
+
+def set_speaker(code: str) -> None:
+    """Legacy: one speaker language (the 0.2 Mac app's picker next to Start meeting)."""
+    set_speakers([code])
 
 
 def local_sharing() -> bool:
@@ -206,8 +236,11 @@ def full_status() -> dict[str, Any]:
                    "client": S.engine_client.info() if S.engine_client else None},
         "languages": languages_public(),
         "language_switches": [{"code": c, "name": ch.lang.name, "on": ch.on} for c, ch in S.pipeline.channels.items()
-                              if c not in AUTO],
+                              if not (S.settings.meeting.auto_en and c == "en")],
         "speaker": S.pipeline.speaker,
+        "meeting": S.settings.meeting.model_dump(),     # docs/v3-languages.md
+        "source": S.pipeline.source or None,            # the language of the last recognised chunk
+        "church": S.settings.church,
         "listeners": {"stream": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
                       "captions": sum(ch.hub.count for ch in S.pipeline.channels.values())},
         "listener_url": listener_url(),
@@ -312,12 +345,12 @@ async def lifespan(app: FastAPI):
         b = Mp3Broadcaster(sr, st.stream.bitrate_kbps, st.stream.burst_s)
         m = Mixer(sr, on_frame=b.feed)
         m.volume = st.tts.volume
-        tr = Translator(st.translate, glossary_for(lang.code, st.stt.language, S.glossaries),
-                        HOME / "data" / "claude-workdir", lang, st.stt.language)
+        tr = Translator(st.translate, S.pipeline.glossary(lang.code),
+                        HOME / "data" / "claude-workdir", lang, st.meeting.speakers)
         tts = TtsRunner(tts_for(st, lang.code), sr, lazy=True)
         ch = Channel(S.pipeline, lang, tr, tts, m, b, Hub(f"listen-{lang.code}", history=300, queue_size=400))
         S.pipeline.add_channel(ch)
-        ch.on = auto_on(lang.code) if lang.code in AUTO else lang.code in st.languages
+        ch.on = lang.code in st.meeting.targets
     S.pipeline.start_tasks()
     bg = [asyncio.create_task(status_loop()), asyncio.create_task(_ensure_stt()),
           asyncio.create_task(tunnel_loop())]
@@ -791,7 +824,8 @@ async def ws_listen(ws: WebSocket):
     same = hello.get("boot") == S.started and hello.get("session") == session and hello.get("lang") == ch.code
     last = int(hello.get("last_seq") or 0) if same else 0
     init = {"type": "init", "boot": S.started, "session": session, "live": meeting_live(),
-            "lang": ch.code, "on": ch.on, "languages": languages_public(), "speaker": S.pipeline.speaker,
+            "lang": ch.code, "on": ch.on, "languages": languages_public(), "speaker": legacy_speaker(),
+            "speakers": S.settings.meeting.speakers, "passthrough": True,
             "server_time": time.time(), "history": ch.hub.replay_after(last) if session else []}
     await ch.hub.serve(ws, [init])
 
@@ -924,8 +958,12 @@ async def api_state(request: Request):
         "voice_catalog": voice_catalog(),
         "samples": _samples(),
         "languages": languages_public(),
-        "all_languages": [{"code": l.code, "name": l.name} for l in LANGUAGES.values() if l.code not in AUTO],
+        "all_languages": [{"code": l.code, "name": l.name} for l in LANGUAGES.values()
+                          if not (S.settings.meeting.auto_en and l.code == "en")],
         "speaker_languages": [{"code": c, "name": n} for c, n in SPEAKER_LANGUAGES.items()],
+        "translation_languages": [{"code": l.code, "name": l.name} for l in LANGUAGES.values()],
+        "meeting": S.settings.meeting.model_dump(),
+        "church": S.settings.church,
         "glossaries": S.glossaries,
         "listener_url": listener_url(),
         "lan_candidates": netinfo.candidate_ips(),
@@ -945,7 +983,10 @@ def _package_languages(given: Any) -> list[str]:
     """Which languages' packages to report: the ones asked for (the app's setup) or the switched-on ones."""
     if isinstance(given, str):
         given = [c for c in given.split(",") if c]
-    return [c for c in given if c in LANGUAGES] if isinstance(given, list) and given else list(S.settings.languages)
+    if isinstance(given, list) and given:
+        return [c for c in given if c in LANGUAGES]
+    m = S.settings.meeting   # every heard or spoken language
+    return [c for c in dict.fromkeys(m.targets + m.speakers) if c in LANGUAGES]
 
 
 @app.get("/api/packages")
@@ -986,7 +1027,7 @@ async def api_packages_remove(request: Request):
         raise HTTPException(400, str(e))
     if ch:
         if ch.on:
-            set_languages([c for c in S.settings.languages if c != code])
+            set_targets([c for c in S.settings.meeting.targets if c != code])
         ch.tts.unload()
     return {"ok": True}
 
@@ -1034,7 +1075,28 @@ async def api_stop(request: Request):
 
 
 # What the speaker password may change (from the speak page): languages and voices, nothing else.
-SPEAKER_EDITABLE = {"languages": None, "voices": None, "tts": {"engine", "voice"}, "stt": {"language"}}
+SPEAKER_EDITABLE = {"meeting": {"speakers", "targets"}, "languages": None, "voices": None, "tts": {"engine", "voice"},
+                    "stt": {"language"}}
+
+
+def _meeting_request(body: Any) -> tuple[list[str] | None, list[str] | None]:
+    """{"speakers": [...], "targets": [...]} (either may be left out), checked before anything changes."""
+    if not isinstance(body, dict):
+        raise HTTPException(400, "meeting must be an object with speakers and/or targets")
+    out = []
+    for key, known, what in (("speakers", SPEAKER_LANGUAGES, "speaker"), ("targets", LANGUAGES, "translation")):
+        v = body.get(key)
+        if v is None:
+            out.append(None)
+            continue
+        if not isinstance(v, list) or not v:
+            raise HTTPException(400, f"Choose at least one {what} language.")
+        bad = [c for c in v if c not in known]
+        if bad:
+            raise HTTPException(400, f"Not a {what} language: {', '.join(map(str, bad))}. "
+                                     f"Choose from {', '.join(known)}.")
+        out.append([str(c) for c in dict.fromkeys(v)])
+    return out[0], out[1]
 
 
 @app.post("/api/settings")
@@ -1046,22 +1108,37 @@ async def api_settings(request: Request):
             allowed = SPEAKER_EDITABLE.get(section, set())
             if section not in SPEAKER_EDITABLE or (allowed is not None and set(values) - allowed):
                 raise HTTPException(403, "Only the operator password can change that setting.")
+    # Checked first, so a refused request changes nothing.
+    speakers, targets = _meeting_request(body["meeting"]) if "meeting" in body else (None, None)
+    speaker = (body.get("stt") or {}).get("language") if isinstance(body.get("stt"), dict) else None
+    if speaker is not None and speaker not in SPEAKER_LANGUAGES:
+        raise HTTPException(400, "The speaker can talk in " + ", ".join(SPEAKER_LANGUAGES.values()) + ".")
+    # The meeting's languages: live, also during a meeting.
+    if "meeting" in body:
+        S.settings.meeting.auto_en = False   # the new way: English is a translation language like the others
+        if speakers is not None and speakers != S.settings.meeting.speakers:
+            set_speakers(speakers)
+        set_targets(targets if targets is not None else S.settings.meeting.targets)
+    if speaker is not None and [speaker] != S.settings.meeting.speakers:   # legacy: one speaker language
+        set_speaker(speaker)
+    if "languages" in body:   # legacy: the switches without English
+        set_languages([c for c in body["languages"] or [] if c in LANGUAGES])
+    if "church" in body:   # the onboarding choice: picks the glossary (Latter-day Saint terms or not)
+        S.settings.church = str(body["church"] or "").strip()[:200]
+        save_override("church", S.settings.church)
     data = S.settings.model_dump()
     note = ""
     for section, values in body.items():
+        if section in ("meeting", "languages", "church") or (section == "stt" and set(values) <= {"language"}):
+            continue
         if section == "voices":  # {"wo": {"engine": "speecht5", "voice": "female"}}
             for code, v in values.items():
                 if code in LANGUAGES and code != "fr":
                     data["voices"][code] = VoiceCfg(**v).model_dump()
             save_override("voices", data["voices"])
             continue
-        if section == "languages":  # live: each language can be switched on/off at any time
-            data["languages"] = set_languages([c for c in values if c in LANGUAGES])
-            continue
-        allowed = EDITABLE.get(section, set())
+        allowed = EDITABLE.get(section, set()) - ({"language"} if section == "stt" else set())
         clean = {k: v for k, v in values.items() if k in allowed}
-        if section == "stt" and clean.get("language") not in SPEAKER_LANGUAGES:
-            raise HTTPException(400, "The speaker can talk in " + ", ".join(SPEAKER_LANGUAGES.values()) + ".")
         if not clean:
             continue
         data[section].update(clean)
@@ -1070,11 +1147,8 @@ async def api_settings(request: Request):
         new = Settings.model_validate(data)
     except Exception as e:
         raise HTTPException(400, str(e))
-    speaker_was = S.settings.stt.language
     S.settings = new
     S.pipeline.apply_settings(new, S.glossaries)
-    if new.stt.language != speaker_was:
-        set_speaker(new.stt.language)
     return {"ok": True, "settings": _public_settings(), "message": note}
 
 

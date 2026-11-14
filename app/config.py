@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 ROOT = Path(__file__).resolve().parent.parent
 # Where this computer's own files go (settings, logs, glossaries, downloaded voices). The project folder by
@@ -107,7 +107,8 @@ class SttCfg(BaseModel):
     engine: str = "auto"
     model: str = "mlx-community/whisper-large-v3-turbo"
     faster_whisper_model: str = "small.en"
-    language: str = "en"   # the speaker's language (en, fr, es, ru): switched live next to Start meeting
+    language: str = "en"   # = meeting.speakers[0] (kept in sync; older clients set it to switch the speaker)
+    languages: list[str] = []   # = meeting.speakers: Whisper picks each chunk's language among these
 
 
 class TranslateCfg(BaseModel):
@@ -152,7 +153,8 @@ DEFAULT_VOICES: dict[str, VoiceCfg] = {
     "ne": VoiceCfg(engine="piper", voice="ne_NP-chitwan-medium"),
     "vi": VoiceCfg(engine="piper", voice="vi_VN-vais1000-medium"),
     "zh": VoiceCfg(engine="piper", voice="zh_CN-chaowen-medium"),
-    "en": VoiceCfg(engine="piper", voice="en_US-joe-medium")}
+    "en": VoiceCfg(engine="piper", voice="en_US-joe-medium"),
+    "lv": VoiceCfg(engine="piper", voice="lv_LV-aivars-medium")}
 
 
 class BacklogCfg(BaseModel):
@@ -180,9 +182,26 @@ class ScriptureCfg(BaseModel):
     max_verses: int = 5        # longest range fetched ("John 3:16-40" → 16–20)
 
 
+class MeetingCfg(BaseModel):
+    """What a meeting is (docs/v3-languages.md): the languages people speak and the languages it is translated into."""
+    speakers: list[str] = []    # speaker languages; [] = not set yet: [stt.language]
+    targets: list[str] = []     # translation languages = the listen pills, in order; [] = from the older settings
+    # Older settings and the 0.2 Mac app: English is a target exactly when some speaker language isn't English, and
+    # `languages` lists the other targets. Setting the meeting explicitly turns this off for good.
+    auto_en: bool = True
+
+
+def apply_auto_en(targets: list[str], speakers: list[str]) -> list[str]:
+    """Targets with English following the speakers (the legacy rule), English last as it always was."""
+    out = [t for t in targets if t != "en"]
+    return out + ["en"] if any(s != "en" for s in speakers) else out
+
+
 class Settings(BaseModel):
-    # Output languages, in the order listeners see them; the first is the default.
+    # Legacy view of meeting.targets (without English while meeting.auto_en): the older pages' language switches.
     languages: list[str] = ["fr", "wo"]
+    meeting: MeetingCfg = MeetingCfg()
+    church: str = ""   # the church chosen at onboarding; "" = The Church of Jesus Christ of Latter-day Saints
     voices: dict[str, VoiceCfg] = {}
     server: ServerCfg = ServerCfg()
     audio: AudioCfg = AudioCfg()
@@ -195,6 +214,21 @@ class Settings(BaseModel):
     engine: EngineCfg = EngineCfg()
     hearchurch: HearCfg = HearCfg()
     scripture: ScriptureCfg = ScriptureCfg()
+
+    @model_validator(mode="after")
+    def _meeting_views(self) -> "Settings":
+        """Fill the meeting from older settings, drop unknown codes, and keep the legacy views in sync."""
+        from .languages import LANGUAGES, SPEAKER_LANGUAGES
+
+        m = self.meeting
+        speakers = [c for c in dict.fromkeys(m.speakers or [self.stt.language]) if c in SPEAKER_LANGUAGES]
+        m.speakers = speakers or ["en"]
+        targets = m.targets or list(self.languages)
+        targets = [c for c in dict.fromkeys(targets) if c in LANGUAGES]
+        m.targets = apply_auto_en(targets, m.speakers) if m.auto_en else targets
+        self.stt.language, self.stt.languages = m.speakers[0], list(m.speakers)
+        self.languages = [c for c in m.targets if not (m.auto_en and c == "en")]
+        return self
 
 
 def tts_for(settings: "Settings", code: str) -> TtsCfg:

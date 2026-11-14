@@ -1,7 +1,8 @@
 """One output language: translator → voice → its own mixer/MP3 stream, plus its caption feed.
 
-Every channel receives the same English chunks from the shared speech-recognition stage and
-works through them in order, independently of the other languages.
+Every channel receives the same chunks from the shared speech-recognition stage and works through them in
+order, independently of the other languages. A chunk already in the channel's language is passed through: the
+original words become its caption and its voice reads them (no translation).
 """
 from __future__ import annotations
 
@@ -120,12 +121,19 @@ class Channel:
             except Exception:
                 self._log_stage_error("translate", rec)
 
+    def _original(self, rec: ChunkRecord) -> bool:
+        return bool(rec.src) and rec.src == self.code
+
     async def _mt_one(self, rec: ChunkRecord) -> None:
         res = rec.out[self.code]
+        if self._original(rec):
+            await self._pass_through(rec)
+            return
         english = rec.en
-        # Falling behind? Translate the waiting chunks together in one request.
+        # Falling behind? Translate the waiting chunks together in one request (only chunks in the same language:
+        # one passed through, or in another language, waits for its own turn).
         merged: list[ChunkRecord] = []
-        while not self.mt_q.empty() and len(merged) < 3:
+        while not self.mt_q.empty() and len(merged) < 3 and getattr(self.mt_q._queue[0], "src", "") == rec.src:
             merged.append(self.mt_q.get_nowait())
         if merged:
             english = " ".join([rec.en] + [m.en for m in merged])
@@ -154,19 +162,37 @@ class Channel:
             self.p.lang_done(rec)
             return
         res.text = tr.text
+        caption = self._caption(rec, tr.text)
+        credit = self.scripture.credit_for(tr.text) if verse_note else None
+        if credit:   # the caption reproduces a published verse: its Bible's attribution goes with it
+            caption["credit"] = credit
+            res.note = (res.note + f" scripture: {credit['reference']} ({credit['source']})").strip()
+        await self._send_caption(rec, caption)
+
+    def _caption(self, rec: ChunkRecord, text: str) -> dict[str, Any]:
+        res = rec.out[self.code]
         res.t_caption = time.monotonic()
         res.status = "captioned"
         self.caption_no += 1
         res.caption_no = self.caption_no
         caption = {"type": "caption", "seq": res.caption_no, "session": self.p.session_id,
-                   "lang": self.code, "text": tr.text, "ts": time.time()}
-        credit = self.scripture.credit_for(tr.text) if verse_note else None
-        if credit:   # the caption reproduces a published verse: its Bible's attribution goes with it
-            caption["credit"] = credit
-            res.note = (res.note + f" scripture: {credit['reference']} ({credit['source']})").strip()
+                   "lang": self.code, "text": text, "ts": time.time()}
+        if rec.src:
+            caption["src"] = rec.src
+        return caption
+
+    async def _send_caption(self, rec: ChunkRecord, caption: dict[str, Any]) -> None:
         self.hub.publish(caption, remember=True)
         self.p.publish_rec(rec)
         await self.tts_q.put(rec)
+
+    async def _pass_through(self, rec: ChunkRecord) -> None:
+        """The chunk is already in this language: its caption is what was said, read by this language's voice."""
+        res = rec.out[self.code]
+        res.engine, res.mt_ms, res.text = "original", 0.0, rec.en
+        caption = self._caption(rec, rec.en)
+        caption["original"] = True
+        await self._send_caption(rec, caption)
 
     async def _tts_stage(self) -> None:
         while True:

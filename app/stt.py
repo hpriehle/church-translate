@@ -30,6 +30,21 @@ class SttResult:
     no_speech_prob: float = 0.0
     avg_logprob: float = 0.0
     dropped_reason: str = ""
+    language: str = ""          # what the chunk was recognised as (one of the meeting's speaker languages)
+
+
+# Several speaker languages: a chunk keeps the previous chunk's language unless another one of the meeting's
+# languages is clearly more likely (by this much probability), so a short or unclear chunk doesn't flip.
+STICKY = 0.15
+
+
+def pick_language(probs: dict[str, float], choices: list[str], prev: str = "") -> str:
+    """The most likely of the meeting's speaker languages (Whisper's detector scores all ~100 of its languages)."""
+    scored = {c: float(probs.get(c, 0.0)) for c in choices}
+    best = max(choices, key=lambda c: (scored[c], -choices.index(c)))
+    if prev in scored and scored[best] - scored[prev] < STICKY:
+        return prev
+    return best
 
 
 def _clean(text: str) -> str:
@@ -84,19 +99,48 @@ class Transcriber:
         log.info("STT ready (%s) in %.1fs", self.engine, self.load_s)
 
     def _fw_wanted(self) -> str:
-        """The faster-whisper model for the speaker's language: "small.en" becomes "small" for other languages."""
+        """The faster-whisper model for the speaker languages: "small.en" becomes "small" unless only English is
+        spoken (English-only models know only English, and can't tell languages apart)."""
         name = self.cfg.faster_whisper_model
-        return name[:-3] if self.cfg.language != "en" and name.endswith(".en") else name
+        english_only = (self.cfg.languages or [self.cfg.language]) == ["en"]
+        return name[:-3] if not english_only and name.endswith(".en") else name
 
-    def _transcribe_raw(self, audio: np.ndarray, prompt: str | None) -> tuple[str, float, float, float]:
+    def _fw_sync(self) -> None:
+        if self._fw_wanted() != self._fw_name:   # the speaker languages changed: English-only models know only English
+            from faster_whisper import WhisperModel
+
+            self._fw_name = self._fw_wanted()
+            self._fw_model = WhisperModel(self._fw_name, device="cpu", compute_type="int8")
+
+    def detect(self, audio: np.ndarray, choices: list[str], prev: str = "") -> str:
+        """Which of the meeting's speaker languages `audio` is in (one choice: that one, nothing is run)."""
+        if len(choices) <= 1:
+            return choices[0] if choices else self.cfg.language
+        if self.engine == "mlx":
+            import mlx.core as mx
+            from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
+            from mlx_whisper.transcribe import ModelHolder
+
+            model = ModelHolder.get_model(self.cfg.model, mx.float16)   # the one transcribe() uses (fp16)
+            mel = log_mel_spectrogram(audio, n_mels=model.dims.n_mels, padding=N_SAMPLES)
+            _, probs = model.detect_language(pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16))
+        else:
+            self._fw_sync()
+            _lang, _p, all_probs = self._fw_model.detect_language(audio)
+            probs = dict(all_probs)
+        return pick_language(probs, choices, prev)
+
+    def _transcribe_raw(self, audio: np.ndarray, prompt: str | None,
+                        language: str | None = None) -> tuple[str, float, float, float]:
         """Returns (text, max no_speech_prob, mean avg_logprob, max compression ratio)."""
+        language = language or self.cfg.language
         if self.engine == "mlx":
             import mlx_whisper
 
             r = mlx_whisper.transcribe(
                 audio,
                 path_or_hf_repo=self.cfg.model,
-                language=self.cfg.language,
+                language=language,
                 task="transcribe",
                 initial_prompt=prompt or None,
                 condition_on_previous_text=False,
@@ -109,13 +153,9 @@ class Transcriber:
             segs = r.get("segments", [])
             text = r.get("text", "")
         else:
-            if self._fw_wanted() != self._fw_name:   # the speaker switched language: English-only models know only English
-                from faster_whisper import WhisperModel
-
-                self._fw_name = self._fw_wanted()
-                self._fw_model = WhisperModel(self._fw_name, device="cpu", compute_type="int8")
+            self._fw_sync()
             seg_iter, _info = self._fw_model.transcribe(
-                audio, language=self.cfg.language, initial_prompt=prompt or None,
+                audio, language=language, initial_prompt=prompt or None,
                 condition_on_previous_text=False, beam_size=1, temperature=[0.0, 0.2, 0.4],
                 vad_filter=False,
             )
@@ -129,10 +169,11 @@ class Transcriber:
         cr = max(float(s.get("compression_ratio", 0.0)) for s in segs)
         return _clean(text), nsp, alp, cr
 
-    def transcribe(self, audio: np.ndarray, prompt: str = "") -> SttResult:
+    def transcribe(self, audio: np.ndarray, prompt: str = "", language: str | None = None) -> SttResult:
         t0 = time.monotonic()
-        text, nsp, alp, cr = self._transcribe_raw(audio, prompt)
-        res = SttResult(text=text, ms=(time.monotonic() - t0) * 1000, no_speech_prob=nsp, avg_logprob=alp)
+        text, nsp, alp, cr = self._transcribe_raw(audio, prompt, language)
+        res = SttResult(text=text, ms=(time.monotonic() - t0) * 1000, no_speech_prob=nsp, avg_logprob=alp,
+                        language=language or self.cfg.language)
         low = text.lower().strip(" .!?,")
         if not text:
             res.dropped_reason = "empty"

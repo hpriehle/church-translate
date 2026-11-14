@@ -107,8 +107,10 @@
   let langOn = true;            // the operator can pause a language
   const LANG_OFF = { fr: "La traduction en français est arrêtée pour le moment.",
                      wo: "La traduction en wolof est arrêtée pour le moment." };
-  // The speaker talks in this phone's language right now: nothing to translate, listen in the room.
+  // The speaker talks in this phone's language right now: nothing to translate, listen in the room. Not with a
+  // server that passes the original through to this language (passthrough: several speaker languages, V3).
   let speaker = "en";
+  let passthrough = false;
   function speakerText() {
     let name = speaker;
     try { name = new Intl.DisplayNames([document.documentElement.lang || "fr"], { type: "language" }).of(speaker); } catch {}
@@ -116,7 +118,7 @@
   }
   function updateWaiting() {
     const any = captionsEl.children.length > 0;
-    const paused = live && speaker === lang;
+    const paused = live && speaker === lang && !passthrough;
     waitingEl.hidden = live && any && langOn && !paused;
     if (paused) waitingEl.textContent = speakerText();
     else if (!langOn) waitingEl.textContent = (!BASE && LANG_OFF[lang]) || U.off;
@@ -213,6 +215,7 @@
           }
           langOn = m.on !== false;
           speaker = m.speaker || "en";
+          passthrough = !!m.passthrough;
           renderLangs(m.languages || []);
           boot = m.boot;
           session = m.session;
@@ -241,7 +244,7 @@
         case "onair": markOnAir(m.seq); break;
         case "languages": renderLangs(m.languages || []); break;
         case "lang_state": langOn = !!m.on; updateWaiting(); break;
-        case "speaker": speaker = m.speaker || "en"; updateWaiting(); break;
+        case "speaker": speaker = m.speaker || "en"; passthrough = !!m.passthrough; updateWaiting(); break;
         case "status":
           live = !!m.live;
           if (!live) session = null;  // run over: a reconnect after this must not treat it as current
@@ -357,6 +360,7 @@
     wo: { label: "Tàmbali", hint: "Bësal fii ngir déglu tekki bi ci wolof. Jëfandikool ay écouteurs." },
     es: { label: "Empezar", hint: "Toque para escuchar la traducción en español. Use auriculares." },
     en: { label: "Start", hint: "Tap to hear the translation in English. Use headphones." },
+    lv: { label: "Sākt", hint: "Pieskarieties, lai klausītos tulkojumu latviešu valodā. Izmantojiet austiņas." },
     ru: { label: "Начать", hint: "Нажмите, чтобы слушать перевод на русский. Используйте наушники." },
   };
   const startOverlay = $("startOverlay");
