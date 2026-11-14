@@ -49,6 +49,7 @@ class Channel:
         self.caption_no = 0
         self.avg_clip_s = 4.0
         self.avg_tts_s = 0.5
+        self.behind_s: float | None = None   # the last caption's delay behind the speaker (shown on the Mac's transcript)
         self.recording = None
         self._last_stage_log: dict[str, float] = {}
         self.on = True           # translating into this language (switched live on the operator page)
@@ -84,6 +85,7 @@ class Channel:
             "name": self.lang.name,
             "on": self.on,
             "backlog_s": round(self.mixer.backlog_s, 1),
+            "behind_s": self.behind_s,
             "pipeline_backlog_s": round(self.total_backlog(), 1),
             "queues": {"translate": self.mt_q.qsize(), "tts": self.tts_q.qsize()},
             "speed": self.backlog.speed_for(self.total_backlog()),
@@ -173,6 +175,8 @@ class Channel:
         res = rec.out[self.code]
         res.t_caption = time.monotonic()
         res.status = "captioned"
+        lag = res.caption_lag(rec)
+        self.behind_s = round(max(0.0, lag), 1) if lag is not None else self.behind_s
         self.caption_no += 1
         res.caption_no = self.caption_no
         caption = {"type": "caption", "seq": res.caption_no, "session": self.p.session_id,

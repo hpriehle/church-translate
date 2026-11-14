@@ -35,10 +35,14 @@ class LangResult:
     t_ref_end: float = 0.0        # end of the speech this result covers (later than the chunk's if merged)
     status: str = "pending"       # pending|captioned|aired|dropped|skipped|failed|merged
 
+    def caption_lag(self, rec: "ChunkRecord") -> float | None:
+        """Seconds from the end of the speech this line covers to its caption appearing: how far behind it is."""
+        return self.t_caption - (self.t_ref_end or rec.t_speech_end) if self.t_caption else None
+
     def public(self, rec: "ChunkRecord") -> dict[str, Any]:
         d = asdict(self)
         end = self.t_ref_end or rec.t_speech_end
-        d["caption_lag"] = _r(self.t_caption - end if self.t_caption else None)
+        d["caption_lag"] = _r(self.caption_lag(rec))
         d["air_lag"] = _r(self.t_on_air - end if self.t_on_air else None)
         d["air_lag_from_start"] = _r(self.t_on_air - rec.t_speech_start if self.t_on_air else None)
         return d

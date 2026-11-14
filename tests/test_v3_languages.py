@@ -125,6 +125,32 @@ async def test_a_chunk_in_the_channels_own_language_passes_through():
     assert caps[0]["original"] and caps[0]["src"] == "lv" and "original" not in caps[1] and caps[1]["src"] == "ru"
 
 
+async def test_each_language_reports_how_far_behind_the_speaker_its_last_caption_was():
+    """The Mac's transcript header shows it: caption time minus when that speech ended (a merged line: its last part)."""
+    import time
+    done, published = [], []
+    ch, _ = _channel("lv", done, published)
+    ch.mixer.backlog_s, ch.mixer.underruns = 0.0, 0
+    ch.tts = SimpleNamespace(cfg=SimpleNamespace(engine="piper"), voice="v", error=None)
+    ch.broadcaster = SimpleNamespace(listeners=0)
+    ch.hub.count = 0
+    assert ch.behind_s is None and ch.status()["behind_s"] is None   # nothing captioned yet
+    task = asyncio.create_task(ch._mt_stage())
+    rec = _rec(1, "ru", "Добрый день.")
+    rec.t_speech_end = time.monotonic() - 4.0
+    ch.mt_q.put_nowait(rec)
+    await asyncio.wait_for(ch.tts_q.get(), 2)
+    assert 4.0 <= ch.behind_s < 5.0 and ch.status()["behind_s"] == ch.behind_s
+    assert ch.behind_s == round(rec.out["lv"].caption_lag(rec), 1) == round(rec.public()["langs"]["lv"]["caption_lag"], 1)
+    later = _rec(2, "ru", "Как дела?")
+    later.t_speech_end = time.monotonic() - 9.0
+    later.out["lv"].t_ref_end = time.monotonic() - 1.5         # merged with newer speech that ended 1.5 s ago
+    ch.mt_q.put_nowait(later)
+    await asyncio.wait_for(ch.tts_q.get(), 2)
+    task.cancel()
+    assert 1.5 <= ch.behind_s < 2.5                             # updated by each new line
+
+
 async def test_pipeline_bills_only_translated_languages(monkeypatch):
     """ru + lv speakers → en + lv: a Latvian chunk is billed for English only (Latvian hears the original)."""
     from app.pipeline import Pipeline

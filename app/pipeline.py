@@ -202,6 +202,7 @@ class Pipeline:
         self.metrics = MetricsLog(LOG_DIR, "session")
         for ch in self.channels.values():
             ch.backlog = BacklogPolicy(self.settings.backlog)
+            ch.behind_s = None
             if record:
                 ch.recording = ch.broadcaster.start_recording(
                     self.metrics.path.with_name(f"{self.metrics.path.stem}-{ch.code}.mp3"))
@@ -462,6 +463,7 @@ class Pipeline:
             "started_at": self.started_at,
             "level_db": round(self.level_db, 1),
             "backlog_s": max((c["backlog_s"] for c in chans.values()), default=0.0),
+            "behind_s": {code: c["behind_s"] for code, c in chans.items() if c["behind_s"] is not None},
             "queues": {"stt": self.chunk_q.qsize()},
             "stt_ready": self.stt.ready,
             "stt_engine": self.stt.engine,

@@ -406,7 +406,8 @@ private struct TranscriptView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                TranscriptColumns(chunks: model.engine.chunks, targets: columns)
+                TranscriptColumns(chunks: model.engine.chunks, targets: columns,
+                                  behind: model.running ? model.engine.status?.pipeline.behind_s ?? [:] : [:])
             }
             if showLog {
                 Divider()
@@ -441,6 +442,7 @@ private struct TranscriptView: View {
 private struct TranscriptColumns: View {
     let chunks: [Chunk]
     let targets: [String]
+    let behind: [String: Double]   // seconds each translation is behind the speaker, while the meeting runs
     private static let minWidth: CGFloat = 200
 
     var body: some View {
@@ -452,7 +454,8 @@ private struct TranscriptColumns: View {
                     HStack(spacing: 0) {
                         header("Original", detail: "as spoken", width: width)
                         ForEach(targets, id: \.self) { code in
-                            header("\(OutputLanguage.all.first { $0.id == code }?.flag ?? "") \(OutputLanguage.name(code))", detail: OutputLanguage.native(code), width: width)
+                            header("\(OutputLanguage.all.first { $0.id == code }?.flag ?? "") \(OutputLanguage.name(code))", detail: OutputLanguage.native(code),
+                                   lag: behind[code].map { "\(Int($0.rounded())) s behind" }, width: width)
                         }
                     }
                     .background(.bar)
@@ -471,11 +474,15 @@ private struct TranscriptColumns: View {
         }
     }
 
-    private func header(_ title: String, detail: String, width: CGFloat) -> some View {
+    private func header(_ title: String, detail: String, lag: String? = nil, width: CGFloat) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(title).font(.subheadline.weight(.semibold))
             Text(detail).font(.caption).foregroundStyle(.secondary)
             Spacer(minLength: 0)
+            if let lag {
+                Text(lag).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .help("How long after the speaker finished a sentence its translation appeared, for the latest line")
+            }
         }
         .lineLimit(1)
         .padding(.horizontal, 12).padding(.vertical, 6)

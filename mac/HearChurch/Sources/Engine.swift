@@ -381,6 +381,7 @@ struct EngineStatus: Decodable, Equatable {
         let stt_ready: Bool?
         let started_at: Double?
         let backlog_s: Double?
+        let behind_s: [String: Double]?   // per translation language: its last line's delay behind the speaker
         let last_error: String?
     }
     struct Translate: Decodable, Equatable {

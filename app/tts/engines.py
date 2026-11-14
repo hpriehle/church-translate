@@ -67,7 +67,7 @@ _VOICE_PEOPLE = {
     "ne": [("ne_NP-chitwan-medium", "Male", "Ram")],
     "vi": [("vi_VN-vais1000-medium", "Female", "Lan")],
     "zh": [("zh_CN-chaowen-medium", "Female", "Mei")],
-    "en": [("en_US-mike-medium", "Male", "James"), ("en_US-kathleen-medium", "Female", "Mary")],
+    "en": [("en_US-mike-medium", "Male", "Mike"), ("en_US-kathleen-medium", "Female", "Kathleen")],
     "lv": [("lv_LV-aivars-medium", "Male", "Jānis")],
 }
 _PIPER_LOADED: dict[str, object] = {}
