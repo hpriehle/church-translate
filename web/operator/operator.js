@@ -1,6 +1,7 @@
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  const ENGINE_NAMES = { claude: "translator" };   // engine ids as shown in the transcript
   const PIN = new URLSearchParams(location.search).get("pin") || new URLSearchParams(location.search).get("key");
   // Opened through a public address (tunnel)? Then show that address, not the server's LAN one.
   const VIA_PUBLIC = !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|\[|[\d.]+$)/.test(location.hostname);
@@ -119,14 +120,14 @@
 
   // Claude credentials are write-only: the page only learns which kind is in use.
   const ACCESS = { token: "Subscription token (saved on this server)", api_key: "API key (saved on this server)",
-                   login: "This computer's own Claude login", credits: "Hear Church credits (no key needed)" };
+                   login: "This computer's own sign-in", credits: "Hear Church credits (no key needed)" };
   async function saveAccess(kind, value) {
     try {
       const r = await api("/api/claude-access", { kind, value });
       $("credValue").value = "";
       $("claudeAccess").textContent = ACCESS[r.access] || r.access;
       log(r.message);
-    } catch (e) { log("Claude access: " + e.message, "error"); }
+    } catch (e) { log("Translation access: " + e.message, "error"); }
   }
   // Speaker password (write-only, like the Claude credentials).
   const showSpeakerPw = (set) => { $("speakerPwState").textContent = set ? "Set: speakers can sign in with it." : "Not set: only the operator password works."; };
@@ -142,7 +143,7 @@
   $("speakerPwRemove").onclick = () => { if (confirm("Remove the speaker password? People using it will be signed out.")) saveSpeakerPw(""); };
 
   $("credSave").onclick = () => { const v = $("credValue").value.trim(); if (v) saveAccess($("credKind").value, v); };
-  $("credForget").onclick = () => { if (confirm("Remove the saved token or key and use this computer's own Claude login?")) saveAccess("login", ""); };
+  $("credForget").onclick = () => { if (confirm("Remove the saved token or key and use this computer's own sign-in?")) saveAccess("login", ""); };
 
   $("device").onchange = () => { updateChannels(); saveSetting("audio", { input_device: $("device").value }); };
   $("channel").onchange = () => saveSetting("audio", { input_channel: +$("channel").value });
@@ -430,11 +431,11 @@
       const c = x.claude;
       return `${many ? `<small>${SHORT(code)}</small> ` : ""}${c.state}${c.state === "busy" && c.busy_for > 3 ? ` ${c.busy_for}s` : ""}`;
     });
-    $("claudeState").innerHTML = parts.join(" · ") + ` <small>${esc((tl[0] || {}).claude?.model || "")}</small>`;
+    $("claudeState").innerHTML = parts.join(" · ");
     if (st.claude_access) {
       const signedOut = tl.some((x) => /not logged in|invalid api key|authentication|oauth token/i.test(x.last_error || ""));
       $("claudeAccess").textContent = (ACCESS[st.claude_access] || st.claude_access)
-        + (signedOut ? " — Claude is not signed in: paste a token or key below" : "");
+        + (signedOut ? " — the translator is not signed in: paste a token or key below" : "");
       cls($("claudeAccess"), signedOut ? "bad" : "");
     }
     const states = tl.map((x) => x.claude.state);
@@ -522,7 +523,7 @@
 
   function langCell(code, x) {
     if (!x) return `<td class="lang"></td>`;
-    const eng = x.engine ? `<span class="eng ${esc(x.engine)}">${esc(x.engine)}</span> ` : "";
+    const eng = x.engine ? `<span class="eng ${esc(x.engine)}">${esc(ENGINE_NAMES[x.engine] || x.engine)}</span> ` : "";
     const bits = [];
     if (x.mt_ms) bits.push(`MT ${ms(x.mt_ms)}`);
     if (x.tts_ms) bits.push(`voice ${ms(x.tts_ms)}`);

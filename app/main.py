@@ -43,7 +43,7 @@ AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".mp4", ".mov"}
 EDITABLE = {
     "audio": {"input_device", "input_channel", "input_gain"},
     "translate": {"mode", "claude_model", "claude_effort", "claude_timeout_s", "ollama_model", "claude_session_turns"},
-    "tts": {"engine", "voice", "rate", "volume"},
+    "tts": {"engine", "voice", "rate", "volume", "speed"},
     "backlog": {"speedup_start_s", "speedup_full_s", "max_speed", "condense_on_s", "condense_off_s", "drop_above_s"},
     "server": {"lan_ip", "use_public_url", "sharing"},
     "engine": {"use"},
@@ -1100,6 +1100,14 @@ def _meeting_request(body: Any) -> tuple[list[str] | None, list[str] | None]:
     return out[0], out[1]
 
 
+def merged_voice(settings: Settings, code: str, change: dict[str, Any]) -> dict[str, Any]:
+    """A language's voice after a change from the app: merged into what it has, so a new voice keeps its speed and a
+    new speed (Settings → Speaking) keeps its voice. ValidationError for a bad value (speed outside 0.7–1.6)."""
+    base = (settings.voices[code].model_dump() if code in settings.voices
+            else tts_for(settings, code).model_dump(include={"engine", "voice", "speed"}))
+    return VoiceCfg(**{**base, **change}).model_dump()
+
+
 @app.post("/api/settings")
 async def api_settings(request: Request):
     role = require_speaker(request)
@@ -1132,10 +1140,13 @@ async def api_settings(request: Request):
     for section, values in body.items():
         if section in ("meeting", "languages", "church") or (section == "stt" and set(values) <= {"language"}):
             continue
-        if section == "voices":  # {"wo": {"engine": "speecht5", "voice": "female"}}
+        if section == "voices":  # {"wo": {"engine": "speecht5", "voice": "female"}} or {"wo": {"speed": 1.1}}
             for code, v in values.items():
                 if code in LANGUAGES and code != "fr":
-                    data["voices"][code] = VoiceCfg(**v).model_dump()
+                    try:
+                        data["voices"][code] = merged_voice(S.settings, code, v)
+                    except Exception as e:
+                        raise HTTPException(400, str(e))
             save_override("voices", data["voices"])
             continue
         allowed = EDITABLE.get(section, set()) - ({"language"} if section == "stt" else set())
@@ -1215,15 +1226,15 @@ async def api_claude_access(request: Request):
     kind, value = body.get("kind"), str(body.get("value") or "").strip()
     if kind == "login":  # forget saved credentials; use this computer's own Claude login
         save_secrets({})
-        message = "Removed. Claude uses this computer's own login again."
+        message = "Removed. The translator uses this computer's own sign-in again."
     elif kind in CLAUDE_CREDENTIALS:
         var, prefix, name = CLAUDE_CREDENTIALS[kind]
         if not value.startswith(prefix) or not re.fullmatch(r"sk-ant-[A-Za-z0-9_-]{20,400}", value):
-            hint = (" If you copied a code from the browser, paste that code into Terminal where claude "
-                    "setup-token is waiting; Terminal then prints the token.") if kind == "token" else ""
+            hint = (" If you copied a code from the browser, paste that code into Terminal where the setup-token"
+                    " command is waiting; Terminal then prints the token.") if kind == "token" else ""
             raise HTTPException(400, f"That isn't the {name}: it should start with {prefix}….{hint}")
         save_secrets({var: value})  # one credential at a time
-        message = f"Saved the {name}. Claude restarts with it in a few seconds."
+        message = f"Saved the {name}. The translator restarts with it in a few seconds."
     else:
         raise HTTPException(400, "unknown kind")
     for ch in S.pipeline.channels.values():
@@ -1252,7 +1263,7 @@ async def api_glossary_set(request: Request, lang: str = "fr"):
         if other.glossary_file == LANGUAGES[lang].glossary_file:
             S.glossaries[code] = g
     S.pipeline.apply_settings(S.settings, S.glossaries)
-    return {"ok": True, "message": "Glossary saved. Claude restarts with it in the background (Ollama and speech recognition use it immediately)."}
+    return {"ok": True, "message": "Glossary saved. The translator restarts with it in the background (Ollama and speech recognition use it immediately)."}
 
 
 @app.post("/api/upload")

@@ -86,7 +86,7 @@ class ApiSession:
         if self.client is None:
             key = api_key()
             if not key:
-                raise RuntimeError("no Anthropic API key")
+                raise RuntimeError("no API key")
             # The router has its own deadlines and replaces stuck sessions, so one quick retry is enough here.
             self.client = anthropic.AsyncAnthropic(api_key=key, max_retries=1, timeout=60.0)
         self.alive = True
@@ -119,14 +119,14 @@ class ApiSession:
             self.last_error = self.describe(e)
             if self.fatal(e):
                 self.alive = False                     # a bad key won't get better by retrying this session
-            raise RuntimeError(f"claude error: {self.last_error}") from e
+            raise RuntimeError(f"translator error: {self.last_error}") from e
         finally:
             self.pending = None
         # Append the whole reply (thinking and fallback blocks too): the API expects them back unchanged.
         self.messages.append({"role": "assistant", "content": [b.model_dump(exclude_none=True) for b in resp.content]})
         self._count(resp.usage)
         if resp.stop_reason == "refusal":
-            raise RuntimeError("claude error: declined to translate this sentence")
+            raise RuntimeError("translator error: declined to translate this sentence")
         text = "".join(b.text for b in resp.content if b.type == "text")
         if has_markup(text):
             # Forget this exchange, so the slip isn't in the context the next sentence is translated with
@@ -157,7 +157,7 @@ def _describe(e: anthropic.APIError) -> str:
     if isinstance(e, anthropic.PermissionDeniedError):
         return "the API key may not use this model"
     if isinstance(e, anthropic.RateLimitError):
-        return "rate limited by Anthropic (check the key's spend limit)"
+        return "rate limited by the translation service (check the key's spend limit)"
     if isinstance(e, anthropic.APIConnectionError):
-        return "cannot reach Anthropic (internet down?)"
+        return "cannot reach the translation service (internet down?)"
     return str(getattr(e, "message", e))[:300]

@@ -36,7 +36,7 @@ def _lang_section(records: list[dict[str, Any]], code: str, info: dict[str, Any]
               _row("Audio starts, after speaker pauses", s["air_lag"]),
               _row("Audio starts, after speaker *starts* the phrase", s["air_lag_from_start"]),
               _row("Translation (all)", s["mt_ms"], " ms"),
-              _row("Translation — Claude", s["mt_ms_claude"], " ms"),
+              _row("Translation — main translator", s["mt_ms_claude"], " ms"),
               _row("Translation — Ollama", s["mt_ms_ollama"], " ms"),
               _row("Voice synthesis", s["tts_ms"], " ms"),
               _row("Audio waiting when queued (backlog)", s["backlog"]), ""]
@@ -53,7 +53,7 @@ def _lang_section(records: list[dict[str, Any]], code: str, info: dict[str, Any]
     u = li.get("usage")
     if u and u.get("turns"):
         per_hour = u["cost_usd"] / (audio_s / 3600) if audio_s > 60 else 0
-        lines.append(f"- Claude: {u['turns']} turns, {u['input'] + u['cache_read'] + u['cache_write']:,} input tokens "
+        lines.append(f"- Translator: {u['turns']} turns, {u['input'] + u['cache_read'] + u['cache_write']:,} input tokens "
                      f"({u['cache_read']:,} cached), {u['output']:,} output (≈ ${u['cost_usd']:.3f} API-equivalent, "
                      f"${per_hour:.2f}/hour of speech; on a subscription this is plan usage, not a charge)")
     return lines + [""]

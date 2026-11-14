@@ -62,7 +62,7 @@ async def test_api_session_drops_an_unanswered_sentence_and_reports_refusals():
     client = FakeClient([anthropic.APIConnectionError(request=req), _reply("", stop="refusal")])
     s = ApiSession("SYSTEM", "sonnet", "", client=client)
     await s.start()
-    with pytest.raises(RuntimeError, match="cannot reach Anthropic"):
+    with pytest.raises(RuntimeError, match="cannot reach the translation service"):
         await s.ask("Hello.")
     assert s.messages == [] and s.alive and not s.busy
     with pytest.raises(RuntimeError, match="declined"):
@@ -74,7 +74,7 @@ async def test_api_session_needs_a_key(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr("app.config.SECRETS_PATH", tmp_path / "none.env")
     monkeypatch.setattr("app.config.load_secrets", lambda path=None: {})
-    with pytest.raises(RuntimeError, match="no Anthropic API key"):
+    with pytest.raises(RuntimeError, match="no API key"):
         await ApiSession("S", "opus", "low").start()
 
 

@@ -427,7 +427,7 @@ class Pipeline:
         return {
             "source": self.source_label,
             "stt": f"{stt_engine} {stt_model}",
-            "translator": (f"Claude {st.translate.claude_model} (effort {st.translate.claude_effort}), French fallback "
+            "translator": (f"Hear Church translator {st.translate.claude_model} (effort {st.translate.claude_effort}), French fallback "
                            f"after {st.translate.claude_timeout_s:g}s to Ollama {st.translate.ollama_model}"),
             "languages": langs,
             "stt_events": list(self.stt.events),

@@ -136,7 +136,13 @@ CREATE TABLE IF NOT EXISTS device_codes (
     used_at REAL,
     device_id INTEGER
 );
+CREATE TABLE IF NOT EXISTS slug_aliases (
+    slug TEXT PRIMARY KEY,
+    congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+    created_at REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
+CREATE INDEX IF NOT EXISTS slug_aliases_cong ON slug_aliases(congregation_id);
 CREATE INDEX IF NOT EXISTS emails_address ON congregation_emails(email);
 CREATE INDEX IF NOT EXISTS device_codes_cong ON device_codes(congregation_id, kind);
 CREATE INDEX IF NOT EXISTS devices_cong ON devices(congregation_id);
@@ -297,9 +303,68 @@ class Database:
         base, n = slugify(name), 1
         while True:
             slug = base if n == 1 else f"{base}-{n}"
-            if slug not in RESERVED_SLUGS and not self._q("SELECT 1 FROM congregations WHERE slug = ?", (slug,)):
+            if slug not in RESERVED_SLUGS and not self._slug_used(slug):
                 return slug
             n += 1
+
+    def _slug_used(self, slug: str) -> bool:
+        """Some congregation's address now, or an old one that still redirects (printed QR codes)."""
+        return bool(self._q("SELECT 1 FROM congregations WHERE slug = ? UNION SELECT 1 FROM slug_aliases"
+                            " WHERE slug = ?", (slug, slug)))
+
+    def change_slug(self, cid: int, new: str) -> str:
+        """Give congregation `cid` the address hearchurch.com/<new>. The old slug becomes an alias that redirects to
+        the new one for good. Taking back one of its own old slugs is fine (that alias goes; the current one becomes
+        an alias). Returns "ok", "same", "reserved", "taken" or "not_found". The caller checks the format."""
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._db.execute("SELECT slug FROM congregations WHERE id = ?", (cid,)).fetchone()
+                if row is None:
+                    result = "not_found"
+                elif row["slug"] == new:
+                    result = "same"
+                elif new in RESERVED_SLUGS:
+                    result = "reserved"
+                elif (self._db.execute("SELECT 1 FROM congregations WHERE slug = ?", (new,)).fetchone()
+                      or self._db.execute("SELECT 1 FROM slug_aliases WHERE slug = ? AND congregation_id != ?",
+                                          (new, cid)).fetchone()):
+                    result = "taken"
+                else:
+                    now = time.time()
+                    self._db.execute("DELETE FROM slug_aliases WHERE slug = ?", (new,))
+                    self._db.execute("INSERT INTO slug_aliases (slug, congregation_id, created_at) VALUES (?,?,?)",
+                                     (row["slug"], cid, now))
+                    self._db.execute("UPDATE congregations SET slug = ? WHERE id = ?", (new, cid))
+                    result = "ok"
+                self._db.execute("COMMIT" if result == "ok" else "ROLLBACK")
+                return result
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+
+    def slug_alias(self, slug: str) -> dict[str, Any] | None:
+        """The congregation an old slug belongs to (it redirects to the current one), or None."""
+        rows = self._q("SELECT c.* FROM slug_aliases a JOIN congregations c ON c.id = a.congregation_id"
+                       " WHERE a.slug = ?", (slug,))
+        return _cong(rows[0]) if rows else None
+
+    def by_slug_or_alias(self, slug: str) -> dict[str, Any] | None:
+        return self.by_slug(slug) or self.slug_alias(slug)
+
+    def aliases(self, cid: int | None = None) -> list[dict[str, Any]]:
+        """Old slugs that redirect (of one congregation, or all), oldest first: {slug, congregation_id, created_at}."""
+        if cid is None:
+            return [dict(r) for r in self._q("SELECT * FROM slug_aliases ORDER BY created_at, slug")]
+        return [dict(r) for r in self._q("SELECT * FROM slug_aliases WHERE congregation_id = ? ORDER BY created_at,"
+                                         " slug", (cid,))]
+
+    def set_billing(self, cid: int, mode: str) -> bool:
+        """Switch how a congregation pays: "credits" or "own_key" (the operator unlocks or locks the own key).
+        Meetings keep the mode they started under. False for an unknown congregation."""
+        if mode not in ("credits", "own_key"):
+            raise ValueError(mode)
+        return self._x("UPDATE congregations SET billing = ? WHERE id = ?", (mode, cid)).rowcount > 0
 
     def create_congregation(self, *, church: str, name: str, unit_type: str, email: str, stake: str | None = None,
                             address: str = "", lat: float | None = None, lng: float | None = None,

@@ -79,7 +79,7 @@ def may_translate(device: dict[str, Any], cong: dict[str, Any]) -> JSONResponse 
     """None when this Mac may translate on credits now, else the refusal."""
     h = hear_api._hear()
     if cong["billing"] != "credits":
-        return _no(409, "own_key", "This congregation translates with its own Anthropic key.")
+        return _no(409, "own_key", "This congregation translates with its own API key.")
     live = h.live.get_any(cong["id"])   # private ("this Wi-Fi only") sessions too
     if live is not None and live.device_id == device["id"]:
         return None                       # a meeting under way is never cut off
@@ -129,8 +129,8 @@ async def translate(request: Request):
         if isinstance(e, anthropic.RateLimitError):
             return _no(429, "anthropic_busy", "Translation is busy right now: retrying.")
         if isinstance(e, anthropic.BadRequestError):
-            return _no(400, "bad_request", "Anthropic refused this request.")
-        return _no(502, "unreachable", "Hear Church can't reach Anthropic right now.")
+            return _no(400, "bad_request", "The translator refused this request.")
+        return _no(502, "unreachable", "Hear Church can't reach the translator right now.")
     finally:
         in_flight[cid] -= 1
         if not in_flight[cid]:

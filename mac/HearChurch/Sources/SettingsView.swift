@@ -1,21 +1,41 @@
+import AppKit
 import AVFoundation
 import SwiftUI
 
-/// Hear Church → Settings… (⌘,): the key, languages, voices, the glossary Claude follows, and the congregation.
+/// Hear Church → Settings… (⌘,): billing (or the congregation's own key), languages, voices, the glossary the
+/// translator follows, and the congregation.
 struct SettingsView: View {
     static let tabKey = "settingsTab"
     static let languagesTab = "languages"
+    static let billingTab = "billing"
+    static let aiTab = "ai"
+    @EnvironmentObject var model: AppModel
     @AppStorage(SettingsView.tabKey) private var tab = "general"
 
     var body: some View {
-        TabView(selection: $tab) {
+        // Credits: the Billing tab. Its own key (the hub says "own_key"): the AI tab instead, with the key.
+        let ownKey = model.ownKeyBilling
+        TabView(selection: Binding(get: { shown(ownKey) }, set: { tab = $0 })) {
             GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag("general")
+            if ownKey {
+                AISettings().tabItem { Label("AI", systemImage: "sparkles") }.tag(SettingsView.aiTab)
+            } else {
+                BillingSettings().tabItem { Label("Billing", systemImage: "creditcard") }.tag(SettingsView.billingTab)
+            }
             LanguageSettings().tabItem { Label("Languages", systemImage: "globe") }.tag(SettingsView.languagesTab)
             VoiceSettings().tabItem { Label("Speaking", systemImage: "speaker.wave.2") }.tag("voices")
             GlossarySettings().tabItem { Label("Glossary", systemImage: "character.book.closed") }.tag("glossary")
             CongregationSettings().tabItem { Label("Congregation", systemImage: "building.columns") }.tag("congregation")
         }
         .frame(width: 600, height: 520)
+        .task { await model.refreshBilling() }   // the operator may have switched it since
+    }
+
+    /// A tab that isn't there for this congregation opens its counterpart.
+    private func shown(_ ownKey: Bool) -> String {
+        if tab == SettingsView.aiTab && !ownKey { return SettingsView.billingTab }
+        if tab == SettingsView.billingTab && ownKey { return SettingsView.aiTab }
+        return tab
     }
 }
 
@@ -28,13 +48,23 @@ private struct LanguageSettings: View {
     @State private var removing: OutputLanguage?
     @State private var problem: String?
 
-    private var everyLanguage: [OutputLanguage] { OutputLanguage.all.filter(\.available) }
-
-    private var shown: [OutputLanguage] {
+    private func matching(_ list: [OutputLanguage]) -> [OutputLanguage] {
         let q = search.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return everyLanguage }
-        return everyLanguage.filter { $0.name.localizedCaseInsensitiveContains(q) || $0.native.localizedCaseInsensitiveContains(q) }
+        guard !q.isEmpty else { return list }
+        return list.filter { $0.name.localizedCaseInsensitiveContains(q) || $0.native.localizedCaseInsensitiveContains(q) }
     }
+
+    /// Downloaded (the engine says "ready"), as the main window's grids show them.
+    private var downloaded: [OutputLanguage] { matching(OutputLanguage.all.filter { $0.available && model.isReady($0.id) }) }
+    /// The rest this Mac can use: downloading first, then alphabetical.
+    private var others: [OutputLanguage] {
+        matching(OutputLanguage.all.filter { $0.available && !model.isReady($0.id) })
+            .sorted { a, b in
+                let da = model.package(a.id)?.state == "downloading", db = model.package(b.id)?.state == "downloading"
+                return da != db ? da : a.name < b.name
+            }
+    }
+    private var unusable: [OutputLanguage] { matching(OutputLanguage.all.filter { !$0.available }) }
 
     var body: some View {
         Group {
@@ -67,12 +97,32 @@ private struct LanguageSettings: View {
                     }
                 }
             }
+            if !downloaded.isEmpty {
+                Section("Downloaded") { ForEach(downloaded) { row($0) } }
+            }
             Section {
-                ForEach(shown) { row($0) }
-                if shown.isEmpty { Text("No language called “\(search)”.").foregroundStyle(.secondary) }
+                ForEach(others) { row($0) }
+                if downloaded.isEmpty && others.isEmpty && unusable.isEmpty {
+                    Text("No language called “\(search)”.").foregroundStyle(.secondary)
+                } else if others.isEmpty {
+                    Text("Every language is downloaded.").foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("More languages")
             } footer: {
                 Text("Downloaded languages appear in the main window's speaker and translation grids, above Start meeting. Download a language here to add it there; remove it to free the space.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if !unusable.isEmpty {
+                Section("Not on this Mac") {
+                    ForEach(unusable) { language in
+                        LabeledContent {
+                            Text(language.unavailableReason ?? "").foregroundStyle(.secondary)
+                        } label: {
+                            HStack { Text(language.flag).font(.title3); Text(language.name) }.foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
             if let problem { Text(problem).font(.callout).foregroundStyle(.orange) }
             Section {
@@ -250,57 +300,15 @@ private struct LanguageDetail: View {
     }
 }
 
+/// This Mac and help. The key is in the AI tab (own-key congregations only); languages are in Languages.
 private struct GeneralSettings: View {
-    @EnvironmentObject var model: AppModel
-    @State private var key = ""
-    @State private var keyError: String?
     @State private var atLogin = LoginItem.enabled
 
     var body: some View {
         Form {
-            Section("Claude API key") {
-                switch model.keyState {
-                case .ok: Label("Saved in the Keychain and working.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                case .missing: Text("No key yet.")
-                case .bad(let why): Text(why).foregroundStyle(.red)
-                default: ProgressView().controlSize(.small)
-                }
-                HStack {
-                    SecureField("Paste a new key (sk-ant-…)", text: $key)
-                    Button("Test and save") { Task { keyError = await model.saveKey(key); if keyError == nil { key = "" } } }
-                        .disabled(key.isEmpty || model.running)
-                }
-                if let keyError { Text(keyError).foregroundStyle(.red) }
-                DisclosureGroup("How to get a key") { ClaudeKeyGuide() }
-            }
-            if let s = model.engine.settings {
-                Section("Translation") {
-                    Picker("Claude model", selection: Binding(get: { s.settings.translate.claude_model }, set: { m in
-                        Task { await model.engine.set(["translate": ["claude_model": m]]) }
-                    })) {
-                        Text("Claude Opus 5.5 (best)").tag("claude-opus-5-5")
-                        Text("Claude Sonnet 5.5 (cheaper)").tag("claude-sonnet-5-5")
-                        if !["claude-opus-5-5", "claude-sonnet-5-5"].contains(s.settings.translate.claude_model) {
-                            Text(s.settings.translate.claude_model).tag(s.settings.translate.claude_model)
-                        }
-                    }
-                    .disabled(model.running)
-                }
-            }
             Section("This Mac") {
                 Toggle("Open Hear Church when this Mac starts", isOn: $atLogin)
                     .onChange(of: atLogin) { _, on in LoginItem.set(on) }
-            }
-            Section("Languages on this Mac") {
-                ForEach(OutputLanguage.all) { language in
-                    LabeledContent(language.name) {
-                        if let reason = language.unavailableReason {
-                            Label(reason, systemImage: "xmark.circle").foregroundStyle(.secondary)
-                        } else {
-                            Label("Works on this Mac", systemImage: "checkmark.circle").foregroundStyle(.secondary)
-                        }
-                    }
-                }
             }
             Section("About and help") {
                 HelpLinks()
@@ -314,6 +322,9 @@ private struct GeneralSettings: View {
     }
 }
 
+/// How each of the meeting's translation languages is read aloud. The engine has a speed per language
+/// (app/config.py: French in [tts].speed, the others in [voices.<code>].speed; 1 = the voice's own pace), and one
+/// volume for all.
 private struct VoiceSettings: View {
     @EnvironmentObject var model: AppModel
 
@@ -325,12 +336,23 @@ private struct VoiceSettings: View {
                         .disabled(!model.running)
                         .help("Listening phones hear a short sentence. Start the meeting first.")
                 }
-                Section("Speaking") {
-                    SettingSlider(title: "French speed", value: Double(s.settings.tts.rate), range: 140...240, step: 5,
-                                  format: { "\(Int($0)) wpm" }) { v in
-                        Task { await model.engine.set(["tts": ["rate": Int(v)]]) }
+                Section {
+                    ForEach(model.targets, id: \.self) { code in
+                        SettingSlider(title: "\(OutputLanguage.all.first { $0.id == code }?.flag ?? "") \(OutputLanguage.name(code))",
+                                      value: speed(code, s.settings), range: 0.7...1.6, step: 0.05,
+                                      format: { "\(Int(($0 * 100).rounded()))%" }) { v in
+                            let v = (v * 100).rounded() / 100
+                            Task { await model.engine.set(code == "fr" ? ["tts": ["speed": v]] : ["voices": [code: ["speed": v]]]) }
+                        }
                     }
-                    SettingSlider(title: "Volume", value: s.settings.tts.volume, range: 0.1...1.0, step: 0.05,
+                } header: {
+                    Text("Speed")
+                } footer: {
+                    Text("How fast each translation language of the meeting is read aloud. 100% is the voice's own pace. Voices also speed up by themselves when they fall behind the speaker.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Volume") {
+                    SettingSlider(title: "Every language", value: s.settings.tts.volume, range: 0.1...1.0, step: 0.05,
                                   format: { String(format: "%.0f%%", $0 * 100) }) { v in
                         Task { await model.engine.set(["tts": ["volume": v]]) }
                     }
@@ -340,6 +362,10 @@ private struct VoiceSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func speed(_ code: String, _ s: EngineSettings.Settings) -> Double {
+        (code == "fr" ? s.tts.speed : s.voices[code]?.speed) ?? 1.0
     }
 }
 
@@ -364,11 +390,13 @@ private struct SettingSlider: View {
     }
 }
 
-/// The names and words Claude must translate a fixed way (app/config.py validate_glossary). Each entry is
-/// {"en": …, "fr": …}; "fr" holds the translation whatever the language.
+/// The names and words the translator must translate a fixed way (app/config.py validate_glossary). Each entry is
+/// {"en": …, "fr": …}; "fr" holds the translation whatever the language. English comes first: it has no list of its
+/// own (translations into English read each spoken language's list the other way round), so its page only holds the
+/// names kept as they are.
 private struct GlossarySettings: View {
     @EnvironmentObject var model: AppModel
-    @State private var lang = "fr"
+    @State private var lang = "en"
     @State private var raw: [String: Any] = [:]
     @State private var localNames = ""
     @State private var terms: [Pair] = []
@@ -381,6 +409,8 @@ private struct GlossarySettings: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Picker("Language", selection: $lang) {
+                    Text(OutputLanguage.english.name).tag(OutputLanguage.english.id)
+                    Divider()
                     ForEach(OutputLanguage.all.filter { $0.available && $0.id != "en" }) { Text($0.name).tag($0.id) }
                 }
                 .frame(width: 220)
@@ -388,11 +418,16 @@ private struct GlossarySettings: View {
                 if let status { Text(status).font(.callout).foregroundStyle(.secondary) }
                 Button("Save") { Task { await save() } }.disabled(!dirty).keyboardShortcut("s")
             }
-            Text("Names of people in the congregation (one per line). Claude keeps them as they are.")
+            Text("Names of people in the congregation (one per line). Hear Church keeps them as they are.")
                 .font(.callout).foregroundStyle(.secondary)
-            TextEditor(text: $localNames).font(.body).frame(height: 90)
+            TextEditor(text: $localNames).font(.body).frame(height: lang == "en" ? 200 : 90)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
                 .onChange(of: localNames) { dirty = true }
+            if lang == "en" {
+                Text("Fixed translations into English come from each spoken language's list: choose that language above.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            } else {
             HStack {
                 Text("Words with a fixed translation").font(.callout).foregroundStyle(.secondary)
                 Spacer()
@@ -412,6 +447,7 @@ private struct GlossarySettings: View {
                 }
             }
             .listStyle(.bordered)
+            }
         }
         .padding(20)
         .task(id: lang) { await load() }
@@ -425,7 +461,7 @@ private struct GlossarySettings: View {
         }
         raw = g
         localNames = ((g["local_names"] as? [String]) ?? []).joined(separator: "\n")
-        terms = ["terms", "names", "books"].flatMap { key in
+        terms = lang == "en" ? [] : ["terms", "names", "books"].flatMap { key in
             ((g[key] as? [[String: Any]]) ?? []).map { Pair(en: $0["en"] as? String ?? "", to: $0["fr"] as? String ?? "", list: key) }
         }
         status = nil
@@ -436,7 +472,7 @@ private struct GlossarySettings: View {
         var g = raw   // keeps anything this editor doesn't show
         g["local_names"] = localNames.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let kept = terms.filter { !$0.en.trimmingCharacters(in: .whitespaces).isEmpty && !$0.to.trimmingCharacters(in: .whitespaces).isEmpty }
-        for key in ["terms", "names", "books"] {
+        for key in ["terms", "names", "books"] where lang != "en" {   // English shows (and changes) the names only
             let old = (raw[key] as? [[String: Any]]) ?? []
             g[key] = kept.filter { $0.list == key }.map { p -> [String: Any] in
                 var item = old.first { ($0["en"] as? String) == p.en } ?? [:]   // keep notes etc.
@@ -463,13 +499,17 @@ private struct CongregationSettings: View {
                 LabeledContent("Name", value: model.profile.name)
                 if !model.profile.stake.isEmpty { LabeledContent("Stake", value: model.profile.stake) }
                 LabeledContent("Address", value: model.profile.address)
-                if let url = model.listenerURL { LabeledContent("Listener link") { Link(url.absoluteString, destination: url) } }
                 LabeledContent("Server", value: AppPaths.hub.host ?? "")
             }
+            if model.profile.setupDone && !model.profile.slug.isEmpty { ListenerLinkSection() }
             if model.profile.setupDone {
                 EmailsSection(account: $account, problem: $problem)
                 DevicesSection(account: $account, problem: $problem)
-                if let problem { Text(problem).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+                if let problem {
+                    // An older hearchurch.com without these calls yet is not a problem: say so quietly.
+                    Text(problem).foregroundStyle(problem == HubClient.NotAvailable().localizedDescription ? .secondary : .red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if loading && account == nil { ProgressView().controlSize(.small) }
             }
             Section {
@@ -552,7 +592,7 @@ private struct EmailsSection: View {
                         Button("Add", action: add).disabled(!OnboardingView.isEmail(newEmail) || busy)
                     }
                 }
-            } else {
+            } else if problem == nil {
                 Text("Loading…").foregroundStyle(.secondary)
             }
         } header: {
@@ -664,6 +704,234 @@ private struct DevicesSection: View {
             let c = try await HubClient.pairingCode(token: token)
             code = c.code
             expires = c.expires
+            problem = nil
+        } catch is HubClient.SignedOut {
+            model.signOut()
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+}
+
+/// The congregation's page, hearchurch.com/<slug>: open it, copy it, or change it. The old address (and every QR
+/// code printed with it) keeps working: the hub redirects it to the new one for good.
+private struct ListenerLinkSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var editing = false
+    @State private var slug = ""
+    @State private var problem: String?
+    @State private var saving = false
+    @State private var saved = false
+
+    private var host: String { AppPaths.hub.host ?? "hearchurch.com" }
+    private var url: URL { AppPaths.hub.appendingPathComponent(model.profile.slug) }
+    /// As typed → what the hub accepts: lowercase letters, digits, single dashes.
+    private var cleaned: String {
+        let t = slug.lowercased().map { $0.isASCII && ($0.isLetter || $0.isNumber) ? String($0) : "-" }.joined()
+        return t.split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+    }
+
+    var body: some View {
+        Section {
+            if editing {
+                HStack(spacing: 2) {
+                    Text("\(host)/").foregroundStyle(.secondary)
+                    TextField("your-congregation", text: $slug).textFieldStyle(.roundedBorder).onSubmit { Task { await save() } }
+                }
+                if !slug.isEmpty && cleaned != slug {
+                    Text("Becomes \(host)/\(cleaned)").font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Cancel") { editing = false; problem = nil }
+                    Button("Save") { Task { await save() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(cleaned.count < 3 || cleaned == model.profile.slug || saving)
+                    if saving { ProgressView().controlSize(.small) }
+                }
+                if let problem {
+                    Text(problem).foregroundStyle(problem == HubClient.NotAvailable().localizedDescription ? .secondary : .red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                LabeledContent("Listener link") {
+                    HStack {
+                        Link(url.absoluteString, destination: url).textSelection(.enabled)
+                        Button("Change…") { slug = model.profile.slug; problem = nil; saved = false; editing = true }
+                            .disabled(model.running)
+                            .help(model.running ? "Change it after the meeting." : "Choose another address for your congregation's page")
+                    }
+                }
+                if saved { Label("Saved. The old link still works.", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+            }
+        } header: {
+            Text("Listener link")
+        } footer: {
+            Text("Listeners open this page or scan its QR code. After a change, the old link and printed QR codes keep working: they lead to the new one.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func save() async {
+        let new = cleaned
+        guard new.count >= 3, new != model.profile.slug else { return }
+        saving = true
+        defer { saving = false }
+        problem = await model.changeSlug(new)
+        if problem == nil { editing = false; saved = true }
+    }
+}
+
+/// Settings → Billing (congregations on credit): what's left, buying more, and what the meetings used.
+private struct BillingSettings: View {
+    @EnvironmentObject var model: AppModel
+    @State private var meetings: [HubClient.Meeting] = []
+    @State private var charges: [HubClient.Charge] = []
+    @State private var historyNote: String?
+    @State private var problem: String?
+    @State private var buying: Int?
+    @State private var opened = false
+
+    var body: some View {
+        Form {
+            if !model.profile.setupDone {
+                Text("Connect this Mac to a congregation first.").foregroundStyle(.secondary)
+            } else {
+                balance
+                buy
+                history
+            }
+        }
+        .formStyle(.grouped)
+        .task { await load() }
+    }
+
+    @ViewBuilder private var balance: some View {
+        Section("Credit") {
+            if let b = model.billing {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(String(format: "%.1f", max(0, b.hoursLeft ?? 0))).font(.system(size: 34, weight: .semibold)).monospacedDigit()
+                    Text("hours left").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(Self.usd(b.balanceUSD)).font(.title3).monospacedDigit().foregroundStyle(b.balanceUSD < 0 ? .red : .primary)
+                }
+                Text("An hour is one language for one hour of speech: a meeting translated into two languages uses two hours an hour. \(Self.usd(b.usdPerHour)) per hour.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if b.freeLeftHours > 0 {
+                    Label(String(format: "%.1f free hours left", b.freeLeftHours), systemImage: "gift").foregroundStyle(.secondary)
+                }
+                if b.outOfCredit { Text(b.message).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            } else {
+                Text(problem ?? "Loading…").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var buy: some View {
+        if let b = model.billing {
+            Section {
+                if b.canBuy {
+                    HStack {
+                        ForEach(b.buyUSD, id: \.self) { usd in
+                            Button { Task { await buy(usd) } } label: {
+                                VStack(spacing: 1) {
+                                    Text("$\(usd)").bold()
+                                    Text(String(format: "%g hours", Double(usd) / max(b.usdPerHour, 0.01))).font(.caption)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .disabled(buying != nil)
+                        }
+                    }
+                    if buying != nil { ProgressView("Opening the payment page…").controlSize(.small) }
+                    if opened { Text("Pay in your browser. The credit shows here within a minute; reopen Settings to see it.").font(.callout).foregroundStyle(.secondary) }
+                } else {
+                    Text("Buying credit isn't available yet. Write to support@hearchurch.com.").foregroundStyle(.secondary)
+                }
+                if let problem, model.billing != nil { Text(problem).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            } header: {
+                Text("Buy credit")
+            } footer: {
+                Text("A secure payment page opens in your browser. The receipt goes to the congregation's main e-mail.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var history: some View {
+        Section("Meetings") {
+            if let historyNote {
+                Text(historyNote).foregroundStyle(.secondary)
+            } else if meetings.isEmpty {
+                Text("No meetings yet.").foregroundStyle(.secondary)
+            }
+            ForEach(meetings) { m in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(m.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        Text(m.languages.map(OutputLanguage.name).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(String(format: "%.2f hours", m.languageHours)).monospacedDigit()
+                        Text(cost(m)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+            }
+        }
+        if !charges.isEmpty {
+            Section("Payments") {
+                ForEach(charges) { c in
+                    HStack {
+                        Text(Self.kind(c.kind))
+                        Text(c.at.formatted(date: .abbreviated, time: .omitted)).foregroundStyle(.secondary)
+                        Spacer()
+                        Text((c.amountUSD > 0 ? "+" : "") + Self.usd(c.amountUSD)).monospacedDigit()
+                    }
+                }
+            }
+        }
+    }
+
+    private func cost(_ m: HubClient.Meeting) -> String {
+        if m.ownKey { return "own key" }
+        if m.costUSD > 0 { return Self.usd(m.costUSD) + (m.freeMinutes > 0 ? " (part free)" : "") }
+        return m.languageHours > 0 ? "free" : "no speech"
+    }
+
+    private static func kind(_ k: String) -> String {
+        switch k {
+        case "top_up": return "Credit bought"
+        case "manual_credit": return "Credit added"
+        case "refund": return "Refund"
+        default: return k
+        }
+    }
+
+    static func usd(_ v: Double) -> String { v < 0 ? String(format: "-$%.2f", -v) : String(format: "$%.2f", v) }
+
+    private func load() async {
+        guard model.profile.setupDone, let token = Keychain.get(.deviceToken), !token.isEmpty else { return }
+        await model.refreshBilling()
+        if model.billing == nil { problem = "Can't reach \(AppPaths.hub.host ?? "hearchurch.com") right now." }
+        do {
+            (meetings, charges) = try await HubClient.usage(token: token)
+            historyNote = nil
+        } catch is HubClient.NotAvailable {
+            historyNote = "The history is available after the next update."
+        } catch is HubClient.SignedOut {
+            model.signOut()
+        } catch {
+            historyNote = error.localizedDescription
+        }
+    }
+
+    private func buy(_ usd: Int) async {
+        guard let token = Keychain.get(.deviceToken), !token.isEmpty else { return }
+        buying = usd
+        defer { buying = nil }
+        do {
+            NSWorkspace.shared.open(try await HubClient.checkout(usd: usd, token: token))
+            opened = true
             problem = nil
         } catch is HubClient.SignedOut {
             model.signOut()

@@ -16,7 +16,7 @@ struct OnboardingView: View {
     @State private var busy = false
     // "Connect to my congregation"
     @State private var joinCode = ""
-    @State private var ownKey = OnboardingProgress.ownKey   // this congregation may use its own Anthropic key
+    @State private var ownKey = OnboardingProgress.ownKey   // this congregation may use its own API key
 
     enum Step: String { case welcome, church, name, place, times, languages, microphone, claude, email, join, finish }
 
@@ -348,7 +348,7 @@ private struct ChurchStep: View {
     @State private var choice = ""
 
     var body: some View {
-        StepTitle(title: "Your church", subtitle: "Shown to listeners next to your congregation's name. It also chooses the glossary Claude follows: Christian terms for every church, and Latter-day Saint terms for The Church of Jesus Christ of Latter-day Saints.")
+        StepTitle(title: "Your church", subtitle: "Shown to listeners next to your congregation's name. It also chooses the glossary the translator follows: Christian terms for every church, and Latter-day Saint terms for The Church of Jesus Christ of Latter-day Saints.")
         Picker("Church", selection: $choice) {
             Text("Choose…").tag("")
             ForEach(Churches.all, id: \.self) { Text($0).tag($0) }
@@ -550,20 +550,6 @@ private struct MicrophoneStep: View {
     }
 }
 
-struct ClaudeKeyGuide: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("1. Sign in at console.anthropic.com (or create an account).")
-            Text("2. Billing: add a payment method and buy some credit. $10–25 is plenty to start.")
-            Text("3. Limits: set a monthly spend limit. $25 a month covers a few Sundays for most congregations.")
-            Text("4. API keys: Create Key, name it \"Hear Church\", and copy it.")
-            Text("5. Paste it below.")
-            Link("Open the Anthropic console", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
-        }
-        .font(.callout)
-    }
-}
-
 private struct ClaudeStep: View {
     @EnvironmentObject var model: AppModel
     @Binding var ownKey: Bool
@@ -574,9 +560,9 @@ private struct ClaudeStep: View {
 
     var body: some View {
         if ownKey {
-            StepTitle(title: "Claude translates",
-                      subtitle: "Hear Church uses Claude, from Anthropic, to translate. Your congregation uses its own API key, and Anthropic bills you directly for what you use. The key is kept in this Mac's Keychain.")
-            ClaudeKeyGuide()
+            StepTitle(title: "Your translation key",
+                      subtitle: "Your congregation translates with its own API key, and is billed directly for what it uses. The key is kept in this Mac's Keychain.")
+            APIKeyGuide()
             HStack {
                 SecureField("sk-ant-…", text: $key).onSubmit { Task { await save() } }
                 Button("Test and save") { Task { await save() } }.disabled(key.isEmpty || model.keyState == .checking)
@@ -587,12 +573,12 @@ private struct ClaudeStep: View {
             default: EmptyView()
             }
         } else {
-            StepTitle(title: "Claude translates",
-                      subtitle: "Hear Church uses Claude, from Anthropic, to translate. You pay with prepaid credit: $5 per language for each hour of speech, and the first hour is free.")
-            Text("Nothing to set up here: continue, and your first hour is free. You can buy credit later on the speaker page.")
+            StepTitle(title: "Translation",
+                      subtitle: "Hear Church translates on prepaid credit: $5 per language for each hour of speech, and the first hour is free.")
+            Text("Nothing to set up here: continue, and your first hour is free. You can buy credit later in Settings → Billing.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 4)
-            Text("Did we give you a setup code for your own Anthropic key? Enter it here. Each code works once.")
+            Text("Did we give you a setup code for your own API key? Enter it here. Each code works once.")
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 TextField("HC-XXXX-XXXX-XXXX", text: $code).onSubmit { Task { await useCode() } }
@@ -696,7 +682,7 @@ enum OnboardingProgress {
         get { UserDefaults.standard.bool(forKey: joinedKey) }
         set { UserDefaults.standard.set(newValue, forKey: joinedKey) }
     }
-    /// The congregation may use its own Anthropic key: a one-time code was accepted, or the congregation this Mac
+    /// The congregation may use its own API key: a one-time code was accepted, or the congregation this Mac
     /// joined already uses its own key.
     static var ownKey: Bool {
         get { UserDefaults.standard.bool(forKey: ownKeyKey) }

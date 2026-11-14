@@ -173,7 +173,7 @@
     const out = !!b.out_of_credit;
     $("credit").classList.toggle("out", out);
     if (b.billing !== "credits") {
-      $("creditLine").textContent = "Own Anthropic key";
+      $("creditLine").textContent = "Own API key";
       $("creditSmall").textContent = b.message || "";
       $("buyRow").hidden = true;
       return;

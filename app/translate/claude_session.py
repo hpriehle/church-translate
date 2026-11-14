@@ -142,7 +142,7 @@ class ClaudeSession:
         binary = claude_binary()
         if not binary:
             if _installing.locked():
-                raise RuntimeError("installing Claude Code, one moment")
+                raise RuntimeError("installing the translator, one moment")
             raise RuntimeError("the `claude` CLI is not installed")
         self.workdir.mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE") and k != "CLAUDE_CODE_ENTRYPOINT"}
@@ -231,7 +231,7 @@ class ClaudeSession:
             self.ready = False
             code = await self.proc.wait()
             log.warning("claude session #%d exited (code %s) %s", self.id, code, self.last_error)
-            self._fail_pending(f"claude exited (code {code}) {self.last_error}".strip())
+            self._fail_pending(f"translator exited (code {code}) {self.last_error}".strip())
 
     async def _read_stderr(self) -> None:
         assert self.proc and self.proc.stderr
@@ -260,6 +260,6 @@ class ClaudeSession:
         if ev.get("is_error") or ev.get("subtype") not in (None, "success"):
             msg = ev.get("result") or ev.get("subtype") or "error"
             self.last_error = str(msg)[:300]
-            p.future.set_exception(RuntimeError(f"claude error: {msg}"))
+            p.future.set_exception(RuntimeError(f"translator error: {msg}"))
         else:
             p.future.set_result(ev.get("result") or "")

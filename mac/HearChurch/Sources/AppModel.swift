@@ -14,6 +14,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var onBattery = Power.onBattery
     @Published var message: String?
     @Published private(set) var meetingStarted: Date?
+    /// How the congregation pays, from hearchurch.com (Settings shows Billing, or AI for its own key).
+    @Published private(set) var billing: HubClient.Billing?
     var openSettings: (() -> Void)?   // set by the window (SwiftUI's openSettings)
 
     let engine = Engine()
@@ -88,6 +90,49 @@ final class AppModel: ObservableObject {
         if !running { relaunchEngine() }
     }
 
+    // MARK: billing
+
+    private static let billingKey = "HubBilling"
+
+    /// Own API key (the AI tab) or credits (the Billing tab). The hub's answer, remembered between launches;
+    /// before the first answer, a key on this Mac means its own key.
+    var ownKeyBilling: Bool {
+        if let billing { return billing.ownKey }
+        if let saved = UserDefaults.standard.string(forKey: Self.billingKey) { return saved == "own_key" }
+        if let access = engine.status?.claude_access { return access != "credits" }
+        switch keyState { case .ok, .bad: return true; default: return false }
+    }
+
+    /// Ask the hub how the congregation pays now. Errors leave what we knew (an older hub, no internet).
+    func refreshBilling() async {
+        guard profile.setupDone, let token = Keychain.get(.deviceToken), !token.isEmpty else { return }
+        do {
+            let b = try await HubClient.billing(token: token)
+            billing = b
+            UserDefaults.standard.set(b.mode, forKey: Self.billingKey)
+        } catch is HubClient.SignedOut {
+            signOut()
+        } catch {}
+    }
+
+    /// Settings → Congregation: a new listener link. The old one keeps working (the hub redirects it).
+    /// Returns why not, or nil.
+    func changeSlug(_ slug: String) async -> String? {
+        guard let token = Keychain.get(.deviceToken), !token.isEmpty else { return "This Mac isn't connected to a congregation." }
+        do {
+            let new = try await HubClient.changeSlug(slug, token: token)
+            profile.slug = new
+            profile.save()
+            if !running { relaunchEngine() }   // the engine's QR code and print page use the link
+            return nil
+        } catch is HubClient.SignedOut {
+            signOut()
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     // MARK: engine
 
     /// The engine runs from the first launch, so voices can download while the operator is still in setup.
@@ -95,6 +140,7 @@ final class AppModel: ObservableObject {
         engine.packageLanguages = OutputLanguage.all.map(\.id)
         engine.start(environment: engineEnvironment())
         Task { await checkKey() }
+        Task { await refreshBilling() }
         Task { await checkHub() }
         Task { await checkDevice() }
     }
@@ -117,6 +163,8 @@ final class AppModel: ObservableObject {
         Keychain.delete(.deviceToken)
         Keychain.delete(.connectCode)
         OnboardingProgress.clear()
+        billing = nil
+        UserDefaults.standard.removeObject(forKey: Self.billingKey)
         var p = profile
         p.slug = ""
         p.claim = ""
@@ -135,7 +183,7 @@ final class AppModel: ObservableObject {
         // The hub records it per Mac (the operator's install stats by app version).
         if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String { env["HEARCHURCH_APP_VERSION"] = v }
         if let key = Keychain.get(.apiKey) {
-            // Unadvertised: a Claude subscription token runs through Claude Code instead of the API.
+            // Unadvertised: a subscription token runs through the command-line tool instead of the API.
             env[HubClient.isSubscriptionToken(key) ? "CLAUDE_CODE_OAUTH_TOKEN" : "ANTHROPIC_API_KEY"] = key
         }
         if profile.setupDone, let token = Keychain.get(.deviceToken),
@@ -228,7 +276,19 @@ final class AppModel: ObservableObject {
                 await pushMeeting()
             }
             if profile.setupDone || profile.languagesPicked { await engine.download(neededDownloads) }
+            await downloadEnglishOnce()
         }
+    }
+
+    private static let englishKey = "EnglishDownloadedOnce"
+
+    /// English is downloaded once, at the first launch (it's in almost every meeting). Removed later, it stays removed.
+    private func downloadEnglishOnce() async {
+        guard !UserDefaults.standard.bool(forKey: Self.englishKey) else { return }
+        await engine.refreshPackages()
+        guard !engine.packages.isEmpty else { return }   // the engine doesn't know its packages yet: next start
+        UserDefaults.standard.set(true, forKey: Self.englishKey)
+        if package("en")?.state != "ready" { await engine.download(["en"]) }
     }
 
     private var lastEngineMeeting: EngineStatus.Meeting?
@@ -252,8 +312,10 @@ final class AppModel: ObservableObject {
         Task { await engine.download([code]) }
     }
 
-    func manageLanguages() {
-        UserDefaults.standard.set(SettingsView.languagesTab, forKey: SettingsView.tabKey)
+    func manageLanguages() { openSettingsTab(SettingsView.languagesTab) }
+
+    func openSettingsTab(_ tab: String) {
+        UserDefaults.standard.set(tab, forKey: SettingsView.tabKey)
         openSettings?()
     }
 
@@ -345,9 +407,9 @@ final class AppModel: ObservableObject {
 
     func saveKey(_ key: String) async -> String? {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard key.hasPrefix("sk-ant-") else { return "That doesn't look like an Anthropic API key (they start with sk-ant-)." }
+        guard key.hasPrefix("sk-ant-") else { return "That doesn't look like an API key (they start with sk-ant-)." }
         keyState = .checking
-        switch await HubClient.checkAnthropicKey(key) {
+        switch await HubClient.checkAPIKey(key) {
         case .success:
             guard Keychain.set(.apiKey, key) else {
                 keyState = .missing
@@ -365,7 +427,7 @@ final class AppModel: ObservableObject {
     func checkKey() async {
         guard let key = Keychain.get(.apiKey) else { keyState = .missing; return }
         keyState = .checking
-        switch await HubClient.checkAnthropicKey(key) {
+        switch await HubClient.checkAPIKey(key) {
         case .success: keyState = .ok
         case .failure(let f): keyState = .bad(f.message)
         }
@@ -440,12 +502,12 @@ final class AppModel: ObservableObject {
                        : Check(id: "key", title: "Translation on Hear Church credit", state: .ok))
         } else {
         switch keyState {
-        case .ok: out.append(Check(id: "key", title: "Claude API key works", state: .ok))
-        case .unknown, .checking: out.append(Check(id: "key", title: "Checking the Claude API key…", state: .pending))
-        case .missing: out.append(Check(id: "key", title: "No Claude API key", state: .bad, detail: "Add one in Settings.",
-                                        action: ("Settings…", { self.openSettings?() })))
-        case .bad(let why): out.append(Check(id: "key", title: "Claude API key problem", state: .bad, detail: why,
-                                             action: ("Settings…", { self.openSettings?() })))
+        case .ok: out.append(Check(id: "key", title: "API key works", state: .ok))
+        case .unknown, .checking: out.append(Check(id: "key", title: "Checking the API key…", state: .pending))
+        case .missing: out.append(Check(id: "key", title: "No API key", state: .bad, detail: "Add one in Settings → AI.",
+                                        action: ("Settings…", { self.openSettingsTab(SettingsView.aiTab) })))
+        case .bad(let why): out.append(Check(id: "key", title: "API key problem", state: .bad, detail: why,
+                                             action: ("Settings…", { self.openSettingsTab(SettingsView.aiTab) })))
         }
         }
         if profile.setupDone && (profile.speakers.isEmpty || profile.targets.isEmpty) {

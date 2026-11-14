@@ -235,7 +235,7 @@ private struct DuringMeeting: View {
                     if st?.source == code {
                         Text("Original").foregroundStyle(.secondary).help("The speaker is speaking \(OutputLanguage.name(code)): it goes out as spoken")
                     } else {
-                        Text(claude(t?.claude.state)).foregroundStyle(t?.claude.state == "ready" || t?.claude.state == "busy" ? .green : .orange)
+                        Text(translatorState(t?.claude.state)).foregroundStyle(t?.claude.state == "ready" || t?.claude.state == "busy" ? .green : .orange)
                     }
                 }
                 if let e = t?.last_error, !e.isEmpty { Text(e).font(.caption).foregroundStyle(.orange) }
@@ -252,7 +252,7 @@ private struct DuringMeeting: View {
         }
     }
 
-    private func claude(_ s: String?) -> String {
+    private func translatorState(_ s: String?) -> String {
         switch s {
         case "ready", "busy": return "Translating"
         case "starting": return "Starting…"
@@ -360,8 +360,8 @@ private struct StatsSection: View {
                 }
                 line("Speech model", sttText(p), warn: !(p?.stt_stepped_down ?? "").isEmpty,
                      help: p?.stt_stepped_down?.isEmpty == false ? p!.stt_stepped_down! : "The speech recognition model in use")
-                if let claude = st?.translate.values.first?.claude.model, !claude.isEmpty {
-                    line("Translator", "Claude \(claude)" + usage(m?.usage, credits: st?.claude_access == "credits"))
+                if let id = st?.translate.values.first?.claude.model, !id.isEmpty {
+                    line("Translator", TranslationQuality.name(id) + usage(m?.usage, credits: st?.claude_access == "credits"))
                 }
                 ForEach(model.targets, id: \.self) { code in
                     LanguageStats(code: code)
@@ -397,7 +397,7 @@ private struct StatsSection: View {
         return text
     }
 
-    /// Claude requests and tokens this meeting; the cost only with the congregation's own key (credits are billed
+    /// Translator requests and tokens this meeting; the cost only with the congregation's own key (credits are billed
     /// per language-hour, not per token).
     private func usage(_ u: [String: Double]?, credits: Bool) -> String {
         guard let u, let turns = u["turns"], turns > 0 else { return "" }
@@ -670,17 +670,23 @@ private struct ChunkRow: View {
                 Group {
                     if let out = chunk.langs[code] {
                         VStack(alignment: .leading, spacing: 4) {
-                            if out.original {
-                                Text("Original").font(.caption2.bold()).foregroundStyle(.secondary)
-                                    .help("The speaker spoke \(OutputLanguage.name(code)): it goes out as spoken, not translated")
+                            // Above the line, level with the original's language and time.
+                            let delay = Self.delay(out)
+                            if out.original || delay != nil {
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    if out.original {
+                                        Text("Original").font(.caption2.bold()).foregroundStyle(.secondary)
+                                            .help("The speaker spoke \(OutputLanguage.name(code)): it goes out as spoken, not translated")
+                                    }
+                                    if let delay {
+                                        Text(delay.text).font(.caption.monospacedDigit()).foregroundStyle(delay.color)
+                                            .help(Self.detail(out))
+                                    }
+                                }
                             }
                             Text(out.text.isEmpty ? (out.status == "pending" ? "…" : "—") : out.text)
                                 .foregroundStyle(color(out.status)).textSelection(.enabled)
                             if let note = note(out) { Text(note).font(.caption).foregroundStyle(.orange) }
-                            if let delay = Self.delay(out) {
-                                Text(delay.text).font(.caption.monospacedDigit()).foregroundStyle(delay.color)
-                                    .help(Self.detail(out))
-                            }
                         }
                     } else {
                         Text("—").foregroundStyle(.tertiary)
@@ -720,7 +726,9 @@ private struct ChunkRow: View {
         var bits = ["Caption: after the speaker finished the sentence"]
         switch out.engine {
         case "original": bits.append("passed through as spoken")
-        case let e? where !e.isEmpty: bits.append("translated by \(e.capitalized)" + (out.mt_ms.map { " in \(Int($0)) ms" } ?? ""))
+        case let e? where !e.isEmpty:
+            let who = e == "claude" ? "the translator" : e.capitalized   // engine ids are not shown as they are
+            bits.append("translated by \(who)" + (out.mt_ms.map { " in \(Int($0)) ms" } ?? ""))
         default: break
         }
         if let ms = out.tts_ms, ms > 0 { bits.append("voice made in \(Int(ms)) ms") }

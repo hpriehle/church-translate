@@ -25,6 +25,9 @@ Accounts (V3.2, docs/v3-languages.md "Accounts"): several e-mails per congregati
                             (Resend; 503 not_configured without RESEND_API_KEY; 429 per IP and per address)
   POST /api/hc/pair         {code, device_name} → {device_token, slug, congregation, billing}; 403 bad_code,
                             429 locked. Takes both kinds of code.
+  POST /api/hc/slug         (device token) {slug} → {ok, slug, url, aliases}: the listener link becomes
+                            hearchurch.com/<slug>; the old slug redirects there for good (slug_aliases, so printed QR
+                            codes keep working). 422 bad_slug (format), 409 reserved / taken.
 Billing (prepaid credits, or the congregation's own Anthropic key through a one-time code Harrison makes):
   POST /api/hc/own-key-code/check {code} → {ok} or 403 bad_code / 429 locked. Doesn't use the code up: onboarding
                             asks for the code before the key, and the congregation only exists after sign-up.
@@ -32,6 +35,9 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
                             congregation (asking again is fine). 403 bad_code (unknown, or used by another), 429 locked.
   GET  /api/hc/billing      (device token) → {billing, balance: {left_min, free_left_min, balance_usd, can_start, …},
                             balance_usd, language_hours_left, out_of_credit, can_buy, buy_usd, message}
+  GET  /api/hc/usage        (device token) → {billing, meetings: [{started_at, ended_at, languages, language_minutes,
+                            language_hours, free_minutes, paid_minutes, cost_usd, billing}], charges: [{kind, at,
+                            amount_usd}]}: the Billing tab's history, newest first (?meetings=, ?charges= limits).
   POST /api/hc/checkout     (device token) {usd} → {url}: a Stripe Checkout page (card only) for that much credit;
                             503 not_configured without STRIPE_SECRET_KEY. Back to /api/hc/checkout/done or /cancelled.
   POST /api/stripe/webhook  Stripe → hub, signed with STRIPE_WEBHOOK_SECRET: checkout.session.completed (paid) calls
@@ -41,6 +47,7 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
   POST /api/admin/congregations/<id>/credits {payment_id, cents} (operator) → {created, credit, balance}: credit a
                             top-up. Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
                             payment's id); 409 when that id was credited with another amount or congregation.
+  POST /api/admin/congregations/<id>/billing {mode: "credits"|"own_key"} (operator): unlock or lock the own key.
   POST /api/admin/own-key-codes {label} (operator) → {code, label}: the only time the code is shown.
   GET  /api/admin/own-key-codes (operator) → {codes: [{id, label, created_at, used_at, voided_at, status, used_by…}]}
   More operator JSON for Siteboard (stats, ledger, refunds, void a code, one congregation): app/hear/admin.py.
@@ -49,7 +56,7 @@ Sign-up geocodes an address that came without lat/lng (Nominatim, or Mapbox with
 answer says whether it worked ("located"); if not, lat/lng stay empty and the app should ask for a map pin and
 send it to /api/hc/location.
 Listener side: hearchurch.com/ (the finder: by location, then by name), hearchurch.com/<slug> (one congregation:
-its live meeting, or "wait for the meeting to start"; /c/<slug> redirects there), GET /api/live?lat&lng
+its live meeting, or "wait for the meeting to start"; /c/<slug> and old slugs redirect there), GET /api/live?lat&lng
 (congregations within a mile of a phone; the phone computes exact distances; the position is never stored or
 logged), GET /api/hc/search?q= (by name or town), GET /api/hc/c/<slug>.
 meeting_times: [{"day": "sun", "time": "10:00"}], timezone: an IANA name (used for "next meeting").
@@ -106,7 +113,8 @@ class Hear:
                        "email_addr": RateLimiter(3, 3600), "claim": RateLimiter(1200, 3600),
                        "verify": RateLimiter(60, 3600), "checkout": RateLimiter(20, 3600),
                        "email_code": RateLimiter(10, 3600), "email_code_addr": RateLimiter(3, 3600),
-                       "pair_code": RateLimiter(30, 3600), "emails": RateLimiter(60, 3600)}
+                       "pair_code": RateLimiter(30, 3600), "emails": RateLimiter(60, 3600),
+                       "slug": RateLimiter(20, 3600)}
 
 
 class FailureLimiter:
@@ -538,6 +546,48 @@ class Pair(BaseModel):
     device_name: str = Field(default="Mac", max_length=60)
 
 
+class SlugChange(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    slug: str = Field(max_length=200)
+
+
+SLUG_MIN, SLUG_MAX = 3, 60
+
+
+def _slug_answer(cong: dict[str, Any], request: Request) -> dict[str, Any]:
+    h = _hear()
+    return {"ok": True, "slug": cong["slug"], "url": f"{_base_url(request)}/{cong['slug']}",
+            "aliases": [a["slug"] for a in h.db.aliases(cong["id"])]}
+
+
+@router.post("/api/hc/slug")
+async def change_slug(request: Request, body: SlugChange):
+    """(device token) The congregation's listener link becomes hearchurch.com/<slug>. The old slug keeps
+    redirecting to the new one for good (printed QR codes). Lowercase letters, digits and single dashes."""
+    cong = _device_congregation(request)
+    slug = body.slug.lower()
+    if not (SLUG_MIN <= len(slug) <= SLUG_MAX and SLUG_RE.fullmatch(slug)):   # typing mistakes don't count below
+        return JSONResponse({"error": "bad_slug", "message": f"Use {SLUG_MIN} to {SLUG_MAX} lowercase letters, digits "
+                                                             "and dashes (no dash at the start or end)."},
+                            status_code=422)
+    _limit(request, "slug", f"cong{cong['id']}")
+    result = _hear().db.change_slug(cong["id"], slug)
+    if result == "reserved":
+        return JSONResponse({"error": "reserved", "message": f"hearchurch.com/{slug} is one of the site's own pages. "
+                                                             "Choose another."}, status_code=409)
+    if result == "taken":
+        return JSONResponse({"error": "taken", "message": f"hearchurch.com/{slug} is already taken. Choose another."},
+                            status_code=409)
+    if result == "not_found":
+        raise HTTPException(403, "Unknown device: sign in again.")
+    if result == "ok":
+        log.info("congregation %d moved from /%s to /%s", cong["id"], cong["slug"], slug)
+        s = _hear().live.get_any(cong["id"])
+        if s is not None:
+            s.slug = slug
+    return _slug_answer(_hear().db.congregation(cong["id"]), request)
+
+
 @router.post("/api/hc/pair")
 async def pair(request: Request, body: Pair):
     """A new Mac enters a pairing code ("Add device" on another Mac) or a code from the e-mail: it gets a device token
@@ -644,6 +694,29 @@ async def billing(request: Request):
     return billing_info(_device_congregation(request))
 
 
+@router.get("/api/hc/usage")
+async def usage_history(request: Request, meetings: int = Query(default=50, ge=1, le=500),
+                        charges: int = Query(default=50, ge=1, le=500)):
+    """(device token) The Billing tab's history, newest first: meetings with their language-hours and cost, and the
+    credit bought or refunded."""
+    from . import admin
+
+    cong = _device_congregation(request)
+    rows = admin.ledger(_hear(), cong["id"])
+    by_session = {r["session_id"]: r for r in rows if r["kind"] == "usage"}
+    out = []
+    for m in reversed(_hear().db.sessions(cong["id"])[-meetings:]):
+        u = by_session.get(m["id"]) or {}
+        mins = u.get("minutes", 0)
+        out.append({"started_at": m["started_at"], "ended_at": m["ended_at"], "billing": m["billing"],
+                    "languages": m["languages"], "language_minutes": u.get("language_minutes", {}),
+                    "language_hours": round(mins / 60, 2), "minutes": mins,
+                    "free_minutes": u.get("free_minutes", 0), "paid_minutes": u.get("paid_minutes", 0),
+                    "cost_usd": u.get("cost_usd", 0)})
+    paid = [{"kind": r["kind"], "at": r["at"], "amount_usd": r["amount_usd"]} for r in rows if r["kind"] != "usage"]
+    return {"billing": cong["billing"], "meetings": out, "charges": paid[:charges]}
+
+
 def billing_info(cong: dict[str, Any]) -> dict[str, Any]:
     """What the operator page and the app show: the balance in dollars and language-hours, whether the next
     meeting can start, and whether credit can be bought here (Stripe set up on this server)."""
@@ -652,7 +725,7 @@ def billing_info(cong: dict[str, Any]) -> dict[str, Any]:
     hours = round(b["left_min"] / 60, 2)
     owed = f"-${-b['balance_usd']:.2f}" if b["balance_usd"] < 0 else f"${b['balance_usd']:.2f}"
     if not credits:
-        message = "Translation is paid with your own Anthropic key."
+        message = "Translation is paid with your own API key."
     elif not b["can_start"]:
         message = f"Out of credit (balance {owed}). Buy credit to start the next meeting."
     else:
@@ -702,7 +775,7 @@ async def checkout(request: Request, body: Buy):
         return JSONResponse({"error": "not_configured", "message": "Buying credit isn't set up on this server yet."},
                             status_code=503)
     if cong["billing"] != "credits":
-        raise HTTPException(409, "This congregation pays with its own Anthropic key.")
+        raise HTTPException(409, "This congregation pays with its own API key.")
     cents, base = body.usd * 100, _base_url(request)
     meta = {"congregation_id": str(cong["id"]), "slug": cong["slug"], "cents": str(cents)}
     hours = cents / CENTS_PER_LANGUAGE_HOUR
@@ -846,7 +919,7 @@ def next_meeting(times: list[dict], tz: str, now: datetime | None = None) -> dic
 
 
 def _congregation(slug: str) -> dict[str, Any]:
-    c = _hear().db.by_slug(slug)
+    c = _hear().db.by_slug_or_alias(slug)
     if c is None or c["hidden"] or not c["email_verified"]:
         raise HTTPException(404, "No such congregation.")
     return c
@@ -873,7 +946,10 @@ async def listener_page(slug: str):
     """hearchurch.com/<slug>: the congregation's page (from its QR code or link). Not live → it waits."""
     from .. import main
 
-    c = _hear().db.by_slug(slug) if SLUG_RE.fullmatch(slug) and slug not in RESERVED_SLUGS else None
+    ok = SLUG_RE.fullmatch(slug) and slug not in RESERVED_SLUGS
+    c = _hear().db.by_slug(slug) if ok else None
+    if c is None and ok and (moved := _hear().db.slug_alias(slug)) is not None:
+        return RedirectResponse(f"/{moved['slug']}", status_code=301)   # an old link or printed QR code
     if c is None or c["hidden"] or not c["email_verified"]:
         return _page("Not found", "No congregation has this address. Find yours at hearchurch.com/listen.", 404)
     return main.page(WEB_DIR / "listener" / "index.html")
@@ -945,7 +1021,7 @@ async def stream(slug: str, code: str):
 @router.websocket("/c/{slug}/ws/listen")
 async def ws_listen(ws: WebSocket, slug: str):
     h = _hear()
-    c = h.db.by_slug(slug)
+    c = h.db.by_slug_or_alias(slug)
     if c is None or c["hidden"] or not c["email_verified"]:
         await ws.close(code=4404)
         return
@@ -1008,6 +1084,9 @@ async def admin_list(request: Request):
     main.require_operator(request)
     h = _hear()
     out = []
+    aliases: dict[int, list] = {}
+    for a in h.db.aliases():
+        aliases.setdefault(a["congregation_id"], []).append(a)
     for c in h.db.list_congregations():
         s = h.live.get_any(c["id"])
         out.append({**{k: c[k] for k in ("id", "slug", "church", "name", "unit_type", "stake", "address", "email",
@@ -1016,8 +1095,27 @@ async def admin_list(request: Request):
                     "wifi_only": bool(s and s.private),
                     "listeners": s.listeners() if s else 0,
                     "last_session": (h.db.sessions(c["id"]) or [{}])[-1].get("started_at"),
-                    "balance": h.db.balance(c["id"])})
+                    "balance": h.db.balance(c["id"]),
+                    "aliases": [a["slug"] for a in aliases.get(c["id"], [])]})
     return {"congregations": out}
+
+
+class BillingMode(BaseModel):
+    mode: Literal["credits", "own_key"]
+
+
+@router.post("/api/admin/congregations/{cid}/billing")
+async def admin_billing(request: Request, cid: int, body: BillingMode):
+    """Unlock (own_key) or lock (credits) the congregation's own API key. Meetings already started keep their mode;
+    the Mac shows the AI tab, or the Billing tab, the next time it asks GET /api/hc/billing."""
+    from .. import main
+
+    main.require_operator(request)
+    h = _hear()
+    if not h.db.set_billing(cid, body.mode):
+        raise HTTPException(404, "No such congregation.")
+    log.info("congregation %d billing set to %s by the operator", cid, body.mode)
+    return {"ok": True, "billing": billing_info(h.db.congregation(cid))}
 
 
 class NewOwnKeyCode(BaseModel):

@@ -171,7 +171,8 @@ One church in one call.
 ```json
 {"congregation": {"id": 1, "slug": "dakar", "title": "Dakar Ward", "church": "LDS", "name": "Dakar", "unit_type": "ward",
                   "stake": null, "address": "", "city": "", "email": "bishop@example.org", "email_verified": true,
-                  "hidden": false, "created_at": 1794635908.33, "billing": "credits", "timezone": "", "meeting_times": []},
+                  "hidden": false, "created_at": 1794635908.33, "billing": "credits", "timezone": "", "meeting_times": [],
+                  "aliases": ["dakar-ward"]},
  "billing": {"billing": "credits", "balance_usd": 17.5, "language_hours_left": 3.5, "out_of_credit": false,
              "balance": {"free_left_min": 0.0, "used_min": 90.0, "metered_min": 90.0, "bought_usd": 20.0, "…": "…"},
              "message": "Credit $17.50 · 3.5 language-hours left.", "…": "…"},
@@ -193,8 +194,31 @@ One church in one call.
 - `meetings`: the newest first, including meetings with no speech (which show 0 minutes). `languages` are the
   languages offered, and `language_minutes` are the ones actually heard.
 - `own_key_codes`: the codes this congregation used.
+- `congregation.aliases`: the congregation's old slugs, oldest first. Each one redirects (301) to the current
+  `slug` for good, so printed QR codes keep working. The list (`GET /api/admin/congregations`) has them too.
 - `devices`: every Mac, revoked ones too (`revoked_at` set, listed last). `emails`: the main (billing) one first.
 - For more transactions, call `/api/admin/transactions?congregation={id}&before=<next_before>`.
+
+## POST /api/admin/congregations/{id}/billing  `{"mode": "credits"}` or `{"mode": "own_key"}`
+
+How the congregation pays. `own_key` unlocks its own API key: the Mac shows the **AI** tab in Settings (paste the
+key) instead of **Billing**, and meetings are never charged. `credits` locks it again: prepaid credit, with the
+Billing tab. This does the same as an own-key code, without one.
+
+→ `{"ok": true, "billing": {…the same object as "billing" in GET /api/admin/congregations/{id}…}}`. 404 for an
+unknown congregation, 422 for another mode. Setting the mode it already has is fine.
+
+- A meeting keeps the mode it started under. The switch counts from the next meeting.
+- The Mac's engine follows the mode it gets from `GET /api/hc/billing`. The Settings window asks again each time it
+  opens. Switching to `own_key` doesn't put a key on the Mac: until someone pastes one in the AI tab, translation
+  fails (the hub's proxy answers `409 own_key`). Switch only once the church has its key ready.
+- Today `harlem-first` is `own_key` (grandfathered) and `riga-2` is `credits`.
+
+## Listener link changes (the church does it)
+
+The Mac changes the slug with `POST /api/hc/slug {slug}` (device token). There is no admin route for it. The old slug
+goes into `slug_aliases` and redirects forever. A slug that is reserved (`RESERVED_SLUGS` in `app/hear/db.py`,
+including `source` and the site's pages), already used, or another congregation's old slug is refused.
 
 ## E-mails and devices (V3.2)
 

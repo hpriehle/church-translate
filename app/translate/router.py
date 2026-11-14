@@ -112,7 +112,7 @@ class Translator:
         self._keep_warm = asyncio.create_task(self._ollama_keep_warm())
         if self.cfg.mode != "ollama":
             if not self.has_claude:
-                self.last_error = "claude CLI not found — using Ollama only"
+                self.last_error = "translator tool not found — using Ollama only"
                 log.warning(self.last_error)
             else:
                 self._maintain()
@@ -229,7 +229,7 @@ class Translator:
             self._spawn_failures += 1
             backoff = min(120.0, 5.0 * 2 ** (self._spawn_failures - 1))
             self._restart_after = time.monotonic() + backoff
-            self.last_error = f"Claude start failed: {e} {s.last_error}".strip()
+            self.last_error = f"Translator start failed: {e} {s.last_error}".strip()
             log.warning("%s (retry in %.0fs)", self.last_error, backoff)
             await s.close()
             self.retired_usage.add(s.usage)
@@ -259,7 +259,7 @@ class Translator:
             s = self.active
         if claude_allowed:
             if time.monotonic() < self._paused_until:
-                note = "claude paused after errors"
+                note = "translator paused after errors"
             elif s and s.alive and s.ready and not s.busy:
                 claude_task = asyncio.create_task(s.ask(user_message(english, condense, scripture)))
                 claude_task.add_done_callback(_swallow)
@@ -276,7 +276,7 @@ class Translator:
             except asyncio.TimeoutError:
                 note = f"claude > {limit:g}s"
             except Exception as e:
-                note = "claude error"
+                note = "translator error"
                 self._claude_error(str(e))
 
         if not self.uses_ollama:

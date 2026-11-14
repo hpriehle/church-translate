@@ -1,6 +1,6 @@
 import Foundation
 
-/// hearchurch.com's sign-up API (app/hear/api.py) and the Anthropic key check.
+/// hearchurch.com's sign-up API (app/hear/api.py) and the API key check.
 enum HubClient {
     struct Failure: LocalizedError {
         let message: String
@@ -9,7 +9,7 @@ enum HubClient {
 
     /// With e-mail verification off (for now) the device token comes back at once; otherwise a claim to poll.
     struct SignUpResult { let slug: String; let deviceToken: String?; let claim: String; let located: Bool; let connectCode: String? }
-    /// billing: how the congregation pays, "credits" or "own_key" (its own Anthropic key, through a one-time code).
+    /// billing: how the congregation pays, "credits" or "own_key" (its own API key, through a one-time code).
     struct Joined {
         let token: String; let slug: String; let name: String; let church: String; let billing: String
         var unitType = ""; var stake = ""; var address = ""
@@ -72,6 +72,13 @@ enum HubClient {
     struct Account { let mainEmail: String; let emails: [Email]; let devices: [Device] }
     /// The hub no longer knows this Mac's token (revoked, or the congregation is gone): set up again.
     struct SignedOut: LocalizedError { var errorDescription: String? { "This Mac was disconnected from the congregation." } }
+    /// The hub is older than this app and doesn't have that call yet (FastAPI's own 404 for an unknown route).
+    /// Nothing is wrong: show it quietly.
+    struct NotAvailable: LocalizedError { var errorDescription: String? { "Available after the next update." } }
+
+    private static func missingRoute(_ json: [String: Any], _ status: Int) -> Bool {
+        (status == 404 || status == 405) && json["error"] == nil && (json["detail"] as? String).map { $0 == "Not Found" || $0 == "Method Not Allowed" } ?? true
+    }
 
     static func account(token: String) async throws -> Account {
         try accountAnswer(try await get("/api/hc/account", token: token))
@@ -92,6 +99,7 @@ enum HubClient {
     /// "Add device": a one-time code another Mac enters, and when it stops working.
     static func pairingCode(token: String) async throws -> (code: String, expires: Date) {
         let (json, status) = try await send("/api/hc/pairing-code", [:], token: token)
+        if missingRoute(json, status) { throw NotAvailable() }
         if status == 403 { throw SignedOut() }
         if status == 429 { throw Failure(message: "Too many codes this hour. Try again later.") }
         guard (200..<300).contains(status), let code = json["code"] as? String else {
@@ -103,6 +111,7 @@ enum HubClient {
 
     private static func accountAnswer(_ answer: ([String: Any], Int)) throws -> Account {
         let (json, status) = answer
+        if missingRoute(json, status) { throw NotAvailable() }
         switch status {
         case 200..<300: break
         case 403: throw SignedOut()
@@ -120,6 +129,87 @@ enum HubClient {
                           appVersion: d["app_version"] as? String ?? "", this: d["this"] as? Bool ?? false)
         }
         return Account(mainEmail: json["main_email"] as? String ?? emails.first { $0.main }?.email ?? "", emails: emails, devices: devices)
+    }
+
+    // MARK: billing (Settings → Billing) and the listener link
+
+    /// GET /api/hc/billing: how the congregation pays and what it has left.
+    struct Billing: Equatable {
+        let mode: String               // "credits" or "own_key"
+        let balanceUSD: Double
+        let hoursLeft: Double?         // language-hours: the free hour and the credit
+        let freeLeftHours: Double
+        let outOfCredit: Bool
+        let canBuy: Bool
+        let buyUSD: [Int]
+        let usdPerHour: Double
+        let message: String
+        var ownKey: Bool { mode == "own_key" }
+    }
+
+    static func billing(token: String) async throws -> Billing {
+        let (json, status) = try await get("/api/hc/billing", token: token)
+        try check(json, status)
+        let b = json["balance"] as? [String: Any] ?? [:]
+        func num(_ v: Any?) -> Double? { (v as? Double) ?? (v as? Int).map(Double.init) }
+        return Billing(mode: json["billing"] as? String ?? "credits", balanceUSD: num(json["balance_usd"]) ?? 0,
+                       hoursLeft: num(json["language_hours_left"]), freeLeftHours: (num(b["free_left_min"]) ?? 0) / 60,
+                       outOfCredit: json["out_of_credit"] as? Bool ?? false, canBuy: json["can_buy"] as? Bool ?? false,
+                       buyUSD: (json["buy_usd"] as? [Int]) ?? [10, 25, 50, 100], usdPerHour: num(json["usd_per_language_hour"]) ?? 5,
+                       message: json["message"] as? String ?? "")
+    }
+
+    struct Meeting: Identifiable, Hashable {
+        let startedAt: Date; let endedAt: Date?; let languages: [String]; let languageHours: Double
+        let freeMinutes: Double; let paidMinutes: Double; let costUSD: Double; let ownKey: Bool
+        var id: Date { startedAt }
+    }
+    struct Charge: Identifiable, Hashable {
+        let kind: String; let at: Date; let amountUSD: Double
+        var id: String { "\(kind)\(at.timeIntervalSince1970)" }
+    }
+
+    /// GET /api/hc/usage: meetings and their language-hours, and credit bought or refunded, newest first.
+    static func usage(token: String) async throws -> (meetings: [Meeting], charges: [Charge]) {
+        let (json, status) = try await get("/api/hc/usage", token: token)
+        try check(json, status)
+        func num(_ v: Any?) -> Double { (v as? Double) ?? (v as? Int).map(Double.init) ?? 0 }
+        let meetings = (json["meetings"] as? [[String: Any]] ?? []).map { m in
+            Meeting(startedAt: Date(timeIntervalSince1970: num(m["started_at"])),
+                    endedAt: (m["ended_at"] as? Double).map { Date(timeIntervalSince1970: $0) },
+                    languages: m["languages"] as? [String] ?? [], languageHours: num(m["language_hours"]),
+                    freeMinutes: num(m["free_minutes"]), paidMinutes: num(m["paid_minutes"]), costUSD: num(m["cost_usd"]),
+                    ownKey: m["billing"] as? String == "own_key")
+        }
+        let charges = (json["charges"] as? [[String: Any]] ?? []).map { c in
+            Charge(kind: c["kind"] as? String ?? "", at: Date(timeIntervalSince1970: num(c["at"])), amountUSD: num(c["amount_usd"]))
+        }
+        return (meetings, charges)
+    }
+
+    /// POST /api/hc/checkout: a Stripe Checkout page for that much credit, opened in the browser.
+    static func checkout(usd: Int, token: String) async throws -> URL {
+        let (json, status) = try await send("/api/hc/checkout", ["usd": usd], token: token)
+        if status == 503 { throw Failure(message: "Buying credit isn't set up yet. Write to support@hearchurch.com.") }
+        try check(json, status)
+        guard let s = json["url"] as? String, let url = URL(string: s) else { throw Failure(message: "The payment page didn't open. Try again.") }
+        return url
+    }
+
+    /// POST /api/hc/slug: the listener link becomes hearchurch.com/<slug>; the old one keeps redirecting.
+    static func changeSlug(_ slug: String, token: String) async throws -> String {
+        let (json, status) = try await send("/api/hc/slug", ["slug": slug], token: token)
+        try check(json, status)
+        return json["slug"] as? String ?? slug
+    }
+
+    /// Throws for anything but a 2xx: NotAvailable (older hub), SignedOut (403), or the hub's message.
+    private static func check(_ json: [String: Any], _ status: Int) throws {
+        if (200..<300).contains(status) { return }
+        if missingRoute(json, status) { throw NotAvailable() }
+        if status == 403 { throw SignedOut() }
+        if status == 429 { throw Failure(message: message(json) ?? "Too many tries. Try again later.") }
+        throw Failure(message: message(json) ?? "Server error \(status).")
     }
 
     /// Hub errors are {"error": code, "message": text}, or FastAPI's {"detail": …}.
@@ -144,7 +234,7 @@ enum HubClient {
         try ownKeyAnswer(json, status)
     }
 
-    /// Use the code up for this Mac's congregation: it pays with its own Anthropic key from now on.
+    /// Use the code up for this Mac's congregation: it pays with its own API key from now on.
     static func redeemOwnKeyCode(_ code: String, token: String) async throws {
         let (json, status) = try await send("/api/hc/own-key-code", ["code": code], token: token)
         try ownKeyAnswer(json, status)
@@ -175,9 +265,8 @@ enum HubClient {
     static func isSubscriptionToken(_ key: String) -> Bool { key.hasPrefix("sk-ant-oat") }
 
     /// A free call that proves the key works: list the models it may use.
-    static func checkAnthropicKey(_ key: String) async -> Result<Void, Failure> {
-        // A subscription token (from `claude setup-token`) can't be checked against the API; Claude Code
-        // uses it, and the engine reports any problem with it.
+    static func checkAPIKey(_ key: String) async -> Result<Void, Failure> {
+        // A subscription token can't be checked against the API; the engine reports any problem with it.
         if isSubscriptionToken(key) {
             return key.count >= 40 && key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
                 ? .success(()) : .failure(Failure(message: "That token looks incomplete. Copy it again."))
@@ -190,12 +279,12 @@ enum HubClient {
             let (_, resp) = try await URLSession.shared.data(for: req)
             switch (resp as? HTTPURLResponse)?.statusCode ?? 0 {
             case 200: return .success(())
-            case 401: return .failure(Failure(message: "Anthropic did not accept this key. Copy it again from the console."))
+            case 401: return .failure(Failure(message: "This key was not accepted. Copy it again from the console."))
             case 403: return .failure(Failure(message: "This key is not allowed to use the API (check the workspace)."))
-            case let code: return .failure(Failure(message: "Anthropic answered \(code). Try again in a minute."))
+            case let code: return .failure(Failure(message: "The key check answered \(code). Try again in a minute."))
             }
         } catch {
-            return .failure(Failure(message: "Cannot reach Anthropic. Is the internet connected?"))
+            return .failure(Failure(message: "Cannot check the key right now. Is the internet connected?"))
         }
     }
 

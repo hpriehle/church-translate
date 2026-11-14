@@ -514,9 +514,9 @@ struct PackageList: Decodable, Equatable { let packages: [PackageStatus] }
 struct EngineSettings: Decodable, Equatable {
     struct Settings: Decodable, Equatable {
         struct Audio: Decodable, Equatable { let input_device: String; let input_channel: Int; let input_gain: Double }
-        struct Tts: Decodable, Equatable { let engine: String; let voice: String; let rate: Int; let volume: Double }
+        struct Tts: Decodable, Equatable { let engine: String; let voice: String; let rate: Int; let volume: Double; let speed: Double? }
         struct Translate: Decodable, Equatable { let claude_model: String }
-        struct Voice: Decodable, Equatable { let engine: String; let voice: String }
+        struct Voice: Decodable, Equatable { let engine: String; let voice: String; let speed: Double? }
         struct Server: Decodable, Equatable { let sharing: String? }
         struct Stt: Decodable, Equatable { let language: String }
         let languages: [String]

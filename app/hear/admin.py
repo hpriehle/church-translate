@@ -6,7 +6,7 @@ docs/admin-api.md:
   GET  /api/admin/transactions?congregation=&kind=&limit=&before=
   POST /api/admin/refunds {payment_id, cents?}
   POST /api/admin/own-key-codes/{id}/void
-  GET  /api/admin/congregations/{id}
+  GET  /api/admin/congregations/{id}          (congregation.aliases: old slugs that redirect to the current one)
   GET  /api/admin/congregations/{id}/account   its e-mails (main first) and devices (revoked ones too)
   POST /api/admin/devices/{id}/revoke          the device's token stops working; its meeting ends
 
@@ -333,7 +333,8 @@ async def admin_congregation(request: Request, cid: int, meetings: int = Query(d
         "congregation": {**{k: c[k] for k in ("id", "slug", "church", "name", "unit_type", "stake", "address", "city",
                                               "email", "email_verified", "hidden", "created_at", "billing",
                                               "timezone", "meeting_times")},
-                         "title": api.display_name(c)},
+                         "title": api.display_name(c),
+                         "aliases": [x["slug"] for x in h.db.aliases(cid)]},
         "billing": api.billing_info(c),
         "live": s is not None, "wifi_only": bool(s and s.private), "listeners": s.listeners() if s else 0,
         "devices": _devices(h, cid),
