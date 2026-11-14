@@ -6,6 +6,18 @@ Included in this repository:
   (https://huggingface.co/datasets/Matthijs/cmu-arctic-xvectors), free to use with attribution.
 - `download/src/fonts/` — Alegreya and Alegreya Sans, SIL Open Font License 1.1 (licenses alongside).
 
+Included in the Mac app:
+- Piper (`piper-tts`, https://github.com/OHF-Voice/piper1-gpl) — GNU GPL v3 or later; it contains eSpeak NG
+  (https://github.com/espeak-ng/espeak-ng) and its pronunciation data — GNU GPL v3 or later.
+- Sparkle (https://github.com/sparkle-project/Sparkle) — MIT License, with bsdiff (BSD) and ed25519 (zlib-style).
+- Python (python-build-standalone) — Python Software Foundation License, with the licences of its bundled libraries.
+- Python packages, each with its licence in its `*.dist-info` folder inside the app's `python` folder. Most are MIT,
+  BSD or Apache 2.0; these are not: `lameenc` (with LAME) — GNU LGPL v3; `soxr` (with libsoxr) — GNU LGPL v2.1 or
+  later; `certifi` and `tqdm` — Mozilla Public License 2.0; SciPy's libgfortran/libgcc — GNU GPL v3 with the GCC
+  Runtime Library Exception. `ctranslate2` (Intel Macs) — MIT License, Copyright (c) 2018- SYSTRAN.
+- Intel Macs only: PyAV (`av`, BSD) contains FFmpeg — GNU LGPL v3 or later — built with x264 and x265 — GNU GPL v2
+  or later.
+
 Downloaded at setup (not included):
 - Whisper large-v3-turbo / faster-whisper models — MIT License (OpenAI).
 - Piper voices `fr_FR-tom-medium` and `fr_FR-siwis-medium` — see each voice's MODEL_CARD on
@@ -14,6 +26,9 @@ Downloaded at setup (not included):
   `ru_RU-dmitri-medium` (CC0), `pt_BR-cadu-medium` and `pt_BR-faber-medium` (CC0), `uk_UA-tetiana-high` and
   `uk_UA-oleksa-high` (Apache-2.0), `fa_IR-amir-medium` and `fa_IR-ganji-medium` (CC0), `ne_NP-chitwan-medium` (CC0),
   `zh_CN-chaowen-medium` (CC0), `en_US-mike-medium` (CC0), from the same repository.
+- `fr_FR-siwis-medium`, `ru_RU-dmitri-medium`, `pt_BR-faber-medium` and `zh_CN-chaowen-medium` are fine-tuned from a
+  model trained on the Hi-Fi TTS dataset (reader 92, Cori Samuel; Bakhturina, Lavrukhin, Ginsburg and Zhang, NVIDIA,
+  https://www.openslr.org/109/), CC BY 4.0.
 - Piper voice `en_US-kathleen-medium` — CC0 recordings (https://github.com/OHF-Voice/voice-datasets), fine-tuned from
   a model trained on the Hi-Fi TTS dataset (reader 92, Cori Samuel; Bakhturina, Lavrukhin, Ginsburg and Zhang, NVIDIA,
   https://www.openslr.org/109/), CC BY 4.0 — from the same repository.
