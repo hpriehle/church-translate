@@ -656,7 +656,7 @@ private struct DevicesSection: View {
                         if left > 0 {
                             Text(code).font(.system(size: 40, weight: .bold, design: .monospaced)).textSelection(.enabled)
                                 .frame(maxWidth: .infinity)
-                            Text("On the new Mac: Connect to my congregation → I have a code. Works once, for \(left / 60):\(String(format: "%02d", left % 60)) more.")
+                            Text("On the new Mac: Use a code from another Mac. Works once, for \(left / 60):\(String(format: "%02d", left % 60)) more.")
                                 .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                         } else {
                             Text("That code has expired.").foregroundStyle(.secondary)
@@ -795,10 +795,7 @@ private struct BillingSettings: View {
     @State private var confirmRemove = false
     @State private var confirmBuy: HubClient.Bundle?   // 1-click always asks first (Maddie, 2026-11-15)
     @State private var cardBusy = false
-    @State private var code = ""
-    @State private var codeBusy = false
-    @State private var codeResult: String?
-    @State private var codeFailed = false
+    @State private var opening = false
     @State private var autoBusy = false
     @State private var watching: Task<Void, Never>?
 
@@ -814,7 +811,7 @@ private struct BillingSettings: View {
                 buy
                 card
                 auto
-                codes
+                manage
                 history
             }
         }
@@ -955,19 +952,16 @@ private struct BillingSettings: View {
         }
     }
 
-    @ViewBuilder private var codes: some View {
-        Section("Have a code?") {
+    /// Everything else (codes, the congregation, its e-mails and Macs) is on the web account.
+    @ViewBuilder private var manage: some View {
+        Section {
             HStack {
-                TextField("Code", text: $code, prompt: Text("7KQM-X2PA"))
-                    .textFieldStyle(.roundedBorder).font(.body.monospaced())
-                    .onChange(of: code) { _, v in let f = HubClient.pairingFormat(v); if f != v { code = f } }
-                    .onSubmit { Task { await redeem() } }
-                Button("Redeem") { Task { await redeem() } }
-                    .disabled(codeBusy || code.filter { $0 != "-" }.count < 8)
+                Button("Buy credit / Manage billing…") { Task { await openAccount() } }.disabled(opening)
+                if opening { ProgressView().controlSize(.small) }
             }
-            if let codeResult {
-                Text(codeResult).foregroundStyle(codeFailed ? .red : .green).fixedSize(horizontal: false, vertical: true)
-            }
+        } footer: {
+            Text("Opens your account on hearchurch.com, already signed in: buy credit, change the card, see receipts, or redeem a code from Hear Church.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -1152,21 +1146,13 @@ private struct BillingSettings: View {
         }
     }
 
-    private func redeem() async {
-        guard let token, !code.isEmpty, !codeBusy else { return }
-        codeBusy = true
-        defer { codeBusy = false }
-        do {
-            codeResult = try await HubClient.redeemCode(code, token: token)
-            codeFailed = false
-            code = ""
-            await load()
-        } catch is HubClient.SignedOut {
-            model.signOut()
-        } catch {
-            codeResult = error.localizedDescription
-            codeFailed = true
-        }
+    /// hearchurch.com/account, signed in by a one-time link from the hub (or the plain page, to sign in there).
+    private func openAccount() async {
+        guard let token else { return }
+        opening = true
+        defer { opening = false }
+        NSWorkspace.shared.open(await HubClient.accountLink(token: token))
+        watch()   // a purchase or a code there shows here within a minute
     }
 
     /// After a payment or a card on Stripe's page: the webhook brings the change within seconds; look again for a while.

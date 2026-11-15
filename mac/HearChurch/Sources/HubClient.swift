@@ -1,34 +1,16 @@
 import Foundation
 
-/// hearchurch.com's sign-up API (app/hear/api.py) and the API key check.
+/// hearchurch.com's API for the Mac (app/hear/api.py): sign-in by code, the account, billing, and the API key check.
 enum HubClient {
     struct Failure: LocalizedError {
         let message: String
         var errorDescription: String? { message }
     }
 
-    /// With e-mail verification off (for now) the device token comes back at once; otherwise a claim to poll.
-    struct SignUpResult { let slug: String; let deviceToken: String?; let claim: String; let located: Bool; let connectCode: String? }
-    /// billing: how the congregation pays, "credits" or "own_key" (its own API key, through a one-time code).
+    /// billing: how the congregation pays, "credits" or "own_key" (its own API key, switched on by Hear Church).
     struct Joined {
         let token: String; let slug: String; let name: String; let church: String; let billing: String
         var unitType = ""; var stake = ""; var address = ""
-    }
-
-    static func signUp(_ p: Profile, deviceName: String) async throws -> SignUpResult {
-        var body: [String: Any] = [
-            "church": p.church, "name": p.name, "unit_type": p.unitType, "email": p.email,
-            "address": p.address, "timezone": p.timezone, "device_name": deviceName,
-            "meeting_times": p.meetingTimes.map { ["day": $0.day, "time": $0.time] },
-        ]
-        if !p.stake.isEmpty { body["stake"] = p.stake }
-        let more = p.extraEmails.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && $0 != p.email }
-        if !more.isEmpty { body["emails"] = more }
-        if let lat = p.lat, let lng = p.lng { body["lat"] = lat; body["lng"] = lng }
-        let (json, _) = try await post("/api/hc/signup", body)
-        return SignUpResult(slug: json["slug"] as? String ?? "", deviceToken: json["device_token"] as? String,
-                            claim: json["claim"] as? String ?? "", located: json["located"] as? Bool ?? false,
-                            connectCode: json["connect_code"] as? String)
     }
 
     /// "Connect by code": a code from "Add device" on another Mac, or from the e-mail (POST /api/hc/pair).
@@ -311,6 +293,15 @@ enum HubClient {
         }
     }
 
+    /// POST /api/hc/web/link: a one-time link (2 minutes) that opens hearchurch.com/account signed in, on Billing.
+    /// An older hub without it: the plain account page (sign in there by e-mailed code).
+    static func accountLink(token: String) async -> URL {
+        let plain = AppPaths.hub.appendingPathComponent("account")
+        guard let answer = try? await send("/api/hc/web/link", [:], token: token), (200..<300).contains(answer.1),
+              let s = answer.0["url"] as? String, let url = URL(string: s), ["https", "http"].contains(url.scheme ?? "") else { return plain }
+        return url
+    }
+
     /// POST /api/hc/slug: the listener link becomes hearchurch.com/<slug>; the old one keeps redirecting.
     static func changeSlug(_ slug: String, token: String) async throws -> String {
         let (json, status) = try await send("/api/hc/slug", ["slug": slug], token: token)
@@ -340,29 +331,6 @@ enum HubClient {
         let secs = (json["retry_after"] as? Double) ?? (json["retry_after"] as? Int).map(Double.init) ?? 60
         let mins = max(1, Int((secs / 60).rounded(.up)))
         return Failure(message: "Too many tries. Try again in \(mins) minute\(mins == 1 ? "" : "s").")
-    }
-
-    /// Is this an unused one-time own-key code (from Harrison, for one church)? Nothing is used up: the
-    /// congregation doesn't exist yet. Throws with a message to show when it isn't.
-    static func checkOwnKeyCode(_ code: String) async throws {
-        let (json, status) = try await send("/api/hc/own-key-code/check", ["code": code])
-        try ownKeyAnswer(json, status)
-    }
-
-    /// Use the code up for this Mac's congregation: it pays with its own API key from now on.
-    static func redeemOwnKeyCode(_ code: String, token: String) async throws {
-        let (json, status) = try await send("/api/hc/own-key-code", ["code": code], token: token)
-        try ownKeyAnswer(json, status)
-    }
-
-    private static func ownKeyAnswer(_ json: [String: Any], _ status: Int) throws {
-        switch status {
-        case 200..<300: return
-        case 403 where json["error"] as? String == "bad_code":
-            throw Failure(message: "That code doesn't work. Check it, or write to support@hearchurch.com. Each code works once.")
-        case 429: throw tooManyTries(json)
-        default: throw Failure(message: detail(json) ?? "Server error \(status).")
-        }
     }
 
     static func setLocation(lat: Double, lng: Double, address: String, token: String) async throws {

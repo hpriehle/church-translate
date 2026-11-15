@@ -49,7 +49,7 @@ struct AISettings: View {
     }
 }
 
-/// How to make the key, in the AI tab and in setup for a congregation with an own-key code.
+/// How to make the key, in the AI tab and in setup for a congregation on its own API key.
 struct APIKeyGuide: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

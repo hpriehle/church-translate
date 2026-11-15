@@ -19,6 +19,9 @@ JSON (CSRF: every POST carries X-CSRF-Token, and an Origin, when the browser sen
   POST /api/hc/web/switch    {id} → another congregation of the same address
   POST /api/hc/web/logout    {everywhere?} → the session (or every session of the address) ends; cookie cleared.
   GET  /api/hc/receipts/<credit id> → 302 to Stripe's receipt for that top-up.
+  POST /api/hc/web/link      (the Mac, device token) → {url}: a one-time link (2 minutes) for "Buy credit / Manage
+                             billing"; GET /account/link?t=… uses it up, signs the browser in as the congregation's main
+                             address and goes on to /account#billing (a dead link: just /account, to sign in).
 Everything else the account pages do goes through the Mac's own routes (/api/hc/billing, /topup, /emails, …): the
 session cookie is accepted there in place of a device token, only for WEB_ROUTES (api.device_and_congregation).
 
@@ -356,6 +359,48 @@ async def logout(request: Request, body: LogoutIn | None = None):
             h.db.revoke_web_session(s["id"])
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(SESSION_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
+    return resp
+
+
+# ------------------------------------------------------------------ the Mac's "Buy credit / Manage billing"
+
+@router.post("/api/hc/web/link")
+async def web_link(request: Request):
+    """The Mac (device token only, never a browser session) asks for a one-time link that opens
+    hearchurch.com/account already signed in as the congregation's main address: {url}, good for WEB_LINK_TTL_S."""
+    if not request.headers.get("authorization", "").startswith("Bearer "):
+        raise HTTPException(403, "Unknown device: sign in again.")
+    device, cong = api.device_and_congregation(request)
+    api._limit(request, "web_link", f"cong{cong['id']}")
+    h = _hear()
+    email = h.db.main_email(cong["id"])
+    if not email:
+        raise HTTPException(409, {"error": "no_email", "message": "Your congregation has no e-mail address yet."})
+    token = h.db.new_web_link(email, cong["id"])
+    return {"url": f"{api._base_url(request)}/account/link?t={token}"}
+
+
+@router.get("/account/link")
+async def web_link_open(request: Request, t: str = ""):
+    """Use up the Mac's one-time link: a session for its address, then on to the Billing section. A used, expired or
+    unknown link just shows the sign-in page."""
+    h = _hear()
+    got = h.db.use_web_link(t)
+    resp = RedirectResponse("/account#billing", status_code=303,
+                            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    if got is None:
+        return resp
+    email, cid = got
+    cong = h.db.congregation(cid)
+    if cong is None or cong["hidden"] or email not in {e["email"] for e in h.db.emails(cid)}:
+        return resp
+    old = current_session(request)
+    if old is not None:
+        h.db.revoke_web_session(old["id"])   # this browser now signs in as the link says
+    token, _csrf = h.db.new_web_session(email, cid)
+    log.info("%s: signed in on the web from the Mac", cong["slug"])
+    resp.set_cookie(SESSION_COOKIE, token, max_age=int(WEB_SESSION_TTL_S), httponly=True, secure=True,
+                    samesite="lax", path="/")
     return resp
 
 

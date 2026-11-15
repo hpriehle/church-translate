@@ -209,6 +209,7 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     revoked_at REAL
 );
 CREATE INDEX IF NOT EXISTS web_codes_email ON web_codes(email, purpose);
+CREATE INDEX IF NOT EXISTS web_codes_hash ON web_codes(code_hash);
 CREATE INDEX IF NOT EXISTS web_sessions_email ON web_sessions(email);
 CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
 CREATE INDEX IF NOT EXISTS code_redemptions_cong ON code_redemptions(congregation_id, status);
@@ -313,6 +314,7 @@ AUTO_TOPUP_BELOW_S = 3600        # an auto top-up runs after a meeting when the 
 WEB_CODE_TTL_S = 10 * 60     # the 6-digit codes e-mailed by hearchurch.com/start and /account
 WEB_CODE_TRIES = 5           # wrong guesses before such a code stops working
 WEB_SESSION_TTL_S = 30 * 24 * 3600   # a hearchurch.com/account sign-in lasts this long (unless signed out)
+WEB_LINK_TTL_S = 2 * 60      # the Mac's one-time "Manage billing" sign-in link
 MAX_EMAILS = 10              # addresses per congregation
 DEVICE_CODE_LEN = 8          # add-a-Mac codes "7KQM-X2PA": 30^8, ~39 bits, short-lived and behind failure limits
 DEVICE_CODE_TTL_S = 15 * 60
@@ -1357,6 +1359,29 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
                 return False
             return self._db.execute("UPDATE web_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
                                     (now, row["id"])).rowcount == 1
+
+    def new_web_link(self, email: str, cid: int, ttl_s: float = WEB_LINK_TTL_S) -> str:
+        """A one-time sign-in link token for the Mac's "Buy credit / Manage billing" button: it opens
+        hearchurch.com/account already signed in as the congregation's main address. Kept as a web_codes row
+        (purpose "link:<congregation id>"), only its hash."""
+        token = new_token("hcl")
+        now = time.time()
+        self._x("INSERT INTO web_codes (email, purpose, code_hash, created_at, expires_at) VALUES (?,?,?,?,?)",
+                (email.strip().lower(), f"link:{cid}", hash_token(token), now, now + ttl_s))
+        return token
+
+    def use_web_link(self, token: str) -> tuple[str, int] | None:
+        """(address, congregation id) for a live, unused link token, which is used up; None otherwise."""
+        if not token or len(token) > 200:
+            return None
+        now = time.time()
+        with self._lock:
+            row = self._db.execute("SELECT id, email, purpose FROM web_codes WHERE code_hash = ? AND purpose LIKE 'link:%'"
+                                   " AND used_at IS NULL AND expires_at > ?", (hash_token(token), now)).fetchone()
+            if row is None or self._db.execute("UPDATE web_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
+                                               (now, row["id"])).rowcount != 1:
+                return None
+        return row["email"], int(row["purpose"].split(":", 1)[1])
 
     def new_web_session(self, email: str, cid: int | None, ttl_s: float = WEB_SESSION_TTL_S) -> tuple[str, str]:
         """A signed-in browser: returns (session token for the cookie, CSRF token). Only hashes of the token are kept."""

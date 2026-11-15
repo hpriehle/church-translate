@@ -143,7 +143,7 @@ class Hear:
                        "verify": RateLimiter(60, 3600), "checkout": RateLimiter(20, 3600),
                        "email_code": RateLimiter(10, 3600), "email_code_addr": RateLimiter(3, 3600),
                        "pair_code": RateLimiter(30, 3600), "emails": RateLimiter(60, 3600),
-                       "slug": RateLimiter(20, 3600)}
+                       "slug": RateLimiter(20, 3600), "web_link": RateLimiter(30, 3600)}
 
 
 class FailureLimiter:

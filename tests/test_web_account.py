@@ -455,3 +455,31 @@ def test_church_choices_match_the_mac_app():
 def test_the_web_module_lists_only_real_routes():
     paths = set(main.app.openapi()["paths"])
     assert web.WEB_ROUTES <= paths
+
+
+def test_the_macs_manage_billing_link_signs_in_once(browser, client, hear, resend):  # noqa: F811
+    cong, device = make_cong(hear)
+    assert client.post("/api/hc/web/link").status_code == 403                       # no device token
+    assert client.post("/api/hc/web/link", headers={"Authorization": "Bearer nope"}).status_code == 403
+    r = client.post("/api/hc/web/link", headers={"Authorization": f"Bearer {device}"})
+    assert r.status_code == 200, r.text
+    url = r.json()["url"]
+    assert "/account/link?t=hcl" in url
+    path = url[url.index("/account/link"):]
+    r = browser.get(path, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/account#billing"
+    me = browser.get("/api/hc/web/me").json()
+    assert me["signed_in"] and me["email"] == "a@example.org" and me["congregation"]["id"] == cong["id"]
+    assert browser.get("/api/hc/billing").status_code == 200
+    other = TestClient(main.app, base_url="https://hearchurch.test")
+    r = other.get(path, follow_redirects=False)                                       # used up
+    assert r.status_code == 303 and "set-cookie" not in r.headers
+    assert other.get("/api/hc/web/me").json() == {"signed_in": False}
+    # a browser session can't mint links (only the Mac's device token)
+    assert browser.post("/api/hc/web/link", headers=H(me["csrf"])).status_code == 403
+    # an expired link does nothing
+    url = client.post("/api/hc/web/link", headers={"Authorization": f"Bearer {device}"}).json()["url"]
+    hear.db._x("UPDATE web_codes SET expires_at = ? WHERE purpose LIKE 'link:%'", (time.time() - 1,))
+    fresh = TestClient(main.app, base_url="https://hearchurch.test")
+    fresh.get(url[url.index("/account/link"):], follow_redirects=False)
+    assert fresh.get("/api/hc/web/me").json() == {"signed_in": False}
