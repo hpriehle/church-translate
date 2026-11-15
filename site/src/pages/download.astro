@@ -71,6 +71,12 @@ import Base from "../layouts/Base.astro";
 </script>
 
 <style>
+/* This page is short: fill the window so the footer sits at its bottom edge, and follows the content when the
+   window is shorter than the page. Only here; the layout's other pages keep their plain block body. */
+:global(body) { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+:global(body > main) { flex: 1 0 auto; }
+:global(body > .top), :global(body > .foot) { width: 100%; }
+
 /* The app icon on the left, the button for this Mac on the right. */
 .dl {
   display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center;
