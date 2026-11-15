@@ -29,6 +29,8 @@ struct MainView: View {
         }
         // The microphone is only open while the checks can show its level (the orange dot; AirPods drop to call
         // quality). During a meeting the engine has it.
+        // Hidden (minimised, covered, another Space): no microphone and no meter.
+        .background(WindowVisibility { model.mainWindowVisible = $0 })
         .onAppear { model.startMicPreview() }
         .onDisappear { model.mic.stop() }
         .onChange(of: model.running) { _, running in running ? model.mic.stop() : model.startMicPreview() }
@@ -809,11 +811,13 @@ struct CheckRow: View {
 /// The preflight meter: watches only the level, so nothing else redraws with it.
 struct MicMeter: View {
     @ObservedObject var level: MicLevel
-    var body: some View { LevelMeter(db: Double(level.db)) }
+    // No animation: at ~10 level updates a second it would never stop, and redraw the window non-stop.
+    var body: some View { LevelMeter(db: Double(level.db), animated: false) }
 }
 
 struct LevelMeter: View {
     let db: Double
+    var animated = true
 
     var body: some View {
         GeometryReader { g in
@@ -824,7 +828,7 @@ struct LevelMeter: View {
             }
         }
         .frame(height: 8)
-        .animation(.linear(duration: 0.1), value: db)
+        .animation(animated ? .linear(duration: 0.1) : nil, value: db)
         .accessibilityLabel("Input level")
     }
 }
@@ -872,5 +876,42 @@ enum QRCode {
         let img = NSImage(size: rep.size)
         img.addRepresentation(rep)
         return img
+    }
+}
+
+/// Tells whether the window this view sits in can be seen (on screen, not minimised, covered or on another Space).
+struct WindowVisibility: NSViewRepresentable {
+    let changed: (Bool) -> Void
+
+    func makeNSView(context: Context) -> Probe { Probe(changed) }
+    func updateNSView(_ view: Probe, context: Context) { view.changed = changed }
+
+    final class Probe: NSView {
+        var changed: (Bool) -> Void
+        private var observer: NSObjectProtocol?
+
+        init(_ changed: @escaping (Bool) -> Void) {
+            self.changed = changed
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observer.map(NotificationCenter.default.removeObserver)
+            observer = nil
+            guard let window else { return }
+            observer = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
+                                                              object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.report() }
+            }
+            report()
+        }
+
+        private func report() {
+            guard let window else { return }
+            let visible = window.occlusionState.contains(.visible)
+            DispatchQueue.main.async { [weak self] in self?.changed(visible) }   // not during a view update
+        }
     }
 }

@@ -188,7 +188,9 @@ final class MicMonitor: ObservableObject {
     }
 
     private func push(_ db: Float) {
-        level.db = db
+        // Whole dB only: the meter can't show less, and an unchanged value redraws nothing.
+        let shown = max(-80, db.rounded())
+        if shown != level.db { level.db = shown }
         history.append(db)
         if history.count > 100 { history.removeFirst(history.count - 100) }
         let heard = (history.max() ?? db) > -50

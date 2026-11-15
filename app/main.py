@@ -305,10 +305,16 @@ def use_billing(billing: str) -> None:
 
 
 async def status_loop() -> None:
+    last, last_t = None, 0.0
     while True:
         await asyncio.sleep(1.0)
         if S.operator.count or (S.engine_client and S.engine_client.running):
-            S.operator.publish(full_status())
+            st = full_status()
+            # No meeting: only send what changed (plus one every 5 s), so an idle engine and app stay quiet.
+            same = {k: v for k, v in st.items() if k != "time"}
+            if S.pipeline.running or same != last or time.monotonic() - last_t >= 5:
+                S.operator.publish(st)
+                last, last_t = same, time.monotonic()
 
 
 @asynccontextmanager
@@ -345,6 +351,8 @@ async def lifespan(app: FastAPI):
         b = Mp3Broadcaster(sr, st.stream.bitrate_kbps, st.stream.burst_s)
         m = Mixer(sr, on_frame=b.feed)
         m.volume = st.tts.volume
+        # No meeting, no phone on this stream, no recording: no silent MP3 frames (idle CPU).
+        m.idle = lambda b=b: not S.pipeline.running and not b.subs and not b._recorders
         tr = Translator(st.translate, S.pipeline.glossary(lang.code),
                         HOME / "data" / "claude-workdir", lang, st.meeting.speakers)
         tts = TtsRunner(tts_for(st, lang.code), sr, lazy=True)

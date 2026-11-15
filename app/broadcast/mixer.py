@@ -17,6 +17,8 @@ import numpy as np
 log = logging.getLogger("mixer")
 
 TICK_S = 0.1
+IDLE_GRACE_S = 3.0    # keep ticking this long after the last clip before parking
+IDLE_CHECK_S = 1.0    # while parked, look again this often (a listener or meeting may have appeared)
 
 
 @dataclass
@@ -66,11 +68,16 @@ class Mixer:
         self.underruns = 0
         self._frame_errors = 0
         self._last_err_log = -1e9
+        # Returns True when no one needs silent frames (no meeting, no listener, no recording). None = always
+        # tick (an internet-radio stream that never pauses).
+        self.idle: Callable[[], bool] | None = None
+        self._wake = asyncio.Event()
 
     # ------------------------------------------------------------ queue
     def enqueue(self, clip: Clip, drop_above_s: float | None = None, drop_to_s: float | None = None) -> list[Clip]:
         clip.pcm = np.concatenate([normalize_peak(trim_silence(clip.pcm, self.sr)), self.gap])
         self.queue.append(clip)
+        self._wake.set()
         dropped: list[Clip] = []
         if drop_above_s is not None and self.backlog_s > drop_above_s:
             target = drop_to_s if drop_to_s is not None else drop_above_s * 0.6
@@ -129,9 +136,34 @@ class Mixer:
             out = np.clip(out.astype(np.float32) * self.volume, -32768, 32767).astype(np.int16)
         return out
 
+    def _wanted(self) -> bool:
+        """Something to play, or someone who needs the (silent) stream to keep flowing."""
+        if self._current is not None or self.queue or self.idle is None:
+            return True
+        try:
+            return not self.idle()
+        except Exception:  # pragma: no cover
+            return True
+
     async def run(self) -> None:
         next_t = time.monotonic()
+        quiet_since: float | None = None
         while True:
+            # Nothing to play and nobody listening (no meeting): stop making silent frames until a clip
+            # arrives or a listener/meeting needs the stream again. A few seconds of grace first, so the
+            # encoder flushes the end of the last clip.
+            if self._wanted():
+                quiet_since = None
+            elif quiet_since is None:
+                quiet_since = time.monotonic()
+            elif time.monotonic() - quiet_since >= IDLE_GRACE_S:
+                self._wake.clear()
+                try:
+                    await asyncio.wait_for(self._wake.wait(), IDLE_CHECK_S)
+                except asyncio.TimeoutError:
+                    pass
+                next_t = time.monotonic()   # resume on time, without catching up on the skipped frames
+                continue
             now = time.monotonic()
             behind = now - next_t
             if behind > 1.0:  # event loop stalled badly; resync instead of bursting

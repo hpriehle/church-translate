@@ -30,6 +30,28 @@ async def test_mixer_clock_survives_a_failing_consumer():
     m._task.cancel()
 
 
+
+async def test_mixer_parks_when_idle_and_wakes_for_a_clip(monkeypatch):
+    import app.broadcast.mixer as mx
+    from app.broadcast.mixer import Clip
+    import numpy as np
+
+    monkeypatch.setattr(mx, "IDLE_GRACE_S", 0.2)
+    monkeypatch.setattr(mx, "IDLE_CHECK_S", 5.0)
+    frames = []
+    m = Mixer(16000, on_frame=frames.append)
+    m.idle = lambda: True            # no meeting, no listener
+    m.start()
+    await asyncio.sleep(0.6)
+    parked = len(frames)
+    assert parked <= 5               # a short grace, then no more silent frames
+    await asyncio.sleep(0.4)
+    assert len(frames) == parked
+    m.enqueue(Clip(1, (np.ones(1600) * 5000).astype(np.int16)))
+    await asyncio.sleep(0.35)        # woken at once (not after IDLE_CHECK_S), the clip plays
+    assert len(frames) > parked and any(f.any() for f in frames[parked:])
+    m._task.cancel()
+
 def _rec(seq, with_out=True):
     r = ChunkRecord(seq=seq, audio_start_s=0, audio_dur_s=1, voiced_s=1, cut_reason="x",
                     t_speech_start=0, t_speech_end=0, t_cut=0, en="Hello.")

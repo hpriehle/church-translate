@@ -377,8 +377,16 @@ final class AppModel: ObservableObject {
     }
 
     /// The level meter before a meeting, from the chosen input.
+    /// The main window can be seen (not minimised, covered or on another Space). Not published: nothing draws it.
+    var mainWindowVisible = true {
+        didSet {
+            guard mainWindowVisible != oldValue, profile.setupDone else { return }
+            if mainWindowVisible { startMicPreview() } else if !running { mic.stop() }
+        }
+    }
+
     func startMicPreview() {
-        guard !running else { return }
+        guard !running, mainWindowVisible else { return }
         mic.start(device: missingInput == nil ? selectedInput : "")
     }
 

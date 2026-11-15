@@ -185,7 +185,9 @@ final class Engine: ObservableObject {
                     self.giveUpStarting()
                     return
                 }
-                try? await Task.sleep(for: .seconds(self.state == .running ? 1 : 0.5))
+                // Once a second during a meeting; every 2 s while idle (nothing changes then); fast while starting.
+                let wait: Double = self.state != .running ? 0.5 : (self.status?.pipeline.running == true ? 1 : 2)
+                try? await Task.sleep(for: .seconds(wait))
             }
         }
     }
