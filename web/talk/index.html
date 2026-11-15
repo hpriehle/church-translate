@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0e1013">
+<title>Conversation · English ↔ Español</title>
+<style>
+  :root { --bg:#0e1013; --fg:#e4e6ea; --mute:#8b93a1; --bad:#e05252; --en:#4f8fe8; --es:#e8964f; --card:#171a1f; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:17px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; }
+  .wrap { max-width:860px; height:100%; margin:0 auto; padding:1rem 1.1rem; display:flex; flex-direction:column; gap:.8rem; }
+  header { display:flex; justify-content:space-between; align-items:center; gap:.6rem; }
+  h1 { font-size:1.1rem; margin:0; font-weight:650; }
+  h1 .en { color:var(--en); } h1 .es { color:var(--es); }
+  button { font:inherit; color:var(--fg); background:#1d2229; border:0; border-radius:.7rem; padding:.5rem 1rem; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:default; }
+  #start { background:#1d5a33; font-weight:650; }
+  #start.on { background:#5a1d1d; }
+
+  #banner { border-radius:1.2rem; padding:1.1rem 1.2rem; text-align:center; background:var(--card); transition:background .2s; }
+  #banner .big { font-size:1.6rem; font-weight:750; }
+  #banner .small { color:var(--mute); margin-top:.2rem; }
+  #banner.listening { background:#13301f; }
+  #banner.hearing { background:#1d4a2c; }
+  #banner.translating { background:#3a3313; }
+  #banner.speaking { background:#2a1f3d; }
+  .meter { height:8px; background:#0006; border-radius:4px; overflow:hidden; margin:.7rem auto 0; max-width:420px; }
+  .meter div { height:100%; width:0; background:#3c8; transition:width .08s; }
+
+  .langs { display:grid; grid-template-columns:1fr 1fr; gap:.7rem; }
+  .langs button { min-height:3.6rem; font-size:1.15rem; font-weight:650; border:2px solid transparent; }
+  .langs button.en.on { border-color:var(--en); background:#16263d; }
+  .langs button.es.on { border-color:var(--es); background:#3d2716; }
+  .hint { color:var(--mute); font-size:.85rem; text-align:center; }
+
+  #feed { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:.7rem; padding:.2rem 0 .6rem; }
+  .turn { max-width:78%; background:var(--card); border-radius:1rem; padding:.7rem .9rem; border-left:4px solid var(--en); }
+  .turn.es { align-self:flex-end; border-left:0; border-right:4px solid var(--es); }
+  .turn .said { color:var(--mute); font-size:.95rem; }
+  .turn .tr { font-size:1.25rem; font-weight:600; margin-top:.25rem; min-height:1.4em; }
+  .turn .meta { color:var(--mute); font-size:.78rem; margin-top:.35rem; display:flex; gap:.8rem; flex-wrap:wrap; }
+  .turn .meta a { color:var(--mute); text-decoration:underline; cursor:pointer; }
+  .empty { color:var(--mute); text-align:center; margin:auto; max-width:30rem; }
+
+  footer { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; color:var(--mute); font-size:.9rem; }
+  footer input { vertical-align:middle; }
+  footer .grow { flex:1; }
+  .err { color:var(--bad); min-height:1.2em; text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="en">English</span> ↔ <span class="es">Español</span></h1>
+    <button id="start">🎙 Start conversation</button>
+  </header>
+
+  <div id="banner">
+    <div class="big" id="b-big">Press Start</div>
+    <div class="small" id="b-small">One laptop between two people. Speak one at a time. · Hablen de uno en uno.</div>
+    <div class="meter"><div id="level"></div></div>
+  </div>
+
+  <div class="langs">
+    <button class="en" id="force-en" disabled>Next: English</button>
+    <button class="es" id="force-es" disabled>Siguiente: Español</button>
+  </div>
+  <div class="hint">The language is detected by itself. Tap a button only if it keeps guessing wrong. · <b>Space</b> stops the voice.</div>
+
+  <div id="feed"><div class="empty">Your conversation appears here. English on the left, Spanish on the right.</div></div>
+  <div class="err" id="err"></div>
+
+  <footer>
+    <label>End of turn after <input type="range" id="pause" min="0.6" max="2.5" step="0.1"> <b id="pause-v"></b> of silence</label>
+    <span class="grow"></span>
+    <button id="reset" disabled>New conversation</button>
+  </footer>
+</div>
+<script src="/static/talk/talk.js"></script>
+</body>
+</html>

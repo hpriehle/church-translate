@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import numpy as np
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +36,7 @@ from .config import apply_auto_en
 from .languages import LANGUAGES, SPEAKER_LANGUAGES
 from .pipeline import Pipeline
 from .stt import Transcriber
+from .talk import TalkCfg, TalkRun, TalkSession, TalkTranslator
 from .translate.router import Translator
 from .tts.engines import TtsRunner, list_voices_for, voice_catalog
 
@@ -70,6 +73,9 @@ class State:
     argv: list[str] = []
     version: str = ""
     bind_host: str = ""                          # the address the server listens on (set by `python -m app`)
+    talk: TalkTranslator | None = None           # the conversation page's translator session (/talk)
+    talk_open: bool = False
+    talk_run: TalkRun | None = None              # set while a conversation is open: metered (engine._activity)
 
 
 S = State()
@@ -419,6 +425,8 @@ async def lifespan(app: FastAPI):
         t.cancel()
     for ch in S.pipeline.channels.values():
         await ch.translator.close()
+    if S.talk:
+        await S.talk.close()
 
 
 async def _parent_watchdog() -> None:
@@ -933,6 +941,85 @@ async def ws_speak(ws: WebSocket):
             eh.stop_run()
         if source is not None:
             source.stop()
+
+
+@app.get("/talk", response_class=HTMLResponse)
+async def talk_page(request: Request):
+    return _operator_page(request, WEB_DIR / "talk" / "index.html", speaker_ok=True)
+
+
+@app.websocket("/ws/talk")
+async def ws_talk(ws: WebSocket):
+    """One-on-one conversation (app/talk.py). First message: {"type":"hello","sample_rate":48000};
+    then int16 PCM frames, and JSON controls ("played", "force", "redo", "config", "reset")."""
+    if _role(ws.client.host if ws.client else None, ws.headers, ws.query_params, ws.cookies) is None:
+        await ws.close(code=4403)
+        return
+    await ws.accept()
+    try:
+        hello = await asyncio.wait_for(ws.receive_json(), timeout=10)
+        rate = int(hello.get("sample_rate") or 48000)
+        if not 8000 <= rate <= 192000:
+            raise ValueError("bad sample rate")
+    except Exception:
+        await ws.close(code=1003)
+        return
+    problem = ""
+    if S.pipeline.stt.engine != "mlx":
+        problem = "The conversation page needs a Mac with Apple Silicon (multilingual speech recognition)."
+    elif S.pipeline.capturing:
+        problem = "A meeting translation is running. Stop it on the operator page first."
+    elif S.talk_open:
+        problem = "The conversation page is already open in another tab or device."
+    else:
+        await _ensure_stt()
+        if not S.pipeline.stt.ready:
+            problem = "Speech recognition isn't ready yet (still downloading or loading). Try again in a minute."
+    if problem:
+        await ws.send_json({"type": "error", "message": problem})
+        await ws.close()
+        return
+    S.talk_open = True
+    S.talk_run = TalkRun()   # a private Hear Church session while the page is open: heard speech is metered
+    if S.talk is None:
+        S.talk = TalkTranslator(S.settings, HOME / "data" / "claude-workdir")
+    S.talk.settings = S.settings                    # the current backend (billing may have changed it)
+    asyncio.create_task(S.talk.reset())              # a new page is a new conversation
+    send_lock = asyncio.Lock()
+
+    async def send(msg: dict) -> None:
+        async with send_lock:
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                pass
+
+    import soxr
+
+    def meter(seq: int, seconds: float, langs: list[str]) -> None:
+        if isinstance(S.engine_client, PublishClient):
+            S.engine_client._speech(seq, seconds, langs)
+
+    session = TalkSession(S.pipeline.stt, S.pipeline.stt_exec, S.talk, send,
+                          TalkCfg(end_pause_s=float(hello.get("end_pause_s") or 1.2)), on_speech=meter)
+    rs = soxr.ResampleStream(rate, 16000, 1, dtype="float32", quality="HQ")
+    await send({"type": "ready"})
+    await send({"type": "state", "state": "listening", "forced": ""})
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                break
+            if msg.get("bytes"):
+                pcm = np.frombuffer(msg["bytes"], dtype=np.int16).astype(np.float32) / 32768.0
+                session.feed(rs.resample_chunk(pcm))
+            elif msg.get("text"):
+                await session.control(json.loads(msg["text"]))
+    except Exception:
+        log.exception("talk connection ended")
+    finally:
+        S.talk_open, S.talk_run = False, None
+        await session.close()
 
 
 @app.get("/print", response_class=HTMLResponse)

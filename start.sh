@@ -30,15 +30,16 @@ start_ollama() {
   fi
 }
 
-# Open-source Piper voices (Tom = male, Siwis = female), ~63 MB each, kept in models/piper.
+# Open-source Piper voices, ~63 MB each, kept in models/piper: French Tom (male) and Siwis (female)
+# for meetings; Spanish and English for the conversation page (/talk).
 ensure_piper_voices() {
   mkdir -p models/piper
-  for v in tom siwis; do
-    f="fr_FR-$v-medium"
+  for f in fr_FR-tom-medium fr_FR-siwis-medium es_MX-claude-high en_US-kathleen-medium; do
+    IFS=- read -r loc name quality <<< "$f"
     for ext in onnx onnx.json; do
       [ -s "models/piper/$f.$ext" ] && continue
       echo "Downloading Piper voice $f.$ext…"
-      curl -fsSL -o "models/piper/$f.$ext.part" "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/$v/medium/$f.$ext" \
+      curl -fsSL -o "models/piper/$f.$ext.part" "https://huggingface.co/rhasspy/piper-voices/resolve/main/${loc%%_*}/$loc/$name/$quality/$f.$ext" \
         && mv "models/piper/$f.$ext.part" "models/piper/$f.$ext" || { rm -f "models/piper/$f.$ext.part"; echo "  (offline? skipped)"; }
     done
   done

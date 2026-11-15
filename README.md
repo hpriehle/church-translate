@@ -189,6 +189,27 @@ behind a tunnel or reverse proxy, requests carrying `Cf-Connecting-Ip`/`X-Forwar
 as "local", so the operator, speak and API pages always require the key. Set `[server] public_url`
 so the QR code shows the public address.
 
+## One-on-one conversations (English ↔ Spanish)
+
+Open <http://localhost:8000/talk> on the Mac and press **Start conversation**. One laptop sits
+between two people, one speaking English and one speaking Spanish. It works out which language each
+turn is in, and the voice reads the translation aloud to the other person.
+
+- **One person at a time.** A turn ends after 1.2 s of silence; the slider changes this. The mic is
+  ignored while the translation plays. A two-note chime means the mic is open again.
+- **Wrong language?** Tap **Redo as …** under the turn. To set the next turn's language in advance,
+  tap **English** or **Español**. Very short replies ("sí", "okay") are assumed to come from the
+  other person.
+- **Space** stops the voice and opens the mic.
+- Translation uses Claude through the meetings' backend (CLI, own API key or Hear Church credits;
+  one conversation, so it keeps the context). The voices are Piper `es_MX-claude-high` and
+  `en_US-kathleen-medium` (any installed voice of the language stands in); `./start.sh --setup`
+  downloads them. Needs an Apple Silicon Mac. It can't run while a meeting is being translated.
+  Each conversation is logged to `logs/talk-*.jsonl`.
+- **Billing.** On a Mac linked to Hear Church, an open conversation page is a private session,
+  metered like a meeting: each translated turn's speech counts once, in the language it was
+  played in (one language-second per second of speech).
+
 ## How it keeps up (backlog control)
 
 French usually takes a bit longer to say than English. The mixer always knows how many seconds of

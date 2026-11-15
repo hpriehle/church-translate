@@ -420,6 +420,20 @@ class EngineClient:
 
 
 
+def _activity():
+    """What the hub meters as a meeting: the pipeline's run, or else an open /talk conversation (app/talk.py
+    TalkRun: always a private session, both languages heard). Both have running, started_at, on_channels and
+    speakers."""
+    M = _m()
+    p = M.S.pipeline
+    talk = getattr(M.S, "talk_run", None)
+    return talk if talk is not None and not p.running else p
+
+
+def _is_talk(a) -> bool:
+    return a is not _m().S.pipeline
+
+
 class PublishClient(EngineClient):
     """Engine side of Hear Church: publish this computer's own locally started meetings to the hub as the
     congregation's live session. The hub never sends audio here; it only relays what this computer makes.
@@ -531,7 +545,13 @@ class PublishClient(EngineClient):
         self._out = asyncio.Queue(maxsize=3000)
         sender = asyncio.create_task(self._sender(ws, self._out))
         st = M.S.settings.stream
-        self._send({"type": "hello", "name": self.name, "languages": list(M.S.pipeline.channels),
+        from .talk import LANGS as TALK_LANGS
+
+        # The hub accepts a session only in languages named here. /talk's come last: binary frames index this list
+        # by channel position, which they leave as it was.
+        langs = list(M.S.pipeline.channels)
+        langs += [c for c in TALK_LANGS if c not in langs]
+        self._send({"type": "hello", "name": self.name, "languages": langs,
                     "stream": {"sample_rate": st.sample_rate, "bitrate_kbps": st.bitrate_kbps}, "busy": False,
                     "app_version": os.environ.get("HEARCHURCH_APP_VERSION", "")})
         self._attach()
@@ -547,7 +567,7 @@ class PublishClient(EngineClient):
                     log.info("live on %s%s", urlparse(self.url).hostname, " (resumed)" if msg.get("resumed") else "")
                 elif msg.get("type") == "session_refused":
                     self.announced, self.running = False, False
-                    self.refused_run, self.notice = _m().S.pipeline.started_at, str(msg.get("message") or "refused")
+                    self.refused_run, self.notice = _activity().started_at, str(msg.get("message") or "refused")
                     log.warning("hub refused the meeting: %s", self.notice)
                 elif msg.get("type") == "listeners" and not self.private:
                     self.listeners = {"stream": int(msg.get("stream") or 0), "captions": int(msg.get("captions") or 0)}
@@ -561,7 +581,7 @@ class PublishClient(EngineClient):
                     self._metered(msg)
                 elif msg.get("type") == "session_ended":  # the hub closed it (e.g. hidden): stop sending, don't re-announce
                     self.announced, self.running, self.session_code = False, False, ""
-                    self.refused_run, self.notice = _m().S.pipeline.started_at, str(msg.get("message") or "ended by the server")
+                    self.refused_run, self.notice = _activity().started_at, str(msg.get("message") or "ended by the server")
                     log.warning("hub ended the session: %s", self.notice)
         finally:
             sender.cancel()
@@ -637,18 +657,18 @@ class PublishClient(EngineClient):
 
     async def _publish_watch(self) -> None:
         """Announce a meeting started on this computer, follow its languages, and stop it when it is over."""
-        M = _m()
-        p = M.S.pipeline
         metered = time.monotonic()
         while True:
             await asyncio.sleep(0.5)
+            p = _activity()
             if self.meter and time.monotonic() - metered >= self.METER_EVERY_S:
                 metered = time.monotonic()
                 self._send_meter()
             self._save_meter()
-            local = self.private_wanted()   # this Wi-Fi only: a private billing session, not listed on the hub
+            local = self.private_wanted() or _is_talk(p)   # this Wi-Fi only (or /talk): a private billing session
             if self.announced and self.private:
-                self.heard, self.listeners = self._local_heard(), {"stream": 0, "captions": 0}
+                heard = set(p.on_channels) if _is_talk(p) else self._local_heard()   # /talk: played on this Mac
+                self.heard, self.listeners = heard, {"stream": 0, "captions": 0}
             if self.announced and local != self.private:   # sharing changed during the meeting: start over
                 self._send({"type": "session_stop"})
                 self.announced, self.running, self.session_code, self.heard = False, False, "", set()
@@ -673,11 +693,14 @@ class PublishClient(EngineClient):
 
     @staticmethod
     def _speaker_set() -> list[str]:
-        return list(getattr(_m().S.pipeline, "speakers", None) or [getattr(_m().S.pipeline, "speaker", "en")])
+        a = _activity()
+        return list(getattr(a, "speakers", None) or [getattr(a, "speaker", "en")])
 
     @staticmethod
     def _legacy_speaker() -> str:
         M = _m()
+        if _is_talk(_activity()):
+            return _activity().speakers[0]
         f = getattr(M, "legacy_speaker", None)
         try:
             return f() if f else getattr(M.S.pipeline, "speaker", "en")
@@ -690,5 +713,5 @@ class PublishClient(EngineClient):
         self.announced, self.running, self.heard = False, False, set()
         self._detach()
         self._save_meter(force=True)
-        if not _m().S.pipeline.running:
+        if not _activity().running:
             self.session_code = ""

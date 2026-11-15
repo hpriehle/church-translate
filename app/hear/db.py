@@ -171,7 +171,7 @@ SITE_PAGES = frozenset({
 RESERVED_SLUGS = frozenset({
     "about", "admin", "api", "c", "clips", "favicon-ico", "find", "guide", "health", "help", "listen", "listener",
     "login", "logout", "operator", "print", "privacy", "qr", "robots", "s", "signs", "signup", "speak", "static",
-    "stream", "support", "terms", "voices", "ws", "www"}) | SITE_PAGES
+    "stream", "support", "talk", "terms", "voices", "ws", "www"}) | SITE_PAGES
 
 
 def city_of(address: str) -> str:

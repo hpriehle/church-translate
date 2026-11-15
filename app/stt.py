@@ -264,6 +264,25 @@ class Transcriber:
         cr = max(float(s.get("compression_ratio", 0.0)) for s in segs)
         return _clean(text), nsp, alp, cr
 
+    def detect_language(self, audio: np.ndarray, choices: list[str]) -> dict[str, float]:
+        """Probability of each language in `choices` (renormalized among them), from the first 30 s (/talk)."""
+        if self.engine == "mlx":
+            import mlx.core as mx
+            from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
+            from mlx_whisper.transcribe import ModelHolder
+
+            model = ModelHolder.get_model(self.cfg.model, mx.float16)
+            mel = log_mel_spectrogram(audio, n_mels=model.dims.n_mels, padding=N_SAMPLES)
+            _, probs = model.detect_language(pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16))
+            probs = probs[0] if isinstance(probs, list) else probs
+        else:
+            self._fw_sync()
+            _lang, _p, all_probs = self._fw_model.detect_language(audio)
+            probs = dict(all_probs)
+        picked = {c: float(probs.get(c, 0.0)) for c in choices}
+        total = sum(picked.values()) or 1.0
+        return {c: p / total for c, p in picked.items()}
+
     def transcribe(self, audio: np.ndarray, prompt: str = "", language: str | None = None) -> SttResult:
         t0 = time.monotonic()
         reloaded = self.engine == "faster-whisper" and self._fw_wanted() != self._fw_name

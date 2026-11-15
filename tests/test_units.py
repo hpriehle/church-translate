@@ -639,3 +639,58 @@ def test_report_counts_catch_up_skips_apart_from_non_speech():
     md = build_report(recs, {"languages": {"en": {}}, "stt_events": ["model small → base (it needed 1.10s per second of speech)"]})
     assert "skipped as non-speech: 1" in md
     assert "2 chunks skipped to catch up · model small → base" in md
+
+
+# ------------------------------------------------------------------ conversation page (/talk)
+
+def test_talk_language_choice_leans_on_turn_order():
+    from app.talk import choose_language
+
+    assert choose_language({"en": 0.99, "es": 0.01}, "en", 0.65) == "en"   # clear speech wins
+    assert choose_language({"en": 0.6, "es": 0.4}, "en", 0.65) == "es"     # unsure: the other person
+    assert choose_language({"en": 0.8, "es": 0.2}, "en", 0.85) == "es"     # a short "sí" after English
+    assert choose_language({"en": 0.4, "es": 0.6}, "", 0.65) == "es"       # first turn: no prior
+
+
+def test_talk_turn_taking_ignores_the_mic_until_played():
+    from app.talk import TalkCfg, TalkSession
+
+    async def run():
+        sent = []
+
+        async def send(m):
+            sent.append(m)
+
+        s = TalkSession(None, None, None, send, TalkCfg(end_pause_s=0.6))
+        class LoudVad:  # "speech" = anything loud
+            def __call__(self, frame):
+                return 1.0 if np.abs(frame).max() > 0.1 else 0.0
+
+            def reset(self):
+                pass
+        s.vad = LoudVad()
+        turns = []
+
+        async def fake_turn(audio, forced, t_end, redo=False, voiced_s=99.0):
+            turns.append((len(audio) / SR, voiced_s))
+            s.state = "speaking"
+        s._run_turn = fake_turn
+        loud, quiet = np.full(SR, 0.3, np.float32), np.zeros(SR, np.float32)
+        s.feed(quiet[: SR // 2])
+        assert s.state == "listening"
+        s.feed(loud)
+        assert s.state == "hearing"
+        s.feed(quiet)                     # 1 s of silence > 0.6 s: the turn ends
+        await asyncio.sleep(0)
+        assert len(turns) == 1 and 0.9 < turns[0][1] < 1.2
+        s.feed(np.concatenate([loud, quiet]))   # talking over the translation: ignored
+        await asyncio.sleep(0)
+        assert len(turns) == 1 and s.state == "speaking"
+        await s.control({"type": "played"})
+        assert s.state == "listening"
+        s.feed(np.full(SR // 10, 0.3, np.float32))   # a click: too short to be a turn
+        s.feed(quiet)
+        await asyncio.sleep(0)
+        assert len(turns) == 1 and s.state == "listening"
+
+    asyncio.run(run())

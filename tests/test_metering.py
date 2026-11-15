@@ -283,3 +283,42 @@ async def test_the_mac_reports_heard_speech_to_the_hub(server, hear, monkeypatch
     finally:
         task.cancel()
         del main.S.pipeline
+
+
+async def test_an_open_talk_page_is_a_private_metered_session(server, hear, monkeypatch):
+    """/talk (app/talk.py) is metered like a meeting: a private session while the page is open, every turn's speech
+    billed once in the language it was played in, the session stopped when the page closes."""
+    from app.talk import TalkRun
+
+    monkeypatch.setattr(PublishClient, "METER_EVERY_S", 0.2)
+    cong, token = make_cong(hear)
+    pipe = NS(running=False, started_at=0.0, channels={}, on_channels={}, speech_taps=[])
+    main.S.pipeline = pipe
+    mac = PublishClient(f"ws://127.0.0.1:{server}/ws/engine", token, "Test Mac")
+    task = asyncio.create_task(mac.run_forever())
+
+    async def until(cond):
+        for _ in range(100):
+            if cond():
+                return
+            await asyncio.sleep(0.05)
+        raise AssertionError("timed out")
+
+    try:
+        await until(lambda: mac.connected)
+        main.S.talk_run = TalkRun()
+        await until(lambda: mac.running)
+        assert mac.private
+        await until(lambda: mac.heard == {"en", "es"})
+        mac._speech(1, 12.0, ["es"])
+        mac._speech(1, 12.0, ["es"])          # a redo of the same turn: counted once
+        mac._speech(2, 6.0, ["en"])
+        await until(lambda: not mac.meter and hear.db.speech_by_language(cong["id"]))
+        assert hear.db.speech_by_language(cong["id"]) == {"es": 12.0, "en": 6.0}
+        main.S.talk_run = None
+        await until(lambda: hear.live.get_any(cong["id"]) is None)
+        assert not mac.announced
+    finally:
+        task.cancel()
+        main.S.talk_run = None
+        del main.S.pipeline
