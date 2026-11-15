@@ -1,17 +1,25 @@
 ---
 // /pricing: prepaid credits, $5 per language-hour of speech, first hour free (decided 2026-11-08).
-// Every number here must match the billing code (docs/seo-site-structure.md, "Pricing"). Deploying site/ publishes it.
+// Every number here must match the billing code and download/src/terms.html ("Credits and refunds"):
+// $5 per heard language-hour, first language-hour free, credit $5–$500 at a time, never expires, unused credit
+// refundable anytime, sold by Automaddie LLC. Deploying site/ publishes it.
 import Base from "../layouts/Base.astro";
+
+const RATE = 5; // US dollars per language-hour
 
 const faq = [
   ["What does a typical meeting cost?",
-   "A 70-minute meeting usually has about 50 minutes of speaking. Translated into two languages, that is 100 language-minutes, about $8.33. Into one language, about $4.17."],
-  ["What counts as speech?",
-   "The minutes when someone is speaking and Hear Church is translating. Silence, pauses and prayers you choose not to translate aren't counted. Sung words that Hear Church recognizes and translates do count."],
+   "A 70-minute meeting usually has about 50 minutes of speaking. Heard in two languages, that is 100 language-minutes, about $8.33. In one language, about $4.17."],
+  ["What is a language-hour?",
+   "One hour of speech translated into one language that someone is listening to. An hour heard in two languages is two language-hours. A language nobody is following that day costs nothing."],
   ["Do listeners pay anything?",
    "No. Listeners open your congregation's link or scan its QR code. They have nothing to install, no account and nothing to pay."],
   ["Is there a monthly plan or contract?",
    "No. You buy credit in advance and use it as you go. Church use comes and goes, so you only pay for meetings you translate."],
+  ["What if we run out during a meeting?",
+   "Translation carries on to the end, so your balance can dip below zero. The next top-up pays for that time first, and a new meeting starts once the balance is back above zero."],
+  ["Can we get our money back?",
+   "Yes. Ask for a refund of unused credit at any time by emailing support@hearchurch.com. Credit already used for translation isn't refundable."],
 ];
 
 const schema = {
@@ -22,25 +30,105 @@ const schema = {
 ---
 <Base
   title="Church Translation Pricing, by the Hour | Hear Church"
-  description="Hear Church pricing: $5 per language per hour of speech, prepaid, with the first hour free. Silence isn't billed. No monthly plan."
+  description="Hear Church pricing: $5 per language per hour of speech, prepaid, with the first hour free. Silence isn't billed. Credit never expires. No monthly plan."
   schema={schema}>
   <article class="wrap">
-    <header class="head prose">
+    <header class="head">
       <h1>Church translation pricing</h1>
-      <p class="lede">You pay only for the time someone is speaking, in each language your members hear. The first hour is free.</p>
+      <p class="lede">Pay only for the time someone is speaking, in each language your members are listening to. The first hour is free.</p>
     </header>
-    <div class="prose">
-      <h2>$5 per language per hour of speech</h2>
-      <p>Buy credit in advance in the Hear Church app and use it as you go. A meeting translated into two languages uses two language-hours for each hour of speaking. Silence and pauses aren't counted.</p>
-      <ul>
-        <li><b>First hour free</b> for every new congregation, so you can try it on a real Sunday first.</li>
-        <li><b>Prepaid.</b> You see your balance in the app before every meeting.</li>
-        <li><b>No monthly plan.</b> You only pay for meetings you translate.</li>
-      </ul>
 
-      <h2>A meeting is never cut off</h2>
-      <p>If the balance runs out during a meeting, translation carries on to the end. The next top-up pays for that time first.</p>
+    <section class="plans" aria-label="Plans">
+      <div class="plan">
+        <h2>Try it</h2>
+        <p class="price"><span class="amount">Free</span></p>
+        <p class="unit">your first language-hour</p>
+        <p class="sum">Every new congregation gets its first hour free, so you can try it on a real Sunday before you buy anything.</p>
+        <ul>
+          <li>Live captions and spoken translation</li>
+          <li>Listeners never pay</li>
+          <li>Nothing to buy until you're sure</li>
+        </ul>
+        <a class="btn" href="/download">Download for Mac</a>
+      </div>
 
+      <div class="plan main">
+        <p class="tag">How most churches pay</p>
+        <h2>Pay as you go</h2>
+        <p class="price"><span class="amount">${RATE}</span></p>
+        <p class="unit">per language-hour of speech</p>
+        <p class="sum">Buy credit in the app and use it as you go. Only speech in a language someone is listening to is counted.</p>
+        <ul>
+          <li>Prepaid credit, $5 to $500 at a time</li>
+          <li><b>Credit never expires</b></li>
+          <li><b>Refund unused credit anytime</b></li>
+          <li>No monthly plan, no contract</li>
+          <li>A meeting is never cut off</li>
+        </ul>
+        <a class="btn get" href="/download">Start with a free hour</a>
+      </div>
+
+      <div class="plan">
+        <h2>Your own key</h2>
+        <p class="price"><span class="amount small">By invitation</span></p>
+        <p class="unit">with a setup code from us</p>
+        <p class="sum">Some congregations connect their own AI provider key. Meetings on your own key don't use credit; you pay the provider directly for that usage.</p>
+        <ul>
+          <li>One-time setup code</li>
+          <li>Congregations already on their own key keep it</li>
+        </ul>
+        <a class="btn" href="mailto:support@hearchurch.com?subject=Setup%20code%20for%20our%20own%20key">Ask for a code</a>
+      </div>
+    </section>
+
+    <section class="calc" aria-labelledby="calc-h">
+      <h2 id="calc-h">Estimate a meeting</h2>
+      <form id="calc" class="calc-form" onsubmit="return false">
+        <label>Minutes of speaking
+          <input id="c-min" type="number" inputmode="numeric" min="0" max="600" step="5" value="50">
+          <small>A 70-minute meeting has about 50.</small>
+        </label>
+        <label>Languages heard
+          <input id="c-lang" type="number" inputmode="numeric" min="1" max="20" step="1" value="2">
+          <small>Not counting the one being spoken.</small>
+        </label>
+        <label>Meetings a month
+          <input id="c-meet" type="number" inputmode="numeric" min="1" max="60" step="1" value="4">
+          <small>Sundays, plus anything else you translate.</small>
+        </label>
+      </form>
+      <div class="calc-out" aria-live="polite">
+        <p><span class="big" id="c-each">$8.33</span> a meeting</p>
+        <p><span class="big" id="c-month">$33.33</span> a month</p>
+        <p class="quiet" id="c-hours">6.7 language-hours a month. Your first hour is free.</p>
+      </div>
+    </section>
+
+    <section class="counts" aria-labelledby="counts-h">
+      <h2 id="counts-h">What counts</h2>
+      <div class="cols">
+        <div>
+          <h3>Counted</h3>
+          <ul class="yes">
+            <li>Seconds of speech in which Hear Church recognizes words and translates them</li>
+            <li>Sung words that Hear Church recognizes and translates</li>
+            <li>Each language, while at least one person is following it by voice or captions</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Not counted</h3>
+          <ul class="no">
+            <li>Silence and pauses</li>
+            <li>Music and stretches with no recognized words</li>
+            <li>Prayers or parts you choose not to translate</li>
+            <li>A language nobody is listening to</li>
+            <li>Listeners: any number can follow, at no cost</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="prose questions">
       <h2>Questions</h2>
       <dl class="faq">
         {faq.map(([q, a]) => <><dt>{q}</dt><dd>{a}</dd></>)}
@@ -50,13 +138,85 @@ const schema = {
         <a class="get" href="/download">Download for Mac</a>
         <a class="second" href="/how-it-works">How it works</a>
       </div>
-    </div>
+      <p class="seller quiet">Prices in US dollars. Credit is sold by Automaddie LLC; payments go through Stripe. See the <a href="/terms">terms</a> for the details.</p>
+    </section>
   </article>
 </Base>
 
+<script define:vars={{ RATE }}>
+const $ = (id) => document.getElementById(id);
+const usd = (n) => "$" + n.toFixed(2);
+const num = (id, lo) => Math.max(lo, Number($(id).value) || 0);
+function update() {
+  const hoursEach = (num("c-min", 0) / 60) * num("c-lang", 1);
+  const hoursMonth = hoursEach * num("c-meet", 1);
+  $("c-each").textContent = usd(hoursEach * RATE);
+  $("c-month").textContent = usd(hoursMonth * RATE);
+  $("c-hours").textContent = `${hoursMonth.toFixed(1)} language-hours a month. Your first hour is free.`;
+}
+$("calc").addEventListener("input", update);
+update();
+</script>
+
 <style>
-.head { padding: clamp(1.5rem, 5vh, 3rem) 0 1rem; }
+.head { padding: clamp(1.5rem, 5vh, 3rem) 0 1.5rem; max-width: 44rem; }
 article { padding-bottom: clamp(3rem, 8vh, 5rem); }
-.prose ul { padding-left: 1.2rem; }
-.prose li { margin-bottom: .6rem; }
+section + section { margin-top: clamp(3rem, 8vh, 4.5rem); }
+
+.plans { display: grid; gap: 1.25rem; align-items: stretch; }
+@media (min-width: 56rem) { .plans { grid-template-columns: 1fr 1.12fr 1fr; align-items: center; } }
+.plan {
+  display: flex; flex-direction: column; padding: 1.75rem 1.6rem 1.6rem; border: 1px solid var(--line);
+  border-radius: 1.25rem; background: var(--cloth-deep);
+}
+.plan.main {
+  border: 2px solid var(--gold-deep); background: linear-gradient(#173d33, var(--cloth-deep));
+  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / .3); padding-block: 2.1rem 2rem;
+}
+.plan h2 { font-size: 1.6rem; margin: 0 0 .75rem; }
+.tag {
+  align-self: flex-start; margin: 0 0 .9rem; padding: .2rem .7rem; border-radius: 1rem; font-size: .9rem; font-weight: 700;
+  color: var(--ink); background: var(--gold);
+}
+.price { margin: 0; line-height: 1; }
+.amount { font: 600 3.6rem/1 var(--serif); color: var(--gold); }
+.amount.small { font-size: 2.3rem; }
+.unit { margin: .4rem 0 1rem; color: var(--quiet); }
+.sum { margin: 0 0 1rem; line-height: 1.5; }
+.plan ul { list-style: none; margin: 0 0 1.5rem; padding: 0; flex: 1; }
+.plan li { position: relative; padding-left: 1.6rem; margin-bottom: .45rem; line-height: 1.4; }
+.plan li::before { content: "✓"; position: absolute; left: 0; color: var(--gold); font-weight: 700; }
+.btn {
+  display: block; text-align: center; padding: .75rem 1rem; border-radius: .9rem; font-weight: 700; text-decoration: none;
+  border: 1px solid var(--gold-deep); color: var(--gold);
+}
+.btn:hover { background: rgb(244 208 131 / .08); }
+.btn.get { font-size: 1.15rem; border: 0; color: var(--ink); }
+
+.calc { display: grid; gap: 1.5rem 3rem; padding: 2rem clamp(1.25rem, 3vw, 2.25rem); border: 1px solid var(--line); border-radius: 1.25rem; }
+.calc h2 { margin: 0; }
+@media (min-width: 48rem) { .calc { grid-template-columns: 1.4fr 1fr; } .calc h2 { grid-column: 1 / -1; } }
+.calc-form { display: grid; gap: 1.1rem; }
+@media (min-width: 36rem) { .calc-form { grid-template-columns: repeat(3, 1fr); } }
+.calc label { display: flex; flex-direction: column; gap: .35rem; font-weight: 700; }
+.calc input {
+  font: 600 1.5rem var(--serif); width: 100%; padding: .45rem .7rem; border-radius: .7rem; border: 1px solid var(--line);
+  background: var(--cloth-deep); color: var(--paper);
+}
+.calc input:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.calc small { font-weight: 400; font-size: .95rem; color: var(--quiet); line-height: 1.35; }
+.calc-out { align-self: center; }
+.calc-out p { margin: 0 0 .4rem; }
+.big { font: 600 2.6rem/1.1 var(--serif); color: var(--gold); margin-right: .3rem; }
+
+.cols { display: grid; gap: 1rem 3rem; }
+@media (min-width: 48rem) { .cols { grid-template-columns: 1fr 1fr; } }
+.cols h3 { margin-top: 0; }
+.counts ul { list-style: none; margin: 0; padding: 0; }
+.counts li { position: relative; padding-left: 1.7rem; margin-bottom: .6rem; line-height: 1.45; }
+.counts .yes li::before { content: "✓"; position: absolute; left: 0; color: var(--gold); font-weight: 700; }
+.counts .no li::before { content: "—"; position: absolute; left: 0; color: var(--quiet); }
+.counts h2 { margin-bottom: 1.25rem; }
+
+.seller { margin-top: 2rem; font-size: 1rem; }
 </style>
