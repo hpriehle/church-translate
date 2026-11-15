@@ -1,21 +1,25 @@
 """End-to-end test of the paid credits chain against a real local hub, Stripe in TEST mode only.
 
-    uv run python scripts/e2e_credits.py            [--env ~/.config/hearchurch/stripe-test.env] [--usd 10]
+    uv run python scripts/e2e_credits.py            [--env ~/.config/hearchurch/stripe-test.env] [--usd 20]
                                                     [--real-anthropic [--hub-env ~/.config/hearchurch/hub.env]]
 
 1. starts the hub (this repo's FastAPI app, hub routes only, no pipeline) on a free port with a throwaway database
    in a temp dir, STRIPE_* loaded from the env file (never printed)
 2. signs up a test congregation (billing mode credits)
-3. POST /api/hc/checkout → a real Stripe TEST Checkout session (only its id and amount are printed); skipped with a
+3. POST /api/hc/checkout for a bundle ($20 = 4 h, $50 = 11 h, $100 = 25 h, $250 = 70 h) → a real Stripe TEST
+   Checkout session (only its id and amount are printed); skipped with a
    fake session id when STRIPE_SECRET_KEY isn't in the env file. A live key (sk_live_/rk_live_) is refused.
 4. builds checkout.session.completed (paid) for that session, signs it like Stripe (t=…,v1=HMAC-SHA256), posts it
    to /api/stripe/webhook twice (credited once) and once with a bad signature (400)
-5. GET /api/hc/billing: the balance went up by exactly the top-up
+5. GET /api/hc/billing: the paid hours went up by exactly the bundle's hours, the balance by its price
 6. a meeting over the engine's link (/ws/engine): session_start, then the engine's `meter` report of 90
-   language-minutes (sent twice): the free hour goes first, the other 30 min cost $2.50 at $5/language-hour
-7. charge.refunded for part of the top-up (posted twice): the balance drops by the refunded part
+   language-minutes (sent twice): this month's free hour goes first, the other 30 min cost the bundle's own rate
+   ($2.50 for the $20 bundle at $5/h)
+7. charge.refunded for part of the top-up (posted twice): the balance drops by the refunded part, and the hours
+   pro rata at the bundle's rate
 8. a "this Wi-Fi only" meeting: session_start with private=true starts a billing session that the congregation's
-   public page, search and listener socket don't show; its meter report (12 language-minutes) costs $1.00
+   public page, search and listener socket don't show; its meter report (12 language-minutes) costs the bundle's
+   rate too ($1.00 for the $20 bundle)
 9. only with --real-anthropic: the credits translation proxy with the real Anthropic key. ANTHROPIC_API_KEY is read
    from the hub env file and given to the hub child process only (never printed; this process, which plays the
    engine, has no key at all). The engine's own `hub` backend (app/translate/hub_session.py: HubSession and
@@ -58,8 +62,8 @@ DEFAULT_HUB_ENV = Path("~/.config/hearchurch/hub.env").expanduser()
 CLAUDE_VARS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 PROD_LOG = "E2E_HUB_PROD_LOG"   # set for the hub child: log like the production hub (and the proxy's debug line)
 STRIPE_VARS = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PAYMENT_METHOD_CONFIG")
-USD_PER_LANGUAGE_HOUR = 5.0
-FREE_MIN = 60
+BUNDLE_HOURS = {20: 4, 50: 11, 100: 25, 250: 70}   # app/hear/db.py BUNDLES
+FREE_MIN = 60                                      # every calendar month (UTC)
 
 
 # ------------------------------------------------------------------ the hub (child process)
@@ -187,13 +191,16 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report, real: bool = 
         b0 = await billing()
         r.step("2 billing mode is credits, nothing bought, the free hour intact",
                b0["billing"] == "credits" and b0["balance_usd"] == 0 and b0["balance"]["free_left_min"] == FREE_MIN
-               and b0["can_buy"] == bool(key),
+               and b0["can_buy"] == bool(key) and b0["buy_usd"] == list(BUNDLE_HOURS)
+               and [x["hours"] for x in b0["bundles"]] == list(BUNDLE_HOURS.values())
+               and b0["free_resets_at"] > time.time(),
                f"billing={b0['billing']} balance=${b0['balance_usd']:.2f} free={b0['balance']['free_left_min']} min "
                f"can_buy={b0['can_buy']}")
         cid = None  # the congregation id the webhook needs, from the Checkout metadata or the admin-free fallback
 
         # 3 ------------------------------------------------------------ a real Stripe TEST Checkout session
-        cents = usd * 100
+        cents, hours = usd * 100, BUNDLE_HOURS[usd]
+        usd_per_hour = usd / hours
         session: dict
         if key:
             res = await c.post("/api/hc/checkout", json={"usd": usd}, headers=auth)
@@ -255,8 +262,9 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report, real: bool = 
 
         # 5 ------------------------------------------------------------ the balance went up once
         b1 = await billing()
-        r.step(f"5 balance up by exactly ${usd:.2f}, once", round(b1["balance_usd"] - b0["balance_usd"], 2) == usd
-               and b1["balance"]["bought_usd"] == usd,
+        r.step(f"5 {hours} paid hours and ${usd:.2f} credited, once",
+               round(b1["balance_usd"] - b0["balance_usd"], 2) == usd and b1["balance"]["bought_usd"] == usd
+               and b1["paid_hours_left"] == hours and b1["balance"]["bought_min"] == hours * 60,
                f"${b0['balance_usd']:.2f} → ${b1['balance_usd']:.2f}, bought ${b1['balance']['bought_usd']:.2f}, "
                f"{b1['language_hours_left']} language-hours left")
 
@@ -296,15 +304,16 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report, real: bool = 
             await ws.close()
         b2 = await billing()
         billed_min = 90 - FREE_MIN
-        cost = round(billed_min / 60 * USD_PER_LANGUAGE_HOUR, 2)
-        r.step(f"6 90 language-minutes: free hour used, then ${cost:.2f} at ${USD_PER_LANGUAGE_HOUR:.0f}/language-hour",
+        cost = round(billed_min / 60 * usd_per_hour, 2)
+        r.step(f"6 90 language-minutes: free hour used, then ${cost:.2f} at ${usd_per_hour:.2f}/language-hour",
                b2["balance"]["used_min"] == 90 and b2["balance"]["free_left_min"] == 0
-               and round(b1["balance_usd"] - b2["balance_usd"], 2) == cost,
+               and b2["paid_hours_left"] == round(hours - billed_min / 60, 2)
+               and abs(round(b1["balance_usd"] - b2["balance_usd"], 2) - cost) <= 0.01,
                f"used {b2['balance']['used_min']} min, free left {b2['balance']['free_left_min']}, "
                f"${b1['balance_usd']:.2f} → ${b2['balance_usd']:.2f}")
 
         # 7 ------------------------------------------------------------ partial refund
-        refund_cents = cents * 2 // 5          # 40% of the top-up ($4 of $10)
+        refund_cents = cents * 2 // 5          # 40% of the bundle ($8 of $20: 96 of its 240 minutes)
         charge = {"id": f"ch_e2e_{secrets.token_hex(8)}", "object": "charge", "payment_intent": pi,
                   "amount": cents, "amount_captured": cents, "amount_refunded": refund_cents, "currency": "usd",
                   "refunded": False, "livemode": False}
@@ -317,8 +326,10 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report, real: bool = 
                and res2.status_code == 200 and res2.json().get("refunded") is False,
                f"HTTP {res.status_code}/{res2.status_code} refunded_cents={res.json().get('refunded_cents')}")
         b3 = await billing()
-        r.step(f"7 balance down by the refunded ${refund_cents / 100:.2f}",
-               round(b2["balance_usd"] - b3["balance_usd"], 2) == refund_cents / 100
+        refund_min = hours * 60 * refund_cents / cents     # pro rata at the bundle's own rate
+        r.step(f"7 balance down by the refunded ${refund_cents / 100:.2f} and {refund_min:g} minutes",
+               abs(round(b2["balance_usd"] - b3["balance_usd"], 2) - refund_cents / 100) <= 0.01
+               and abs(b2["balance"]["balance_min"] - b3["balance"]["balance_min"] - refund_min) <= 0.01
                and b3["balance"]["bought_usd"] == (cents - refund_cents) / 100,
                f"${b2['balance_usd']:.2f} → ${b3['balance_usd']:.2f}, bought ${b3['balance']['bought_usd']:.2f}; "
                f"{b3['message']}")
@@ -349,9 +360,10 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report, real: bool = 
         finally:
             await ws.close()
         b4 = await billing()
-        r.step("8 its 12 language-minutes are billed like an online meeting's ($1.00)",
+        cost8 = round(12 / 60 * usd_per_hour, 2)
+        r.step(f"8 its 12 language-minutes are billed like an online meeting's (${cost8:.2f})",
                len(ok.get("seqs", [])) == 12 and b4["balance"]["used_min"] == 102
-               and round(b3["balance_usd"] - b4["balance_usd"], 2) == 1.0,
+               and abs(round(b3["balance_usd"] - b4["balance_usd"], 2) - cost8) <= 0.01,
                f"used {b4['balance']['used_min']} min, ${b3['balance_usd']:.2f} → ${b4['balance_usd']:.2f}")
 
         if real:
@@ -542,7 +554,7 @@ async def recv_on(ws, kind: str) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--env", type=Path, default=DEFAULT_ENV, help=f"env file with {', '.join(STRIPE_VARS)}")
-    ap.add_argument("--usd", type=int, default=10, help="top-up in whole dollars (5–500)")
+    ap.add_argument("--usd", type=int, default=20, choices=list(BUNDLE_HOURS), help="the bundle to buy, in dollars")
     ap.add_argument("--real-anthropic", action="store_true",
                     help="also step 9: real translations through the hub with the real Anthropic key (a few cents)")
     ap.add_argument("--hub-env", type=Path, default=DEFAULT_HUB_ENV, help="env file with ANTHROPIC_API_KEY")

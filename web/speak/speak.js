@@ -178,15 +178,16 @@
       $("buyRow").hidden = true;
       return;
     }
+    const free = b.balance.free_left_min / 60, paid = b.paid_hours_left ?? b.balance.balance_min / 60;
     $("creditLine").textContent = out ? "Out of credit: buy credit to start the next meeting"
-      : `${money(b.balance_usd)} credit · ${b.language_hours_left.toFixed(1)} language-hours left`;
+      : `${free.toFixed(1)} free hours left this month · ${Math.max(0, paid).toFixed(1)} paid hours left`;
     $("creditSmall").textContent = (out ? `Balance ${money(b.balance_usd)}. ` : "")
-      + (b.balance.free_left_min > 0 ? `Includes ${(b.balance.free_left_min / 60).toFixed(1)} free language-hours. ` : "")
-      + `$${b.usd_per_language_hour} per language-hour of speech. A meeting that's running is never cut off.`
+      + "One language-hour free every month. A meeting that's running is never cut off."
       + (b.can_buy ? "" : " Buying credit isn't available yet.");
     $("buyRow").hidden = !b.can_buy;
     if (b.can_buy && !$("buyUsd").options.length)
-      for (const usd of b.buy_usd) $("buyUsd").add(new Option(`$${usd} · ${usd / b.usd_per_language_hour} h`, usd));
+      for (const x of b.bundles || [])
+        $("buyUsd").add(new Option(`$${x.usd} · ${x.hours} h ($${x.usd_per_hour.toFixed(2)}/h)`, x.usd));
   }
 
   $("buyBtn").onclick = async () => {

@@ -1298,7 +1298,7 @@ async def api_billing(request: Request):
 
 @app.post("/api/buy-credit")
 async def api_buy_credit(request: Request):
-    """{usd} → {url}: the hub's Stripe Checkout page for that much credit (POST /api/hc/checkout)."""
+    """{usd} → {url}: the hub's Stripe Checkout page for the credit bundle at that price (POST /api/hc/checkout)."""
     require_speaker(request)
     try:
         usd = int((await request.json()).get("usd"))
