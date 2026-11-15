@@ -1,0 +1,93 @@
+---
+// The download page. It checks which chip this Mac has, offers that build, and the other one below.
+import Base from "../layouts/Base.astro";
+---
+<Base
+  title="Download Hear Church for Mac | Hear Church"
+  description="Download Hear Church, the free Mac app that translates your church meeting live. For Macs with Apple silicon or Intel.">
+
+  <section class="dl wrap" data-dl>
+    <img class="icon" src="/download/icon.png" width="1024" height="1024" alt="The Hear Church app icon: a pulpit with a microphone and a sound wave on it">
+
+    <div class="copy">
+      <h1>Download Hear Church</h1>
+      <p class="found" data-found aria-live="polite">The free Mac app that translates your church meeting live.</p>
+      <a class="get" href="/download/HearChurch.dmg" data-cta="download" data-get>Download for Mac with Apple silicon</a>
+      <p class="other" data-other="arm">Have an Intel Mac? <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Download the Intel version</a></p>
+      <p class="other" data-other="intel" hidden>Have a Mac with Apple silicon? <a href="/download/HearChurch.dmg" data-cta="download">Download that version</a></p>
+      <p class="other" data-unsure hidden>Not sure which you have? Open the Apple menu and choose About This Mac.
+        If it lists a Chip, your Mac has Apple silicon. If it lists a Processor, it's an Intel Mac.</p>
+    </div>
+  </section>
+</Base>
+
+<script>
+  // Apple silicon or Intel? Every Mac browser says "Intel Mac OS X", so look at the graphics chip
+  // (Chrome, Edge, Firefox), then Chrome's architecture hint. Safari hides both: there we offer the
+  // Apple silicon build, which every Mac sold since 2023 needs, and say how to check.
+  async function whichMac() {
+    try {
+      const gl = document.createElement("canvas").getContext("webgl")!;
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const gpu = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      if (/Apple M\d/.test(gpu)) return "arm";
+      if (/Intel|AMD|Radeon|NVIDIA/i.test(gpu)) return "intel";
+    } catch {}
+    try {
+      const { architecture } = await (navigator as any).userAgentData.getHighEntropyValues(["architecture"]);
+      if (architecture === "arm") return "arm";
+      if (architecture === "x86") return "intel";
+    } catch {}
+    return "";
+  }
+
+  const box = document.querySelector<HTMLElement>("[data-dl]")!;
+  const $ = <T extends HTMLElement>(sel: string) => box.querySelector<T>(sel)!;
+  const found = $("[data-found]"), get = $<HTMLAnchorElement>("[data-get]");
+  const ua = navigator.userAgent;
+  const phone = /iPhone|iPod|iPad|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+
+  if (phone) {
+    found.textContent = "Hear Church runs on a Mac. Open this page on the Mac you'll use at church to download it.";
+  } else {
+    whichMac().then((chip) => {
+      document.documentElement.dataset.mac = chip || "unknown";
+      if (chip === "intel") {
+        found.textContent = "This is an Intel Mac, so this is the version you need.";
+        get.href = "/download/HearChurch-Intel.dmg";
+        get.dataset.cta = "download-intel";
+        get.textContent = "Download for Intel Mac";
+        $('[data-other="arm"]').hidden = true;
+        $('[data-other="intel"]').hidden = false;
+      } else if (chip === "arm") {
+        found.textContent = "This Mac has Apple silicon, so this is the version you need.";
+      } else {
+        found.textContent = "Your browser doesn't say which chip this Mac has. Most Macs need the Apple silicon version.";
+        $("[data-unsure]").hidden = false;
+      }
+    });
+  }
+</script>
+
+<style>
+/* The app icon on the left, the button for this Mac on the right. */
+.dl {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center;
+  gap: 2.5rem clamp(3rem, 7vw, 6rem); max-width: 56rem;
+  padding-top: clamp(3rem, 10vh, 6.5rem); padding-bottom: clamp(4rem, 14vh, 8rem);
+}
+.copy h1 { margin-bottom: .9rem; }
+.copy .get { text-wrap: balance; }
+.found { font-size: 1.25rem; margin: 0 0 1.75rem; max-width: 30rem; text-wrap: pretty; }
+.other { color: var(--quiet); font-size: 1rem; margin: 1rem 0 0; max-width: 30rem; text-wrap: pretty; }
+.other[hidden] { display: none; }
+
+/* The app icon, the way it sits in the Dock. */
+.icon { width: clamp(11rem, 24vw, 16rem); height: auto; margin: 0 -.5rem; filter: drop-shadow(0 1.1rem 1.6rem rgb(0 0 0 / .32)); }
+
+@media (max-width: 44rem) {
+  .dl { grid-template-columns: 1fr; padding-top: 2.5rem; }
+  .icon { width: 8.5rem; }
+}
+</style>
