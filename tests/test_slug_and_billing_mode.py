@@ -74,8 +74,80 @@ def test_admin_switches_billing_mode(client, hear):
     assert client.get("/api/hc/billing", headers=bearer(token)).json()["billing"] == "own_key"
     assert client.post(url + "?key=boss", json={"mode": "credits"}).json()["billing"]["billing"] == "credits"
     assert client.get("/api/hc/billing", headers=bearer(token)).json()["billing"] == "credits"
-    assert client.post(url + "?key=boss", json={"mode": "free"}).status_code == 422
+    assert client.post(url + "?key=boss", json={"mode": "free"}).status_code == 400
     assert client.post("/api/admin/congregations/999/billing?key=boss", json={"mode": "credits"}).status_code == 404
+
+
+KNOWS = {"X-HC-Billing-Types": "credits,own_key,internal"}
+
+
+def test_admin_sets_the_billing_type_with_the_billing_field(client, hear):
+    """Siteboard sends {"billing": …}; the three types, 400 (not 422) for anything else, 404 unknown congregation."""
+    cong, token = make_cong(hear)
+    url = f"/api/admin/congregations/{cong['id']}/billing?key=boss"
+    assert client.post(url.split("?")[0], json={"billing": "internal"}).status_code == 403   # operator only
+    for t in ("own_key", "internal", "credits"):
+        r = client.post(url, json={"billing": t})
+        assert r.status_code == 200 and r.json()["ok"] is True and r.json()["billing"]["billing"] == t
+        assert hear.db.congregation(cong["id"])["billing"] == t
+    for bad in ({"billing": "free"}, {"billing": 3}, {"billing": None}, {}, {"mode": "Internal"}):
+        r = client.post(url, json=bad)
+        assert r.status_code == 400, (bad, r.status_code)
+        assert "credits, own_key, internal" in r.json()["detail"]
+    assert client.post("/api/admin/congregations/999/billing?key=boss", json={"billing": "internal"}).status_code == 404
+    # "billing" wins over the older "mode" when both come
+    r = client.post(url, json={"billing": "internal", "mode": "own_key"})
+    assert r.json()["billing"]["billing"] == "internal"
+    # the operator's views show the type
+    row, = client.get("/api/admin/congregations?key=boss").json()["congregations"]
+    assert row["billing"] == "internal"
+    one = client.get(f"/api/admin/congregations/{cong['id']}?key=boss").json()
+    assert one["congregation"]["billing"] == "internal" and one["billing"]["billing"] == "internal"
+
+
+def test_internal_billing_as_the_mac_sees_it(client, hear):
+    cong, token = make_cong(hear)
+    hear.db.set_billing(cong["id"], "internal")
+    b = client.get("/api/hc/billing", headers={**bearer(token), **KNOWS}).json()
+    assert b["billing"] == "internal" and b["message"] == "Included: no charge."
+    assert b["can_buy"] is False and b["out_of_credit"] is False and b["language_hours_left"] is None
+    assert b["balance"]["can_start"] is True
+    # an app that doesn't know "internal" (0.3.0 builds 18/19) is told "credits": it translates through the hub,
+    # with nothing to buy and the plain message
+    old = client.get("/api/hc/billing", headers=bearer(token)).json()
+    assert old["billing"] == "credits" and old["can_buy"] is False and old["out_of_credit"] is False
+    assert old["message"] == "Included: no charge."
+    # never on the public pages
+    for path in (f"/api/hc/c/{cong['slug']}", f"/{cong['slug']}"):
+        r = client.get(path)
+        assert r.status_code == 200 and "internal" not in r.text.lower() and "billing" not in r.text.lower()
+    # no credit can be bought for it
+    r = client.post("/api/hc/checkout", json={"usd": 25}, headers={**bearer(token), **KNOWS})
+    assert r.status_code in (409, 503)
+
+
+def test_internal_meetings_are_metered_at_no_cost_and_never_refused(client, hear):
+    from app.hear import admin
+
+    cong, token = make_cong(hear)
+    hear.db.set_billing(cong["id"], "internal")
+    sid = hear.db.start_session(cong["id"], ["fr"], code="m1", billing="internal")
+    hear.db.record_speech(cong["id"], "m1", [{"seq": i, "s": 60, "langs": ["fr"]} for i in range(120)])  # 2 h
+    hear.db.end_session(sid)
+    bal = hear.db.balance(cong["id"])
+    assert bal["metered_min"] == 120 and bal["used_min"] == 0 and bal["free_left_min"] == 60
+    assert hear.db.can_start(hear.db.congregation(cong["id"]))
+    j = client.get("/api/hc/usage", headers={**bearer(token), **KNOWS}).json()
+    m, = j["meetings"]
+    assert j["billing"] == "internal" and m["billing"] == "internal" and m["cost_usd"] == 0 and m["language_hours"] == 2
+    old = client.get("/api/hc/usage", headers=bearer(token)).json()
+    assert old["billing"] == "credits" and old["meetings"][0]["billing"] == "credits"
+    assert old["meetings"][0]["cost_usd"] == 0                       # the old app shows "free"
+    row, = [r for r in admin.usage(hear) if r["session_id"] == sid]
+    assert row["billing"] == "internal" and row["cost_usd"] == 0 and row["amount_cents"] == 0
+    stats = client.get("/api/admin/stats?key=boss").json()
+    assert stats["all_time"]["language_hours"]["internal"] == 2 and stats["all_time"]["language_hours"]["paid"] == 0
+    assert stats["congregations"]["by_billing"] == {"internal": 1}
 
 
 def test_usage_history_for_the_billing_tab(client, hear):

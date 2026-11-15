@@ -6,6 +6,8 @@ tokens and one-time own-key codes are stored only as SHA-256 hashes.
 Billing: a congregation pays with prepaid credits ("credits"), or with its own Anthropic key ("own_key"). Own key
 is only reached with a one-time code Harrison makes for that church (`python -m app.hear.codes mint "Dakar Ward"`).
 Congregations that existed before billing are grandfathered as "own_key": they were set up with their own keys.
+"internal" (rare, set only by the operator, never advertised): the hub translates for it at no charge with Harrison's
+own Claude Code login (app/hear/internal.py); its meetings are metered like the others but never debited or refused.
 
 Metering and the ledger: the Mac reports seconds of speech per heard language (`record_speech`, idempotent on the
 session and the Mac's chunk number). A congregation's balance is its top-ups (`add_credit`, idempotent on the Stripe
@@ -153,6 +155,8 @@ CREATE INDEX IF NOT EXISTS refunds_credit ON refunds(credit_id);
 # Prices (decided Nov 8): $5 per language-hour of speech, the first language-hour free per congregation.
 CENTS_PER_LANGUAGE_HOUR = 500
 FREE_SECONDS = 3600
+BILLING_TYPES = ("credits", "own_key", "internal")
+NO_CREDIT_NEEDED = ("own_key", "internal")   # metered, but never refused for balance or debited
 MAX_CHUNK_S = 60.0     # one reported chunk of speech is never longer than this (the chunker cuts far sooner)
 MAX_LANGS = 20
 
@@ -360,9 +364,10 @@ class Database:
                                          " slug", (cid,))]
 
     def set_billing(self, cid: int, mode: str) -> bool:
-        """Switch how a congregation pays: "credits" or "own_key" (the operator unlocks or locks the own key).
-        Meetings keep the mode they started under. False for an unknown congregation."""
-        if mode not in ("credits", "own_key"):
+        """Switch how a congregation pays: "credits", "own_key" (the operator unlocks or locks the own key) or
+        "internal" (no charge, through the hub). Meetings keep the mode they started under. False for an unknown
+        congregation."""
+        if mode not in BILLING_TYPES:
             raise ValueError(mode)
         return self._x("UPDATE congregations SET billing = ? WHERE id = ?", (mode, cid)).rowcount > 0
 
@@ -717,7 +722,7 @@ class Database:
         device_id: the Mac that started it."""
         return self._x("INSERT INTO sessions (congregation_id, languages, started_at, trial, code, billing, device_id)"
                        " VALUES (?,?,?,?,?,?,?)", (cid, json.dumps(languages), time.time(), int(trial), code,
-                                                   "own_key" if billing == "own_key" else "credits",
+                                                   billing if billing in BILLING_TYPES else "credits",
                                                    device_id)).lastrowid
 
     def end_session(self, sid: int) -> None:
@@ -895,9 +900,9 @@ class Database:
                 "free_left_min": round(free_left / 60, 2), "balance_min": round(bal / 60, 2),
                 "balance_usd": round(bal / 3600 * CENTS_PER_LANGUAGE_HOUR / 100, 2), "bought_usd": round(cents / 100, 2),
                 "left_min": round((free_left + bal) / 60, 2),
-                "can_start": (cong or {}).get("billing") == "own_key" or free_left + bal > 0}
+                "can_start": (cong or {}).get("billing") in NO_CREDIT_NEEDED or free_left + bal > 0}
 
     def can_start(self, cong: dict[str, Any]) -> bool:
-        """May this congregation start a new meeting? Own key: always. Credits: while the free hour or the balance
+        """May this congregation start a new meeting? Own key and internal: always. Credits: while the free hour or the balance
         has something left. A meeting already running is never stopped; only the next one waits for a top-up."""
-        return cong["billing"] == "own_key" or self.balance(cong["id"])["can_start"]
+        return cong["billing"] in NO_CREDIT_NEEDED or self.balance(cong["id"])["can_start"]

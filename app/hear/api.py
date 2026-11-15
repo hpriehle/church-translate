@@ -13,7 +13,8 @@ Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
   POST /api/hc/connect-code (device token) → {connect_code}: a new 6-digit code for the congregation (old one dies)
   POST /api/hc/connect      {slug, code, device_name} → like claim's answer; 404 not_found, 403 bad_code,
                             429 {error: locked, retry_after}. Signup (verify_email off) also returns connect_code.
-                            The answer carries the congregation's billing ("credits" or "own_key").
+                            The answer carries the congregation's billing ("credits", "own_key" or "internal"; see
+                            "Billing types" below for what an app that doesn't know "internal" gets).
 Accounts (V3.2, docs/v3-languages.md "Accounts"): several e-mails per congregation, one main (billing) one;
   sign-up's `email` is the main one, `emails` adds more.
   GET  /api/hc/account      (device token) → {emails: [{email, main}], main_email, devices: [{…, this}]}
@@ -47,7 +48,14 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
   POST /api/admin/congregations/<id>/credits {payment_id, cents} (operator) → {created, credit, balance}: credit a
                             top-up. Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
                             payment's id); 409 when that id was credited with another amount or congregation.
-  POST /api/admin/congregations/<id>/billing {mode: "credits"|"own_key"} (operator): unlock or lock the own key.
+  POST /api/admin/congregations/<id>/billing {billing: "credits"|"own_key"|"internal"} (operator; {mode: …} works
+                            too) → {ok, billing: <as GET /api/hc/billing>}; 400 unknown type, 404 unknown congregation.
+Billing types: "credits" (prepaid), "own_key" (the church's own Anthropic key, straight from the Mac), "internal"
+  (Harrison's own congregations: the hub translates at no charge with its Claude Code login, app/hear/internal.py;
+  metered, never refused for balance, never shown publicly). Device answers say "internal" only to an app that sends
+  the header `X-HC-Billing-Types: …internal…` (KNOWS_HEADER); older apps (0.3.0 build 18/19) get "credits" instead,
+  which makes them translate through the hub (handled as internal there); their Billing tab shows 0.0 hours and no
+  buy buttons until they update.
   POST /api/admin/own-key-codes {label} (operator) → {code, label}: the only time the code is shown.
   GET  /api/admin/own-key-codes (operator) → {codes: [{id, label, created_at, used_at, voided_at, status, used_by…}]}
   More operator JSON for Siteboard (stats, ledger, refunds, void a code, one congregation): app/hear/admin.py.
@@ -436,7 +444,7 @@ async def connect(request: Request, body: Connect):
         h.connect_cong.fail(cong["slug"])
         return JSONResponse({"error": "bad_code"}, status_code=403)
     return {"ok": True, "device_token": h.db.add_device(cong["id"], body.device_name or "Mac"), "slug": cong["slug"],
-            "congregation": _public(cong), "billing": cong["billing"]}
+            "congregation": _public(cong), "billing": billing_for(request, cong["billing"])}
 
 
 # ------------------------------------------------------------------ accounts (V3.2): e-mails, add-a-Mac codes
@@ -604,7 +612,7 @@ async def pair(request: Request, body: Pair):
     cong, token = got
     log.info("%s: a Mac connected by code", cong["slug"])
     return {"ok": True, "device_token": token, "slug": cong["slug"], "congregation": _public(cong),
-            "billing": cong["billing"]}
+            "billing": billing_for(request, cong["billing"])}
 
 
 class EmailCode(BaseModel):
@@ -690,8 +698,8 @@ async def own_key_code_redeem(request: Request, body: OwnKeyCode):
 
 @router.get("/api/hc/billing")
 async def billing(request: Request):
-    """(device token) How this congregation pays ("credits" or "own_key") and what it has left."""
-    return billing_info(_device_congregation(request))
+    """(device token) How this congregation pays ("credits", "own_key" or "internal") and what it has left."""
+    return billing_info(_device_congregation(request), request)
 
 
 @router.get("/api/hc/usage")
@@ -708,30 +716,47 @@ async def usage_history(request: Request, meetings: int = Query(default=50, ge=1
     for m in reversed(_hear().db.sessions(cong["id"])[-meetings:]):
         u = by_session.get(m["id"]) or {}
         mins = u.get("minutes", 0)
-        out.append({"started_at": m["started_at"], "ended_at": m["ended_at"], "billing": m["billing"],
+        out.append({"started_at": m["started_at"], "ended_at": m["ended_at"], "billing": billing_for(request, m["billing"]),
                     "languages": m["languages"], "language_minutes": u.get("language_minutes", {}),
                     "language_hours": round(mins / 60, 2), "minutes": mins,
                     "free_minutes": u.get("free_minutes", 0), "paid_minutes": u.get("paid_minutes", 0),
                     "cost_usd": u.get("cost_usd", 0)})
     paid = [{"kind": r["kind"], "at": r["at"], "amount_usd": r["amount_usd"]} for r in rows if r["kind"] != "usage"]
-    return {"billing": cong["billing"], "meetings": out, "charges": paid[:charges]}
+    return {"billing": billing_for(request, cong["billing"]), "meetings": out, "charges": paid[:charges]}
 
 
-def billing_info(cong: dict[str, Any]) -> dict[str, Any]:
+KNOWS_HEADER = "X-HC-Billing-Types"   # sent by apps that know "internal" (the Mac app after 0.3.0 build 19)
+INCLUDED_MESSAGE = "Included: no charge."
+
+
+def billing_for(request: Request | None, billing: str) -> str:
+    """The billing type as this caller should see it. "internal" goes only to apps that say they know it
+    (KNOWS_HEADER); older Mac apps (0.3.0 builds 18 and 19, which know only "credits" and "own_key") get "credits",
+    which makes their engine translate through the hub (the proxy treats the congregation as internal regardless).
+    Their app_version ("0.3.0") can't tell the builds apart, so the header decides. No request: the operator."""
+    if billing != "internal" or request is None:
+        return billing
+    return billing if "internal" in request.headers.get(KNOWS_HEADER, "") else "credits"
+
+
+def billing_info(cong: dict[str, Any], request: Request | None = None) -> dict[str, Any]:
     """What the operator page and the app show: the balance in dollars and language-hours, whether the next
-    meeting can start, and whether credit can be bought here (Stripe set up on this server)."""
+    meeting can start, and whether credit can be bought here (Stripe set up on this server). With the device's
+    request, "billing" is as billing_for() says (operator views pass none and see the real type)."""
     b = _hear().db.balance(cong["id"])
     credits = cong["billing"] == "credits"
     hours = round(b["left_min"] / 60, 2)
     owed = f"-${-b['balance_usd']:.2f}" if b["balance_usd"] < 0 else f"${b['balance_usd']:.2f}"
-    if not credits:
+    if cong["billing"] == "internal":
+        message = INCLUDED_MESSAGE
+    elif not credits:
         message = "Translation is paid with your own API key."
     elif not b["can_start"]:
         message = f"Out of credit (balance {owed}). Buy credit to start the next meeting."
     else:
         free = f", {b['free_left_min'] / 60:.1f} of them free" if b["free_left_min"] > 0 else ""
         message = f"Credit {owed} · {hours:.1f} language-hours left{free}."
-    return {"billing": cong["billing"], "balance": b, "balance_usd": b["balance_usd"],
+    return {"billing": billing_for(request, cong["billing"]), "balance": b, "balance_usd": b["balance_usd"],
             "language_hours_left": hours if credits else None, "out_of_credit": credits and not b["can_start"],
             "usd_per_language_hour": CENTS_PER_LANGUAGE_HOUR / 100, "can_buy": credits and bool(stripe_keys()[0]),
             "buy_usd": list(BUY_USD), "buy_min_usd": BUY_MIN_USD, "buy_max_usd": BUY_MAX_USD, "message": message}
@@ -775,7 +800,8 @@ async def checkout(request: Request, body: Buy):
         return JSONResponse({"error": "not_configured", "message": "Buying credit isn't set up on this server yet."},
                             status_code=503)
     if cong["billing"] != "credits":
-        raise HTTPException(409, "This congregation pays with its own API key.")
+        raise HTTPException(409, INCLUDED_MESSAGE if cong["billing"] == "internal"
+                            else "This congregation pays with its own API key.")
     cents, base = body.usd * 100, _base_url(request)
     meta = {"congregation_id": str(cong["id"]), "slug": cong["slug"], "cents": str(cents)}
     hours = cents / CENTS_PER_LANGUAGE_HOUR
@@ -1101,20 +1127,27 @@ async def admin_list(request: Request):
 
 
 class BillingMode(BaseModel):
-    mode: Literal["credits", "own_key"]
+    billing: Any = None   # what Siteboard sends (checked by hand: 400, not 422)
+    mode: Any = None      # the older name, still accepted
 
 
 @router.post("/api/admin/congregations/{cid}/billing")
 async def admin_billing(request: Request, cid: int, body: BillingMode):
-    """Unlock (own_key) or lock (credits) the congregation's own API key. Meetings already started keep their mode;
-    the Mac shows the AI tab, or the Billing tab, the next time it asks GET /api/hc/billing."""
+    """Set how the congregation pays: "credits", "own_key" (unlock its own API key) or "internal" (no charge,
+    through the hub). Body {"billing": …} or {"mode": …}. 400 for another type, 404 for an unknown congregation.
+    Meetings already started keep their type; the Mac shows the AI tab, or the Billing tab, the next time it asks
+    GET /api/hc/billing."""
     from .. import main
+    from .db import BILLING_TYPES
 
     main.require_operator(request)
+    mode = body.billing if body.billing is not None else body.mode
+    if mode not in BILLING_TYPES:
+        raise HTTPException(400, f"billing: one of {', '.join(BILLING_TYPES)}.")
     h = _hear()
-    if not h.db.set_billing(cid, body.mode):
+    if not h.db.set_billing(cid, mode):
         raise HTTPException(404, "No such congregation.")
-    log.info("congregation %d billing set to %s by the operator", cid, body.mode)
+    log.info("congregation %d billing set to %s by the operator", cid, mode)
     return {"ok": True, "billing": billing_info(h.db.congregation(cid))}
 
 

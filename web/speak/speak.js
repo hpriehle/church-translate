@@ -173,8 +173,8 @@
     const out = !!b.out_of_credit;
     $("credit").classList.toggle("out", out);
     if (b.billing !== "credits") {
-      $("creditLine").textContent = "Own API key";
-      $("creditSmall").textContent = b.message || "";
+      $("creditLine").textContent = b.billing === "internal" ? "Included: no charge" : "Own API key";
+      $("creditSmall").textContent = b.billing === "internal" ? "" : (b.message || "");
       $("buyRow").hidden = true;
       return;
     }

@@ -795,6 +795,9 @@ private struct BillingSettings: View {
         Form {
             if !model.profile.setupDone {
                 Text("Connect this Mac to a congregation first.").foregroundStyle(.secondary)
+            } else if model.billing?.included == true {
+                Section("Billing") { Text("Included: no charge").font(.title3) }   // "internal": no balance, nothing to buy
+                history
             } else {
                 balance
                 buy
@@ -894,6 +897,7 @@ private struct BillingSettings: View {
 
     private func cost(_ m: HubClient.Meeting) -> String {
         if m.ownKey { return "own key" }
+        if m.included { return "included" }
         if m.costUSD > 0 { return Self.usd(m.costUSD) + (m.freeMinutes > 0 ? " (part free)" : "") }
         return m.languageHours > 0 ? "free" : "no speech"
     }

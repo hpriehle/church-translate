@@ -135,7 +135,7 @@ enum HubClient {
 
     /// GET /api/hc/billing: how the congregation pays and what it has left.
     struct Billing: Equatable {
-        let mode: String               // "credits" or "own_key"
+        let mode: String               // "credits", "own_key" or "internal" (no charge: no balance, nothing to buy)
         let balanceUSD: Double
         let hoursLeft: Double?         // language-hours: the free hour and the credit
         let freeLeftHours: Double
@@ -145,6 +145,7 @@ enum HubClient {
         let usdPerHour: Double
         let message: String
         var ownKey: Bool { mode == "own_key" }
+        var included: Bool { mode == "internal" }
     }
 
     static func billing(token: String) async throws -> Billing {
@@ -162,6 +163,7 @@ enum HubClient {
     struct Meeting: Identifiable, Hashable {
         let startedAt: Date; let endedAt: Date?; let languages: [String]; let languageHours: Double
         let freeMinutes: Double; let paidMinutes: Double; let costUSD: Double; let ownKey: Bool
+        var included = false
         var id: Date { startedAt }
     }
     struct Charge: Identifiable, Hashable {
@@ -179,7 +181,7 @@ enum HubClient {
                     endedAt: (m["ended_at"] as? Double).map { Date(timeIntervalSince1970: $0) },
                     languages: m["languages"] as? [String] ?? [], languageHours: num(m["language_hours"]),
                     freeMinutes: num(m["free_minutes"]), paidMinutes: num(m["paid_minutes"]), costUSD: num(m["cost_usd"]),
-                    ownKey: m["billing"] as? String == "own_key")
+                    ownKey: m["billing"] as? String == "own_key", included: m["billing"] as? String == "internal")
         }
         let charges = (json["charges"] as? [[String: Any]] ?? []).map { c in
             Charge(kind: c["kind"] as? String ?? "", at: Date(timeIntervalSince1970: num(c["at"])), amountUSD: num(c["amount_usd"]))
@@ -290,12 +292,16 @@ enum HubClient {
 
     // MARK: -
 
+    /// Tells the hub this app knows the "internal" billing type (older apps are told "credits" instead).
+    private static let billingTypes = "credits,own_key,internal"
+
     private static func send(_ path: String, _ body: [String: Any], token: String? = nil) async throws -> ([String: Any], Int) {
         var req = URLRequest(url: AppPaths.hub.appendingPathComponent(path))
         req.httpMethod = "POST"
         req.timeoutInterval = 30
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        req.setValue(billingTypes, forHTTPHeaderField: "X-HC-Billing-Types")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let data: Data, resp: URLResponse
         do {
@@ -312,6 +318,7 @@ enum HubClient {
         var req = URLRequest(url: AppPaths.hub.appendingPathComponent(path))
         req.timeoutInterval = 30
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(billingTypes, forHTTPHeaderField: "X-HC-Billing-Types")
         let data: Data, resp: URLResponse
         do {
             (data, resp) = try await URLSession.shared.data(for: req)

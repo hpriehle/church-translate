@@ -282,9 +282,9 @@ async def tunnel_loop() -> None:
 def app_backend(billing: str = "") -> str:
     """How the Mac app's engine reaches Claude. billing "credits" (the hub says so): through the hub, whatever key
     may be lying around. "own_key": the church's key, straight to the API. Not known yet (the hub not reached):
-    the key if the app passed one, else the hub. Unadvertised: a Claude subscription token (sk-ant-oat…) only
-    works through Claude Code itself."""
-    if billing == "credits":
+    the key if the app passed one, else the hub. "internal" (no charge, the hub's own Claude login): like credits.
+    Unadvertised: a Claude subscription token (sk-ant-oat…) only works through Claude Code itself."""
+    if billing in ("credits", "internal"):
         return "hub"
     access = claude_access()
     if access == "token":
@@ -298,7 +298,7 @@ def app_backend(billing: str = "") -> str:
 def use_billing(billing: str) -> None:
     """The hub told this Mac how its congregation pays (on every connect): switch the translators' backend if that
     changed (e.g. a church that redeemed an own-key code, or one moved to credits)."""
-    if not S.app_mode or billing not in ("credits", "own_key"):
+    if not S.app_mode or billing not in ("credits", "own_key", "internal"):
         return
     want = app_backend(billing)
     if want == S.settings.translate.backend:

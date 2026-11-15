@@ -10,11 +10,14 @@ or that ended one in the last TRAILING_S (its last sentences). A "this Wi-Fi onl
 opens a private, unlisted session for it (app/hear/live.py), so it is metered like an online one. A meeting under way is never
 cut off, whatever the balance; a Mac with no credit left gets 402 out_of_credit (its meeting was refused anyway).
 Own-key congregations get 409 own_key (they translate straight from the Mac).
+"internal" congregations (Harrison's own): the same rules except the balance (never refused for it), and the turn
+goes to Claude Code with Harrison's login instead of the API key (app/hear/internal.py), at no charge.
 
 Privacy: the speech and its translation pass through memory only. Nothing here stores or logs them: logs carry
 the congregation, sizes, timing and status codes, never a request or reply body or Anthropic's error text.
 
-Server key: ANTHROPIC_API_KEY in the hub's environment. Without it → 503 not_configured (everything else works).
+Server key: ANTHROPIC_API_KEY in the hub's environment. Without it → 503 not_configured for credits (everything
+else works, "internal" too).
 Limits per congregation: REQUESTS_PER_MIN, at most IN_FLIGHT at once, bodies up to MAX_BODY bytes.
 """
 from __future__ import annotations
@@ -78,14 +81,14 @@ def _no(status: int, error: str, message: str) -> JSONResponse:
 def may_translate(device: dict[str, Any], cong: dict[str, Any]) -> JSONResponse | None:
     """None when this Mac may translate on credits now, else the refusal."""
     h = hear_api._hear()
-    if cong["billing"] != "credits":
+    if cong["billing"] not in ("credits", "internal"):
         return _no(409, "own_key", "This congregation translates with its own API key.")
     live = h.live.get_any(cong["id"])   # private ("this Wi-Fi only") sessions too
     if live is not None and live.device_id == device["id"]:
         return None                       # a meeting under way is never cut off
     if h.db.ended_lately(cong["id"], device["id"], TRAILING_S):
         return None
-    if not h.db.can_start(cong):
+    if not h.db.can_start(cong):   # always True for "internal"
         return _no(402, "out_of_credit", hear_api.billing_info(cong)["message"])
     return _no(409, "not_live", "Translation on credit works only during a meeting started on this Mac while it "
                                 "can reach Hear Church. Check the internet connection, then start the meeting again.")
@@ -97,8 +100,9 @@ async def translate(request: Request):
     cid = cong["id"]
     if not limiter.allow(f"cong{cid}"):
         return _no(429, "rate_limited", "Too many translation requests: slow down.")
+    internal = cong["billing"] == "internal"
     key = server_key()
-    if not key:
+    if not key and not internal:
         return _no(503, "not_configured", "Translation on credit isn't set up on this server yet.")
     refused = may_translate(device, cong)
     if refused is not None:
@@ -116,6 +120,8 @@ async def translate(request: Request):
         return _no(429, "busy", "Too many translations at once.")
     in_flight[cid] = in_flight.get(cid, 0) + 1
     t0 = time.monotonic()
+    if internal:
+        return await _translate_internal(device, cong, turn, len(body), t0)
     try:
         params = request_params(turn.model, turn.system, [m.model_dump() for m in turn.messages], turn.effort)
         resp = await _anthropic_client(key).beta.messages.create(**params)
@@ -139,3 +145,27 @@ async def translate(request: Request):
     log.debug("translate for %s: %s, %d bytes in, %s+%s tokens, %.1fs", cong["slug"], turn.model, len(body),
               u.input_tokens, u.output_tokens, time.monotonic() - t0)
     return JSONResponse(resp.model_dump(mode="json", exclude_none=True, warnings=False))
+
+
+async def _translate_internal(device: dict[str, Any], cong: dict[str, Any], turn: TranslateTurn, size: int,
+                              t0: float) -> JSONResponse:
+    """An "internal" congregation's turn: Claude Code with Harrison's login, no charge (app/hear/internal.py)."""
+    from .internal import InternalError, bridge
+
+    cid = cong["id"]
+    try:
+        reply = await bridge.turn(device["id"], turn.model, turn.system, [m.model_dump() for m in turn.messages],
+                                  turn.effort)
+    except InternalError as e:
+        log.warning("internal translate for %s: %s after %.1fs (%d bytes)", cong["slug"], e, time.monotonic() - t0,
+                    size)
+        if str(e) == "busy":
+            return _no(429, "busy", "Too many translations at once.")
+        return _no(502, "unreachable", "Hear Church can't reach the translator right now.")
+    finally:
+        in_flight[cid] -= 1
+        if not in_flight[cid]:
+            del in_flight[cid]
+    log.debug("internal translate for %s: %s, %d bytes in, %.1fs", cong["slug"], turn.model, size,
+              time.monotonic() - t0)
+    return JSONResponse(reply)

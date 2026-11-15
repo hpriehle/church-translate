@@ -58,7 +58,7 @@ def _usd(cents: float) -> float:
 
 def usage(h: api.Hear) -> list[dict[str, Any]]:
     """Every meeting with metered speech, oldest first: language-minutes per language, how much of it the free hour
-    covered, and its cost. Own-key meetings are metered but cost nothing."""
+    covered, and its cost. Own-key and internal meetings are metered but cost nothing."""
     speech = h.db.speech_by_session()
     used: dict[int, float] = {}
     out = []
@@ -148,16 +148,18 @@ async def admin_transactions(request: Request, congregation: int | None = None, 
 # ------------------------------------------------------------------ stats
 
 def _hours(rows: list[dict[str, Any]]) -> dict[str, float]:
-    tot = free = paid = own = 0.0
+    tot = free = paid = own = internal = 0.0
     for r in rows:
         secs, f, p = r["_secs"]
         tot += secs
         if r["billing"] == "credits":
             free, paid = free + f, paid + p
+        elif r["billing"] == "internal":
+            internal += secs
         else:
             own += secs
     return {"total": round(tot / 3600, 2), "paid": round(paid / 3600, 2), "free": round(free / 3600, 2),
-            "own_key": round(own / 3600, 2), "paid_usd": _usd(paid / 3600 * CENTS_PER_LANGUAGE_HOUR)}
+            "own_key": round(own / 3600, 2), "internal": round(internal / 3600, 2), "paid_usd": _usd(paid / 3600 * CENTS_PER_LANGUAGE_HOUR)}
 
 
 def installs(h: api.Hear, now: float) -> dict[str, Any]:

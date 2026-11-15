@@ -27,9 +27,10 @@ Auth: send the operator password in the `X-Operator-Key` header (preferred: keep
  "at": 1794635908.43,
  "congregations": {"total": 2, "hidden": 0, "verified": 2, "by_billing": {"credits": 2}, "live_now": 0},
  "last_7d":  {"signups": 2, "active_congregations": 1, "meetings": 1,
-              "language_hours": {"total": 1.5, "paid": 0.5, "free": 1.0, "own_key": 0.0, "paid_usd": 2.5}},
+              "language_hours": {"total": 1.5, "paid": 0.5, "free": 1.0, "own_key": 0.0, "internal": 0.0, "paid_usd": 2.5}},
  "last_30d": {"signups": 2, "active_congregations": 1, "meetings": 1, "language_hours": {"…": "same shape"}},
- "all_time": {"meetings": 1, "language_hours": {"total": 1.5, "paid": 0.5, "free": 1.0, "own_key": 0.0, "paid_usd": 2.5}},
+ "all_time": {"meetings": 1, "language_hours": {"total": 1.5, "paid": 0.5, "free": 1.0, "own_key": 0.0, "internal": 0.0,
+              "paid_usd": 2.5}},
  "credit": {"sold_usd": 25.0, "manual_usd": 5.0, "refunded_usd": 0.0, "outstanding_usd": 27.5, "overdrawn_usd": 0,
             "usd_per_language_hour": 5.0},
  "installs": {"devices": 2, "active_7d": 1, "active_30d": 1, "never_connected": 1,
@@ -43,7 +44,8 @@ Auth: send the operator password in the `X-Operator-Key` header (preferred: keep
 - `signups`: congregations created in the window. `active_congregations` and `meetings`: meetings started in the
   window, counting every meeting whether or not anyone spoke.
 - `language_hours`: metered speech. `paid` is what credit-billed meetings used beyond the free hour, `free` is what
-  the free hour covered, and `own_key` is meetings paid with the church's own Anthropic key (metered, never billed).
+  the free hour covered, `own_key` is meetings paid with the church's own Anthropic key, and `internal` is meetings
+  of `internal` congregations (both metered, never billed). `by_billing` may have `credits`, `own_key`, `internal`.
   `paid_usd` is `paid` at $5 per hour, which is earned revenue. Windows go by when the meeting started.
 - `credit.sold_usd`: top-ups paid through Stripe. `manual_usd`: credits added by hand (see "kinds" below).
   `refunded_usd`: everything refunded. `outstanding_usd`: the sum of positive balances, meaning credit sold and not
@@ -98,7 +100,8 @@ Kinds:
   `"unlogged"` (refunded before the hub started logging refunds on this branch: one row for the whole amount).
 - `usage`: one meeting with metered speech (meetings with no speech aren't listed). `at` = when it started. Each
   congregation's credit-billed meetings use up the free hour in order, so `cost_usd` is the speech beyond it at
-  $5 per language-hour. Own-key meetings show `billing: "own_key"` and cost 0. `ended_at: null` means the meeting
+  $5 per language-hour. Own-key meetings show `billing: "own_key"` and internal ones
+  `billing: "internal"`; both cost 0. `ended_at: null` means the meeting
   is still running and its numbers are still growing.
 
 For each congregation, the sum of `amount_usd` equals its balance (to the cent, apart from rounding per meeting).
@@ -199,19 +202,53 @@ One church in one call.
 - `devices`: every Mac, revoked ones too (`revoked_at` set, listed last). `emails`: the main (billing) one first.
 - For more transactions, call `/api/admin/transactions?congregation={id}&before=<next_before>`.
 
-## POST /api/admin/congregations/{id}/billing  `{"mode": "credits"}` or `{"mode": "own_key"}`
+## POST /api/admin/congregations/{id}/billing  `{"billing": "credits" | "own_key" | "internal"}`
 
-How the congregation pays. `own_key` unlocks its own API key: the Mac shows the **AI** tab in Settings (paste the
-key) instead of **Billing**, and meetings are never charged. `credits` locks it again: prepaid credit, with the
-Billing tab. This does the same as an own-key code, without one.
+How the congregation pays. The body is `{"billing": …}` (what Siteboard sends); the older `{"mode": …}` still works,
+and when both come `billing` wins. Exact values:
 
-→ `{"ok": true, "billing": {…the same object as "billing" in GET /api/admin/congregations/{id}…}}`. 404 for an
-unknown congregation, 422 for another mode. Setting the mode it already has is fine.
+| `billing` | Who | Translation | Charged | Mac's Settings |
+|---|---|---|---|---|
+| `credits` | every new congregation | through the hub, Hear Church's API key | yes, prepaid; refused when out of credit | **Billing** tab: balance, buy credit |
+| `own_key` | grandfathered churches, or unlocked by hand | straight from the Mac, the church's own key | no | **AI** tab (paste the key) |
+| `internal` | Harrison's own congregations only (rare) | through the hub, Harrison's Claude Code login (`claude -p`), never the API key | no; never refused for balance | **Billing** tab reading "Included: no charge" (no balance, no buy) |
 
-- A meeting keeps the mode it started under. The switch counts from the next meeting.
-- The Mac's engine follows the mode it gets from `GET /api/hc/billing`. The Settings window asks again each time it
+```
+POST /api/admin/congregations/7/billing?key=…
+{"billing": "internal"}
+```
+→
+```json
+{"ok": true,
+ "billing": {"billing": "internal",
+             "balance": {"metered_min": 120.0, "used_min": 0.0, "free_left_min": 60.0, "balance_min": 0.0,
+                         "balance_usd": 0.0, "bought_usd": 0.0, "left_min": 60.0, "can_start": true},
+             "balance_usd": 0.0, "language_hours_left": null, "out_of_credit": false, "usd_per_language_hour": 5.0,
+             "can_buy": false, "buy_usd": [10, 25, 50, 100], "buy_min_usd": 5, "buy_max_usd": 500,
+             "message": "Included: no charge."}}
+```
+
+The `billing` object is the same as `billing` in GET /api/admin/congregations/{id}. Errors:
+- `400 {"detail": "billing: one of credits, own_key, internal."}` for any other value (wrong case, a number, missing).
+- `404 {"detail": "No such congregation."}` for an unknown id. `403` without the operator key.
+Setting the type it already has is fine.
+
+- A meeting keeps the type it started under. The switch counts from the next meeting.
+- `GET /api/admin/congregations` (each row's `billing`) and `GET /api/admin/congregations/{id}`
+  (`congregation.billing` and `billing.billing`) show the type. `internal` is never shown on public pages.
+- The Mac's engine follows the type it gets from `GET /api/hc/billing`. The Settings window asks again each time it
   opens. Switching to `own_key` doesn't put a key on the Mac: until someone pastes one in the AI tab, translation
   fails (the hub's proxy answers `409 own_key`). Switch only once the church has its key ready.
+- `internal` needs a Claude Code login on the hub: `CLAUDE_CODE_OAUTH_TOKEN` in the hub's `data/secrets.env` (from
+  `claude setup-token`), or the server user's `claude` login. The hub runs one `claude -p` process per language
+  conversation (closed after 10 idle minutes, at most 24 at once) with `ANTHROPIC_API_KEY` removed from its
+  environment, so it can't fall back to the paid key. Without a login, its turns fail with `502 unreachable`.
+  Usage is metered as usual (`billing: "internal"`, `cost_usd: 0`), so stats stay right.
+- Mac apps that know `internal` send `X-HC-Billing-Types: credits,own_key,internal` on their hub calls. Older apps
+  (0.3.0 builds 18 and 19, which report `app_version` "0.3.0" for both, so the version can't tell them apart) don't
+  send it and are told `billing: "credits"` instead (in /api/hc/billing, /api/hc/usage and the pairing answers):
+  their engine then translates through the hub, which handles the congregation as `internal` anyway (no charge,
+  never refused). Their Billing tab shows 0.0 hours and "Buying credit isn't available yet" until they update.
 - Today `harlem-first` is `own_key` (grandfathered) and `riga-2` is `credits`.
 
 ## Listener link changes (the church does it)

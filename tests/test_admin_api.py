@@ -135,7 +135,8 @@ def test_stats(client, hear):
     assert s["last_7d"]["signups"] == 2 and s["last_30d"]["signups"] == 2
     assert s["last_7d"]["active_congregations"] == 2 and s["last_7d"]["meetings"] == 2
     assert s["last_30d"]["active_congregations"] == 3 and s["last_30d"]["meetings"] == 3
-    assert s["all_time"]["language_hours"] == {"total": 2.0, "paid": 0.5, "free": 1.0, "own_key": 0.5, "paid_usd": 2.5}
+    assert s["all_time"]["language_hours"] == {"total": 2.0, "paid": 0.5, "free": 1.0, "own_key": 0.5, "internal": 0.0,
+                                                 "paid_usd": 2.5}
     assert s["credit"]["sold_usd"] == 25 and s["credit"]["manual_usd"] == 10 and s["credit"]["refunded_usd"] == 5
     assert s["credit"]["outstanding_usd"] == 20 - 2.5 + 10 and s["credit"]["overdrawn_usd"] == 0
     i = s["installs"]

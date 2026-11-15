@@ -67,18 +67,6 @@ const schema = {
         </ul>
         <a class="btn get" href="/download">Start with a free hour</a>
       </div>
-
-      <div class="plan">
-        <h2>Your own key</h2>
-        <p class="price"><span class="amount small">By invitation</span></p>
-        <p class="unit">with a setup code from us</p>
-        <p class="sum">Some congregations connect their own AI provider key. Meetings on your own key don't use credit; you pay the provider directly for that usage.</p>
-        <ul>
-          <li>One-time setup code</li>
-          <li>Congregations already on their own key keep it</li>
-        </ul>
-        <a class="btn" href="mailto:support@hearchurch.com?subject=Setup%20code%20for%20our%20own%20key">Ask for a code</a>
-      </div>
     </section>
 
     <section class="calc" aria-labelledby="calc-h">
@@ -164,7 +152,7 @@ article { padding-bottom: clamp(3rem, 8vh, 5rem); }
 section + section { margin-top: clamp(3rem, 8vh, 4.5rem); }
 
 .plans { display: grid; gap: 1.25rem; align-items: stretch; }
-@media (min-width: 56rem) { .plans { grid-template-columns: 1fr 1.12fr 1fr; align-items: center; } }
+@media (min-width: 46rem) { .plans { grid-template-columns: 1fr 1.12fr; align-items: center; max-width: 52rem; margin-inline: auto; } }
 .plan {
   display: flex; flex-direction: column; padding: 1.75rem 1.6rem 1.6rem; border: 1px solid var(--line);
   border-radius: 1.25rem; background: var(--cloth-deep);
@@ -180,7 +168,6 @@ section + section { margin-top: clamp(3rem, 8vh, 4.5rem); }
 }
 .price { margin: 0; line-height: 1; }
 .amount { font: 600 3.6rem/1 var(--serif); color: var(--gold); }
-.amount.small { font-size: 2.3rem; }
 .unit { margin: .4rem 0 1rem; color: var(--quiet); }
 .sum { margin: 0 0 1rem; line-height: 1.5; }
 .plan ul { list-style: none; margin: 0 0 1.5rem; padding: 0; flex: 1; }

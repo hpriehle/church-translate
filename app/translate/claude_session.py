@@ -96,6 +96,7 @@ class _Pending:
 
 class ClaudeSession:
     _counter = 0
+    subscription_only = False   # True: start Claude Code without ANTHROPIC_API_KEY (token or login only)
 
     def __init__(self, system_prompt: str, model: str, effort: str, workdir: Path):
         ClaudeSession._counter += 1
@@ -150,6 +151,8 @@ class ClaudeSession:
         from ..config import load_secrets
 
         env.update(load_secrets())
+        if self.subscription_only:   # the hub's "internal" translation: Harrison's Claude login, never the paid key
+            env.pop("ANTHROPIC_API_KEY", None)
         self.proc = await asyncio.create_subprocess_exec(
             *self._command(binary), cwd=str(self.workdir), env=env,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

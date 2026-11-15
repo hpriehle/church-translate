@@ -36,6 +36,7 @@ log = logging.getLogger("engine")
 
 PCM_RATE = 16000          # what the hub forwards: speech recognition needs no more
 DONE_TIMEOUT_S = 90.0     # a stopped meeting still finishing on the engine
+BILLING_TYPES = "credits,own_key,internal"   # sent to the hub as X-HC-Billing-Types: the types this code knows
 
 
 def _m():
@@ -533,7 +534,9 @@ class PublishClient(EngineClient):
         u = urlparse(self.url)
         base = f"{'https' if u.scheme == 'wss' else 'http'}://{u.netloc}"
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.request(method, base + path, json=body, headers={"Authorization": f"Bearer {self.token}"})
+            # The header: this engine knows the "internal" billing type (older ones are told "credits" instead).
+            r = await c.request(method, base + path, json=body, headers={"Authorization": f"Bearer {self.token}",
+                                                                         "X-HC-Billing-Types": BILLING_TYPES})
         try:
             data = r.json()
         except ValueError:

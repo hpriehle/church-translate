@@ -334,3 +334,130 @@ def test_the_app_picks_the_backend_from_billing(hear, monkeypatch, tmp_path):
     assert tr.cfg.backend == "api" and restarted == [1, 1]
     main.use_billing("something else")
     assert tr.cfg.backend == "api"
+
+
+# ------------------------------------------------------------------ "internal": Claude Code with Harrison's login
+
+class FakeClaudeSession:
+    """Stands in for the hub's `claude -p` process: remembers what it was asked and how it was started."""
+    made: list["FakeClaudeSession"] = []
+
+    def __init__(self, system, model, effort, workdir):
+        from app.translate.claude_session import Usage
+
+        self.system, self.model, self.effort = system, model, effort
+        self.asked, self.alive, self.usage = [], False, Usage()
+        FakeClaudeSession.made.append(self)
+
+    async def start(self):
+        self.alive = True
+
+    async def ask(self, text):
+        self.asked.append(text)
+        self.usage.input += 7
+        self.usage.output += 3
+        return "OK" if text.startswith("reply simply") else FRENCH
+
+    async def close(self):
+        self.alive = False
+
+
+@pytest.fixture
+def internal(monkeypatch, hear, claude):
+    from app.hear import internal as mod
+
+    FakeClaudeSession.made = []
+    bridge = mod.Bridge()
+    bridge.session_type = FakeClaudeSession
+    monkeypatch.setattr(mod, "bridge", bridge)
+    return bridge
+
+
+def test_an_internal_congregation_translates_through_claude_code_at_no_charge(client, hear, claude, internal,
+                                                                                monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY")                         # the paid key isn't needed (or used)
+    cong, token = make_cong(hear)
+    hear.db.set_billing(cong["id"], "internal")
+    spend(hear, cong, 600)                                          # metered hours that would be "out of credit"
+    r = client.post("/api/hc/translate", json=turn(), headers=auth(token))
+    assert r.status_code == 409 and r.json()["error"] == "not_live"  # only during a meeting, like credits
+    go_live(hear, cong, token)
+    r = client.post("/api/hc/translate", json=turn(), headers=auth(token))
+    assert r.status_code == 200, r.text
+    got = BetaMessage.model_validate(r.json())                      # what the Mac's HubClient builds from it
+    assert [b.text for b in got.content if b.type == "text"] == [FRENCH] and got.stop_reason == "end_turn"
+    s, = FakeClaudeSession.made
+    assert s.system == "SYSTEM" and s.model == "claude-opus-5-5" and s.effort == "low"
+    assert s.asked == ["reply simply: OK", SPEECH]                  # a new conversation: the seed, then the sentence
+    # the next turn of the same conversation only sends the new sentence to the same process
+    nxt = turn()
+    nxt["messages"] += [{"role": "assistant", "content": r.json()["content"]}, {"role": "user", "content": "Amen."}]
+    assert client.post("/api/hc/translate", json=nxt, headers=auth(token)).status_code == 200
+    assert len(FakeClaudeSession.made) == 1 and s.asked[-1] == "Amen." and len(s.asked) == 3
+    # another language (another system prompt) is another process
+    other = {**turn(), "system": "SYSTEM es"}
+    assert client.post("/api/hc/translate", json=other, headers=auth(token)).status_code == 200
+    assert len(FakeClaudeSession.made) == 2
+    assert claude.calls == []                                       # never the API key
+    assert hear.db.balance(cong["id"])["can_start"] is True
+
+
+def test_internal_failures_read_plainly(client, hear, claude, internal):
+    cong, token = make_cong(hear)
+    hear.db.set_billing(cong["id"], "internal")
+    go_live(hear, cong, token)
+
+    async def broken(text):
+        raise RuntimeError("translator exited (code 1) secret 4711")
+
+    class Broken(FakeClaudeSession):
+        async def start(self):
+            await super().start()
+            self.ask = broken
+
+    internal.session_type = Broken
+    r = client.post("/api/hc/translate", json=turn(), headers=auth(token))
+    assert r.status_code == 502 and r.json()["error"] == "unreachable" and "4711" not in r.text
+    assert internal.convs == {} and proxy.in_flight == {}           # the broken process is dropped
+
+
+def test_the_hubs_claude_code_never_gets_the_paid_key(monkeypatch, tmp_path):
+    """Internal translation runs `claude -p` without ANTHROPIC_API_KEY: Harrison's token (or login) only."""
+    from app.hear.internal import _HubClaude
+    from app.translate import claude_session
+
+    secrets = tmp_path / "secrets.env"
+    secrets.write_text("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-harrison\nANTHROPIC_API_KEY=sk-ant-api03-file\n")
+    monkeypatch.setattr("app.config.SECRETS_PATH", secrets)
+    monkeypatch.setattr("app.config.load_secrets.__defaults__", (secrets,))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-hub-key")
+    monkeypatch.setattr(claude_session, "claude_binary", lambda: "/bin/true")
+    monkeypatch.setattr(claude_session, "_supported_flags", lambda b: "")
+    seen = {}
+
+    async def fake_exec(*cmd, env, **kw):
+        seen["env"], seen["cmd"] = env, cmd
+        raise OSError("stop here")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    with pytest.raises(OSError):
+        asyncio.run(_HubClaude("SYSTEM", "claude-opus-5-5", "low", tmp_path).start())
+    assert "ANTHROPIC_API_KEY" not in seen["env"] and seen["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-harrison"
+    assert seen["cmd"][1] == "-p" and "claude-opus-5-5" in seen["cmd"]
+    # the Mac's own `claude` backend is unchanged: a key there still counts
+    with pytest.raises(OSError):
+        asyncio.run(claude_session.ClaudeSession("SYSTEM", "claude-opus-5-5", "low", tmp_path).start())
+    assert seen["env"]["ANTHROPIC_API_KEY"] == "sk-ant-api03-file"
+
+
+def test_the_app_treats_internal_like_credits(hear, monkeypatch, tmp_path):
+    monkeypatch.setattr("app.config.SECRETS_PATH", tmp_path / "none.env")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-church")   # a key lying around doesn't matter
+    monkeypatch.setattr(main.S, "app_mode", True)
+    assert main.app_backend("internal") == "hub"
+    restarted = []
+    tr = NS(cfg=TranslateCfg(backend="api"), restart_claude=lambda: restarted.append(1))
+    monkeypatch.setattr(main.S, "pipeline", NS(channels={"fr": NS(translator=tr)}), raising=False)
+    main.S.settings.translate.backend = "api"
+    main.use_billing("internal")
+    assert tr.cfg.backend == "hub" and restarted == [1]
