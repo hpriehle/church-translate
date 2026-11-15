@@ -81,15 +81,17 @@ class Transcriber:
         self.ready = True
         log.info("STT ready (%s) in %.1fs", self.engine, self.load_s)
 
-    def _transcribe_raw(self, audio: np.ndarray, prompt: str | None) -> tuple[str, float, float, float]:
+    def _transcribe_raw(self, audio: np.ndarray, prompt: str | None,
+                        language: str | None = None) -> tuple[str, float, float, float]:
         """Returns (text, max no_speech_prob, mean avg_logprob, max compression ratio)."""
+        language = language or self.cfg.language
         if self.engine == "mlx":
             import mlx_whisper
 
             r = mlx_whisper.transcribe(
                 audio,
                 path_or_hf_repo=self.cfg.model,
-                language=self.cfg.language,
+                language=language,
                 task="transcribe",
                 initial_prompt=prompt or None,
                 condition_on_previous_text=False,
@@ -103,7 +105,7 @@ class Transcriber:
             text = r.get("text", "")
         else:
             seg_iter, _info = self._fw_model.transcribe(
-                audio, language=self.cfg.language, initial_prompt=prompt or None,
+                audio, language=language, initial_prompt=prompt or None,
                 condition_on_previous_text=False, beam_size=1, temperature=[0.0, 0.2, 0.4],
                 vad_filter=False,
             )
@@ -117,9 +119,27 @@ class Transcriber:
         cr = max(float(s.get("compression_ratio", 0.0)) for s in segs)
         return _clean(text), nsp, alp, cr
 
-    def transcribe(self, audio: np.ndarray, prompt: str = "") -> SttResult:
+    def detect_language(self, audio: np.ndarray, choices: list[str]) -> dict[str, float]:
+        """Probability of each language in `choices` (renormalized among them), from the first 30 s."""
+        if self.engine == "mlx":
+            import mlx.core as mx
+            from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
+            from mlx_whisper.transcribe import ModelHolder
+
+            model = ModelHolder.get_model(self.cfg.model, mx.float16)
+            mel = log_mel_spectrogram(audio, n_mels=model.dims.n_mels, padding=N_SAMPLES)
+            _, probs = model.detect_language(pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16))
+            probs = probs[0] if isinstance(probs, list) else probs
+        else:
+            _segs, info = self._fw_model.transcribe(audio, language=None, beam_size=1)
+            probs = dict(info.all_language_probs or [(info.language, info.language_probability)])
+        picked = {c: float(probs.get(c, 0.0)) for c in choices}
+        total = sum(picked.values()) or 1.0
+        return {c: p / total for c, p in picked.items()}
+
+    def transcribe(self, audio: np.ndarray, prompt: str = "", language: str | None = None) -> SttResult:
         t0 = time.monotonic()
-        text, nsp, alp, cr = self._transcribe_raw(audio, prompt)
+        text, nsp, alp, cr = self._transcribe_raw(audio, prompt, language)
         res = SttResult(text=text, ms=(time.monotonic() - t0) * 1000, no_speech_prob=nsp, avg_logprob=alp)
         low = text.lower().strip(" .!?,")
         if not text:
