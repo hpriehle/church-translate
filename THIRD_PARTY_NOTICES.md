@@ -5,6 +5,9 @@ Included in this repository:
 - `models/wolof/speaker-*.npy` — speaker x-vectors computed from the CMU ARCTIC corpus
   (https://huggingface.co/datasets/Matthijs/cmu-arctic-xvectors), free to use with attribution.
 - `download/src/fonts/` — Alegreya and Alegreya Sans, SIL Open Font License 1.1 (licenses alongside).
+- `web/vendor/leaflet/` — Leaflet 1.9.4 (https://leafletjs.com), BSD 2-Clause License (licence alongside). The
+  sign-up and account pages' map; its tiles are © OpenStreetMap contributors, and address suggestions come from
+  Photon (photon.komoot.io).
 
 Included in the Mac app:
 - Piper (`piper-tts`, https://github.com/OHF-Voice/piper1-gpl) — GNU GPL v3 or later; it contains eSpeak NG

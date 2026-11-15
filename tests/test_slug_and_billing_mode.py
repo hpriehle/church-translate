@@ -163,7 +163,8 @@ def test_usage_history_for_the_billing_tab(client, hear):
     m, = j["meetings"]
     assert m["language_hours"] == 1.5 and m["free_minutes"] == 60 and m["paid_minutes"] == 30 and m["cost_usd"] == 2.5
     assert m["language_minutes"] == {"es": 45, "fr": 45}
-    assert j["charges"] == [{"kind": "top_up", "at": j["charges"][0]["at"], "amount_usd": 25.0, "hours": 5.0}]
+    assert j["charges"] == [{"kind": "top_up", "at": j["charges"][0]["at"], "amount_usd": 25.0, "hours": 5.0,
+                           "receipt_url": "/api/hc/receipts/1"}]   # the web account links Stripe's receipt
     assert client.get("/api/hc/usage").status_code == 403
 
 

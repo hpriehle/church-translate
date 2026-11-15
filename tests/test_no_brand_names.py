@@ -138,3 +138,15 @@ def test_the_check_catches_a_brand_name():
     p = _Text()
     p.feed('<p title="Ask Anthropic">Hi</p><script>const a = "Claude";</script>')
     assert hits_in(p.out) == ["Ask Anthropic"]
+
+
+def test_the_web_account_pages_are_checked_and_clean():
+    """hearchurch.com/start and /account (web/account/, served by the hub) are inside the web/ scan above; no
+    "own key" marketing there either (the own-key type is only stated plainly where it applies)."""
+    files = sorted((WEB / "account").glob("*"))
+    assert {f.name for f in files} >= {"start.html", "start.js", "account.html", "account.js", "common.js",
+                                       "account.css"}
+    for f in files:
+        text = f.read_text()
+        assert not BRAND.search(text), f.name
+        assert not re.search(r"bring your own|own api key", text, re.I), f.name

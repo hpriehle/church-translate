@@ -31,6 +31,7 @@ from .hear import admin as hear_admin
 from .hear import api as hear_api
 from .hear import payments as hear_payments
 from .hear import proxy as hear_proxy
+from .hear import web as hear_web
 from .config import (HOME, ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
 from .config import apply_auto_en
@@ -489,6 +490,7 @@ app.include_router(hear_api.router)  # Hear Church: sign-up, /find, /ws/engine, 
 app.include_router(hear_proxy.router)  # Hear Church: translation on credits (POST /api/hc/translate)
 app.include_router(hear_admin.router)  # Hear Church: operator JSON for Siteboard (stats, ledger, refunds)
 app.include_router(hear_payments.router)  # Hear Church: saved card, 1-click and auto top-up, codes
+app.include_router(hear_web.router)  # Hear Church: hearchurch.com/start and /account (the web account)
 
 
 _LISTEN_PATHS = re.compile(r"^/(|s/[^/]+|stream\.mp3|stream/[a-z]+\.mp3|clips/[a-z]+/\d+\.mp3|qr\.svg"

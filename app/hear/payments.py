@@ -198,6 +198,10 @@ async def card_setup(request: Request):
             "mode": "setup", "currency": "usd", "customer": customer, "client_reference_id": str(cong["id"]),
             "metadata": meta, "setup_intent_data": {"metadata": meta, "description": "Hear Church: saved card"},
             "success_url": f"{base}/api/hc/card/done", "cancel_url": f"{base}/api/hc/card/cancelled"}
+        if api._web(request):   # hearchurch.com: back to the page that asked (sign-up's last step, or /account)
+            back = "/start/done" if request.query_params.get("back") == "start" else "/account?card=saved#billing"
+            params["success_url"] = f"{base}{back}"
+            params["cancel_url"] = f"{base}{'/start/done' if back == '/start/done' else '/account#billing'}"
         pmc = api.payment_method_config()
         if pmc:
             params["payment_method_configuration"] = pmc
@@ -280,7 +284,8 @@ async def topup(request: Request, body: TopUp):
     meta = purchase_meta(cong, b, charged, disc, "one_click")
     params: dict[str, Any] = {
         "amount": charged, "currency": "usd", "customer": p["customer_id"], "payment_method": p["payment_method_id"],
-        "confirm": True, "metadata": meta, "return_url": f"{api._base_url(request)}/api/hc/topup/done",
+        "confirm": True, "metadata": meta,
+        "return_url": f"{api._base_url(request)}{'/account?paid=1#billing' if api._web(request) else '/api/hc/topup/done'}",
         "description": f"Hear Church credit: {api.display_name(cong)} ({b[1]} language-hours)"}
     email = h.db.main_email(cong["id"])
     if email:

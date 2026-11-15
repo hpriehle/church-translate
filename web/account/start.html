@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Get started | Hear Church</title>
+<meta name="description" content="Set up live translation for your congregation: your church, meeting times and address, then download the Mac app.">
+<meta name="robots" content="noindex">
+<meta name="csrf" content="{{csrf}}">
+<meta name="theme-color" content="#12332b">
+<link rel="icon" type="image/png" href="/download/icon.png">
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/static/account/account.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<p class="listen-bar">Here to listen to a meeting? <a href="/listen">Find your congregation</a></p>
+<header class="top">
+  <a class="brand" href="/"><img src="/download/icon.png" width="32" height="32" alt=""> Hear Church</a>
+  <nav aria-label="Main">
+    <a href="/how-it-works">How it works</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/blog">Blog</a>
+    <a href="/account">Sign in</a>
+    <a class="nav-get" href="/start" aria-current="page">Get started</a>
+  </nav>
+</header>
+
+<main id="main" class="wrap narrow">
+
+<div id="form-view">
+  <h1>Get started</h1>
+  <p class="lede">Tell us about your congregation. Then download the Mac app and sign in with your e-mail.</p>
+  <p class="quiet small">Already set up? <a href="/account">Sign in</a>.</p>
+
+  <form id="signup" novalidate>
+    <fieldset>
+      <legend>Your church</legend>
+      <label for="church">Church</label>
+      <select id="church" required>
+        <option value="">Choose…</option>
+      </select>
+      <div id="other-box" hidden>
+        <label for="church-other">Name of your church</label>
+        <input id="church-other" type="text" maxlength="80" autocomplete="organization">
+      </div>
+      <p class="hint">Shown to listeners next to your congregation's name. It also picks the glossary the translator follows.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Congregation</legend>
+      <div id="lds-box" hidden>
+        <label class="inline"><input type="radio" name="unit" value="ward" checked> Ward</label>
+        <label class="inline"><input type="radio" name="unit" value="branch"> Branch</label>
+      </div>
+      <label for="name" id="name-label">Congregation name</label>
+      <input id="name" type="text" minlength="2" maxlength="80" required placeholder="As members know it">
+      <div id="stake-box" hidden>
+        <label for="stake">Stake (optional)</label>
+        <input id="stake" type="text" maxlength="80">
+      </div>
+    </fieldset>
+
+    <fieldset id="times-box">
+      <legend>Meeting times</legend>
+      <div class="times"></div>
+      <button type="button" class="add-time">Add a meeting time</button>
+      <p class="hint">Listeners see when the next meeting starts.</p>
+    </fieldset>
+
+    <fieldset id="place-box">
+      <legend>Address</legend>
+      <label for="address">Where you meet</label>
+      <div class="suggest">
+        <input id="address" class="address" type="text" maxlength="200" autocomplete="off" placeholder="Start typing the address">
+        <ul id="address-suggestions" class="suggestions" role="listbox" hidden></ul>
+      </div>
+      <div class="map" aria-label="Map: click or drag the pin to the building"></div>
+      <p class="attrib">Address search by <a href="https://photon.komoot.io" rel="noopener">Photon</a> · Map data &copy; <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a> contributors</p>
+      <p class="hint">Phones at the building find your congregation by this pin. Drag it if it's off.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>E-mail</legend>
+      <label for="email">Main e-mail</label>
+      <input id="email" type="email" maxlength="120" required autocomplete="email">
+      <p class="hint">You sign in with it, and receipts go there. We'll send it a code to confirm.</p>
+      <div id="more-emails"></div>
+      <button type="button" id="add-email" class="link">Add another e-mail (optional)</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Have a code?</legend>
+      <div class="row">
+        <input id="promo" type="text" maxlength="40" autocomplete="off" aria-label="Code" placeholder="Optional" style="max-width:14rem">
+        <button type="button" id="check-promo">Check</button>
+      </div>
+      <p id="promo-msg" class="msg" hidden></p>
+    </fieldset>
+
+    <fieldset id="card-box">
+      <legend>Card</legend>
+      <label class="inline"><input type="checkbox" id="add-card"> Add a card now for 1-click top-ups (optional)</label>
+      <p class="hint">You enter it on Stripe's secure page; Hear Church only sees its brand and last 4 digits. Every month's first hour is free.</p>
+    </fieldset>
+
+    <button type="submit" class="get" id="continue">Continue</button>
+    <p id="form-msg" class="msg" hidden></p>
+  </form>
+</div>
+
+<div id="code-view" hidden>
+  <h1>Check your e-mail</h1>
+  <p class="lede">We sent a 6-digit code to <b id="code-email"></b>.</p>
+  <form id="code-form" novalidate>
+    <label for="email-code">Code</label>
+    <input id="email-code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required>
+    <div class="row" style="margin-top:1rem">
+      <button type="submit" class="get" id="create">Create my account</button>
+      <button type="button" id="resend" class="link">Send a new code</button>
+      <button type="button" id="back" class="link">Change something</button>
+    </div>
+    <p id="code-msg" class="msg" hidden></p>
+  </form>
+</div>
+
+<div id="done-view" hidden>
+  <h1>You're set up</h1>
+  <p class="lede">Download the app and sign in with <b id="done-email"></b>.</p>
+  <p><a class="get" href="/download">Download for Mac</a></p>
+  <p id="card-note" class="msg" hidden></p>
+  <p id="card-offer" hidden><button type="button" id="card-now">Add a card (optional)</button></p>
+  <p class="quiet">Your listener page: <a id="done-link" href="/"></a>. You can change the congregation, e-mails and billing any time under <a href="/account">your account</a>.</p>
+</div>
+
+</main>
+
+<footer class="foot">
+  <nav aria-label="Site">
+    <a href="/">Hear Church</a> <a href="/how-it-works">How it works</a> <a href="/pricing">Pricing</a> <a href="/blog">Blog</a>
+    <a href="/download">Download for Mac</a> <a href="/listen">Find your congregation</a>
+  </nav>
+  <p><a href="/privacy">Privacy</a> <a href="/terms">Terms</a> <a href="mailto:support@hearchurch.com">support@hearchurch.com</a></p>
+</footer>
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/account/common.js"></script>
+<script src="/static/account/start.js"></script>
+</body>
+</html>

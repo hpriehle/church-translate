@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your account | Hear Church</title>
+<meta name="description" content="Sign in to manage your congregation on Hear Church: hours, billing, e-mails and Macs.">
+<meta name="robots" content="noindex">
+<meta name="csrf" content="{{csrf}}">
+<meta name="theme-color" content="#12332b">
+<link rel="icon" type="image/png" href="/download/icon.png">
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/static/account/account.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<p class="listen-bar">Here to listen to a meeting? <a href="/listen">Find your congregation</a></p>
+<header class="top">
+  <a class="brand" href="/"><img src="/download/icon.png" width="32" height="32" alt=""> Hear Church</a>
+  <nav aria-label="Main">
+    <a href="/how-it-works">How it works</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/blog">Blog</a>
+    <a href="/account" aria-current="page">Sign in</a>
+    <a class="nav-get" href="/start">Get started</a>
+  </nav>
+</header>
+
+<main id="main" class="wrap">
+
+<p id="loading" class="quiet">Loading…</p>
+
+<!-- signing in -->
+<div id="login-view" class="narrow" hidden>
+  <h1>Sign in</h1>
+  <form id="login-email" novalidate>
+    <p class="lede">Enter your congregation's e-mail. We'll send you a 6-digit code.</p>
+    <label for="email">E-mail</label>
+    <input id="email" type="email" maxlength="120" autocomplete="email" required>
+    <p><button type="submit" class="get" id="send">Send me a code</button></p>
+  </form>
+  <form id="login-code" novalidate hidden>
+    <p class="lede" id="login-sent"></p>
+    <label for="code">Code</label>
+    <input id="code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required>
+    <div class="row" style="margin-top:1rem">
+      <button type="submit" class="get" id="verify">Sign in</button>
+      <button type="button" id="other-email" class="link">Use another e-mail</button>
+    </div>
+  </form>
+  <p id="login-msg" class="msg" hidden></p>
+  <p class="quiet small">New here? <a href="/start">Get started</a>.</p>
+</div>
+
+<!-- signed in -->
+<div id="app-view" hidden>
+  <h1 id="title"></h1>
+  <p id="switch-box" class="quiet" hidden><label class="inline" for="switch">Congregation <select id="switch"></select></label></p>
+  <div class="account">
+    <aside class="side">
+      <nav aria-label="Account">
+        <a href="#overview">Overview</a>
+        <a href="#billing">Billing</a>
+        <a href="#code">Have a code?</a>
+        <a href="#congregation">Congregation</a>
+        <a href="#emails">E-mails</a>
+        <a href="#devices">Devices</a>
+        <a href="#signout">Sign out</a>
+      </nav>
+    </aside>
+    <div>
+      <section class="card" id="overview">
+        <h2>Overview</h2>
+        <div id="ov-credits">
+          <div class="stats">
+            <div class="stat"><b id="ov-free">–</b><span class="quiet">free hour left this month</span></div>
+            <div class="stat"><b id="ov-paid">–</b><span class="quiet">paid hours left</span></div>
+          </div>
+          <p id="ov-message" class="quiet"></p>
+        </div>
+        <p id="ov-type" hidden></p>
+        <h3>Last meetings</h3>
+        <table id="meetings"><thead><tr><th>Date</th><th>Languages</th><th>Language-hours</th></tr></thead><tbody></tbody></table>
+        <p id="no-meetings" class="quiet" hidden>No meetings yet.</p>
+      </section>
+
+      <section class="card" id="billing">
+        <h2>Billing</h2>
+        <div id="bill-type" hidden></div>
+        <div id="bill-credits" hidden>
+          <h3>Buy hours</h3>
+          <p id="discount" class="msg good" hidden></p>
+          <div class="bundles" id="bundles"></div>
+          <p id="buy-hint" class="hint"></p>
+          <p id="buy-msg" class="msg" hidden></p>
+
+          <h3>Card</h3>
+          <div class="row" id="card-row"></div>
+          <p class="hint">You enter the card on Stripe's secure page; Hear Church only sees its brand and last 4 digits.</p>
+
+          <h3>Automatic top-up</h3>
+          <div class="row">
+            <label class="inline"><input type="checkbox" id="auto-on"> Top up automatically</label>
+            <label class="inline" for="auto-usd">Bundle <select id="auto-usd" style="width:auto"></select></label>
+          </div>
+          <p class="hint" id="auto-hint"></p>
+          <p id="auto-msg" class="msg" hidden></p>
+        </div>
+        <h3>Payment history</h3>
+        <table id="payments"><thead><tr><th>Date</th><th>What</th><th>Amount</th><th>Receipt</th></tr></thead><tbody></tbody></table>
+        <p id="no-payments" class="quiet" hidden>No payments yet.</p>
+      </section>
+
+      <section class="card" id="code">
+        <h2>Have a code?</h2>
+        <form id="code-form" class="row" novalidate>
+          <input id="promo" type="text" maxlength="40" autocomplete="off" aria-label="Code" style="max-width:14rem">
+          <button type="submit">Use code</button>
+        </form>
+        <p id="code-msg" class="msg" hidden></p>
+      </section>
+
+      <section class="card" id="congregation">
+        <h2>Congregation</h2>
+        <form id="cong-form" novalidate>
+          <label for="c-name">Name</label>
+          <input id="c-name" type="text" minlength="2" maxlength="80" required>
+          <div id="c-stake-box" hidden>
+            <label for="c-stake">Stake (optional)</label>
+            <input id="c-stake" type="text" maxlength="80">
+          </div>
+          <div id="c-times-box">
+            <label>Meeting times</label>
+            <div class="times"></div>
+            <button type="button" class="add-time">Add a meeting time</button>
+          </div>
+          <p><button type="submit">Save</button></p>
+          <p id="cong-msg" class="msg" hidden></p>
+        </form>
+
+        <h3>Address</h3>
+        <div id="c-place-box">
+          <div class="suggest">
+            <input id="c-address" class="address" type="text" maxlength="200" autocomplete="off" aria-label="Address">
+            <ul id="c-address-suggestions" class="suggestions" role="listbox" hidden></ul>
+          </div>
+          <div class="map" aria-label="Map: click or drag the pin to the building"></div>
+          <p class="attrib">Address search by <a href="https://photon.komoot.io" rel="noopener">Photon</a> · Map data &copy; <a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a> contributors</p>
+          <p><button type="button" id="save-place">Save address</button></p>
+          <p id="place-msg" class="msg" hidden></p>
+        </div>
+
+        <h3>Listener link</h3>
+        <form id="slug-form" novalidate>
+          <div class="row"><span class="quiet" id="slug-host">hearchurch.com/</span>
+            <input id="slug" type="text" maxlength="60" autocomplete="off" aria-label="Listener link" style="max-width:18rem">
+            <button type="submit">Change link</button></div>
+          <p class="hint" id="aliases"></p>
+          <p id="slug-msg" class="msg" hidden></p>
+        </form>
+      </section>
+
+      <section class="card" id="emails">
+        <h2>E-mails</h2>
+        <p class="hint">Anyone with one of these addresses can sign in here and connect a Mac. The main one gets receipts.</p>
+        <ul class="plain" id="email-list"></ul>
+        <form id="email-form" class="row" novalidate>
+          <input id="new-email" type="email" maxlength="120" aria-label="Another e-mail" placeholder="another@example.org">
+          <button type="submit">Add</button>
+        </form>
+        <p id="email-msg" class="msg" hidden></p>
+      </section>
+
+      <section class="card" id="devices">
+        <h2>Devices</h2>
+        <ul class="plain" id="device-list"></ul>
+        <p id="no-devices" class="quiet" hidden>No Mac is connected yet. Download the app and sign in with your e-mail.</p>
+        <h3>Add a Mac</h3>
+        <p class="hint">In the Mac app choose "Connect by code" and type this code. It works once, for 15 minutes.</p>
+        <p><button type="button" id="pair">Show a code</button></p>
+        <p id="pair-code" class="pair" hidden></p>
+        <p id="device-msg" class="msg" hidden></p>
+      </section>
+
+      <section class="card" id="signout">
+        <h2>Sign out</h2>
+        <div class="row">
+          <button type="button" id="logout">Sign out</button>
+          <button type="button" id="logout-all" class="link">Sign out on every browser</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<dialog id="confirm">
+  <p id="confirm-text"></p>
+  <div class="row">
+    <button type="button" id="confirm-no">Cancel</button>
+    <button type="button" class="get" id="confirm-yes">Buy</button>
+  </div>
+</dialog>
+
+</main>
+
+<footer class="foot">
+  <nav aria-label="Site">
+    <a href="/">Hear Church</a> <a href="/how-it-works">How it works</a> <a href="/pricing">Pricing</a> <a href="/blog">Blog</a>
+    <a href="/download">Download for Mac</a> <a href="/listen">Find your congregation</a>
+  </nav>
+  <p><a href="/privacy">Privacy</a> <a href="/terms">Terms</a> <a href="mailto:support@hearchurch.com">support@hearchurch.com</a></p>
+</footer>
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/account/common.js"></script>
+<script src="/static/account/account.js"></script>
+</body>
+</html>

@@ -147,6 +147,11 @@ enum HubClient {
             let b = brand.isEmpty ? "Card" : brand == "amex" ? "Amex" : brand.prefix(1).uppercased() + brand.dropFirst()
             return last4.isEmpty ? b : "\(b) ••••\(last4)"
         }
+        /// "Visa ••4242": in the question before a 1-click purchase.
+        var short: String {
+            let b = brand.isEmpty ? "Card" : brand == "amex" ? "Amex" : brand.prefix(1).uppercased() + brand.dropFirst()
+            return last4.isEmpty ? b : "\(b) ••\(last4)"
+        }
     }
     /// Automatic top-up: after a meeting, when the paid hours left are under `belowHours`, buy the `usd` bundle.
     struct AutoTopUp: Equatable { var enabled = false; var usd = 20; var belowHours = 1.0 }

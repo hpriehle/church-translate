@@ -28,6 +28,10 @@ Accounts (V3.2, docs/v3-languages.md "Accounts"): several e-mails per congregati
                             (Resend; 503 not_configured without RESEND_API_KEY; 429 per IP and per address)
   POST /api/hc/pair         {code, device_name} → {device_token, slug, congregation, billing}; 403 bad_code,
                             429 locked. Takes both kinds of code.
+  POST /api/hc/congregation (device token) {name?, stake?, meeting_times?, timezone?} → {ok, congregation}
+  GET /api/hc/account also carries {url, aliases} (the listener link and its old slugs).
+  The routes in web.WEB_ROUTES also take the hearchurch.com/account session cookie instead of a device token
+  (app/hear/web.py: sign-up at /start, sign-in by e-mailed code, CSRF on POSTs).
   POST /api/hc/slug         (device token) {slug} → {ok, slug, url, aliases}: the listener link becomes
                             hearchurch.com/<slug>; the old slug redirects there for good (slug_aliases, so printed QR
                             codes keep working). 422 bad_slug (format), 409 reserved / taken.
@@ -43,7 +47,7 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
                             (the bundle prices, for 0.3.0 apps), message}
   GET  /api/hc/usage        (device token) → {billing, meetings: [{started_at, ended_at, languages, language_minutes,
                             language_hours, free_minutes, paid_minutes, cost_usd, billing}], charges: [{kind, at,
-                            amount_usd}]}: the Billing tab's history, newest first (?meetings=, ?charges= limits).
+                            amount_usd, receipt_url (top-ups: /api/hc/receipts/<id>, web only)}]}: the Billing tab's history, newest first (?meetings=, ?charges= limits).
   POST /api/hc/checkout     (device token) {usd, save_card?} → {url} (less a pending % off code: percent_off,
                             charged_usd; save_card keeps the card for 1-click): a Stripe Checkout page for the bundle at that price ($20,
                             $50, $100 or $250); any other amount is 400 not_a_bundle with a message naming the
@@ -130,6 +134,7 @@ class Hear:
         self.own_key_ip = FailureLimiter(10, 3600)       # wrong own-key codes per IP
         self.pair_ip = FailureLimiter(10, 15 * 60)       # wrong add-a-Mac codes per IP
         self.codes_cong = FailureLimiter(20, 3600)       # wrong codes (own key, free hours, % off) per congregation
+        self.web_code_ip = FailureLimiter(10, 15 * 60)   # wrong e-mailed codes on hearchurch.com/start and /account
         from . import payments
         live.after_end = payments.after_meeting          # maybe an automatic top-up once a meeting ends
         self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
@@ -201,6 +206,11 @@ def _ip(request: Request) -> str:
 def _limit(request: Request, which: str, key: str | None = None) -> None:
     if not _hear().limits[which].allow(key or _ip(request)):
         raise HTTPException(429, "Too many requests: try again later.")
+
+
+def _web(request: Request) -> bool:
+    """Is this a browser signed in to hearchurch.com/account (not the Mac)? Set by web.session_and_congregation."""
+    return bool(getattr(request.state, "hc_web", False))
 
 
 def _base_url(request: Request) -> str:
@@ -278,10 +288,33 @@ def _send_link(request: Request, cong: dict[str, Any], purpose: str, device_name
 async def signup(request: Request, body: SignUp):
     _limit(request, "signup")
     h = _hear()
+    made = await create_from_signup(request, body)
+    if isinstance(made, JSONResponse):
+        return made
+    cong, redeemed, located = made
+    lat = located["lat"]
+    pin_note = "" if lat is not None else " We could not find the building on the map: please place its pin."
+    if not h.verify_email:  # no e-mail confirmation for now: the congregation is live-capable at once
+        h.db.set_verified(cong["id"])
+        return {"ok": True, "slug": cong["slug"], "device_token": h.db.add_device(cong["id"], body.device_name),
+                "connect_code": h.db.new_connect_code(cong["id"]), "emails": h.db.emails(cong["id"]),
+                "congregation": _public(cong), "billing": billing_for(request, cong["billing"]), **located, **redeemed,
+                "message": "Signed up." + pin_note}
+    claim = _send_link(request, cong, "verify", body.device_name)
+    return {"ok": True, "slug": cong["slug"], "claim": claim, "emails": h.db.emails(cong["id"]), **located, **redeemed,
+            "message": "Check your e-mail for the verification link." + pin_note}
+
+
+async def create_from_signup(request: Request, body: SignUp
+                             ) -> JSONResponse | tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Make the congregation a sign-up describes (the Mac's POST /api/hc/signup and hearchurch.com/start): check the
+    code first (403 bad_code, nothing made), geocode an address that came without a pin, add the extra e-mails,
+    redeem the code. Returns (congregation, {"code": …} or {}, {located, lat, lng}), or the error answer."""
+    h = _hear()
     if (body.lat is None) != (body.lng is None):
         raise HTTPException(400, "Give both lat and lng, or neither.")
+    from . import payments
     if body.code:   # checked before the congregation is made, so a typo can be fixed and sent again
-        from . import payments
         if wait := h.own_key_ip.locked(_ip(request)):
             return _locked(wait)
         if h.db.check_code(body.code) is None:
@@ -296,24 +329,15 @@ async def signup(request: Request, body: SignUp):
         address=body.address, lat=lat, lng=lng, timezone=body.timezone, city=await _town(lat, lng),
         meeting_times=[m.model_dump() for m in body.meeting_times])
     for e in body.emails:   # the main one (`email`) was added with the congregation
-        h.db.add_email(cong["id"], e)
+        if e != body.email:
+            h.db.add_email(cong["id"], e)
     redeemed: dict[str, Any] = {}
     if body.code:
         r = payments.redeem_for(request, cong, body.code)
         redeemed = {"code": {k: v for k, v in r.items() if k != "ok"} if isinstance(r, dict)
                     else {"error": "bad_code", "message": payments.BAD_CODE}}
         cong = h.db.congregation(cong["id"])
-    located = {"located": lat is not None, "lat": lat, "lng": lng}
-    pin_note = "" if lat is not None else " We could not find the building on the map: please place its pin."
-    if not h.verify_email:  # no e-mail confirmation for now: the congregation is live-capable at once
-        h.db.set_verified(cong["id"])
-        return {"ok": True, "slug": cong["slug"], "device_token": h.db.add_device(cong["id"], body.device_name),
-                "connect_code": h.db.new_connect_code(cong["id"]), "emails": h.db.emails(cong["id"]),
-                "congregation": _public(cong), "billing": billing_for(request, cong["billing"]), **located, **redeemed,
-                "message": "Signed up." + pin_note}
-    claim = _send_link(request, cong, "verify", body.device_name)
-    return {"ok": True, "slug": cong["slug"], "claim": claim, "emails": h.db.emails(cong["id"]), **located, **redeemed,
-            "message": "Check your e-mail for the verification link." + pin_note}
+    return cong, redeemed, {"located": lat is not None, "lat": lat, "lng": lng}
 
 
 async def _geocode(address: str) -> tuple[float, float] | None:
@@ -341,9 +365,16 @@ def _device_congregation(request: Request) -> dict[str, Any]:
 
 
 def device_and_congregation(request: Request) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The Mac (device token in "Authorization: Bearer …") and its congregation; 403 for anyone else."""
+    """The Mac (device token in "Authorization: Bearer …") and its congregation; 403 for anyone else.
+    A browser signed in to hearchurch.com/account (session cookie) also gets through on the routes in web.WEB_ROUTES,
+    with CSRF checked on POSTs; its "device" is {"id": None, "web": True}, so the same routes serve both."""
     h = _hear()
     auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        from . import web
+        got = web.session_and_congregation(request)
+        if got is not None:
+            return got
     device = h.db.device_by_token(auth[7:]) if auth.startswith("Bearer ") else None
     cong = h.db.congregation(device["congregation_id"]) if device else None
     if cong is None or cong["hidden"]:
@@ -376,6 +407,37 @@ async def set_location(request: Request, body: Location):
         lat, lng = found
     h.db.set_location(cong["id"], lat, lng, body.address, city=await _town(lat, lng))
     return {"ok": True, "lat": lat, "lng": lng, "address": body.address if body.address is not None else cong["address"]}
+
+
+class CongregationEdit(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    name: str | None = Field(default=None, min_length=2, max_length=80)
+    stake: str | None = Field(default=None, max_length=80)
+    meeting_times: Annotated[list[MeetingTime], Field(max_length=14)] | None = None
+    timezone: str | None = Field(default=None, max_length=60)
+
+    @field_validator("timezone")
+    @classmethod
+    def _tz(cls, v: str | None) -> str | None:
+        try:
+            if v:
+                ZoneInfo(v)
+        except Exception:
+            raise ValueError("unknown time zone")
+        return v
+
+
+@router.post("/api/hc/congregation")
+async def edit_congregation(request: Request, body: CongregationEdit):
+    """(device token, or hearchurch.com/account) Change the name, stake, meeting times or time zone; fields left out
+    stay. → {ok, congregation}. The listener link stays (POST /api/hc/slug changes that)."""
+    cong = _device_congregation(request)
+    _limit(request, "emails", f"cong{cong['id']}")
+    times = [m.model_dump() for m in body.meeting_times] if body.meeting_times is not None else None
+    cong = _hear().db.update_congregation(cong["id"], name=body.name, stake=body.stake, meeting_times=times,
+                                          timezone=body.timezone)
+    log.info("%s: congregation details changed", cong["slug"])
+    return {"ok": True, "congregation": _public(cong)}
 
 
 def _page(title: str, text: str, status: int = 200) -> HTMLResponse:
@@ -490,7 +552,7 @@ def _account(cid: int, device_id: int | None = None) -> dict[str, Any]:
 async def account(request: Request):
     """(device token) The congregation's e-mails (main first) and its Macs; "this" marks the one asking."""
     device, cong = device_and_congregation(request)
-    return {"ok": True, "slug": cong["slug"], **_account(cong["id"], device["id"])}
+    return {**_slug_answer(cong, request), **_account(cong["id"], device["id"])}
 
 
 class EmailChange(BaseModel):
@@ -573,7 +635,8 @@ async def devices_revoke(request: Request, body: DeviceRevoke):
                             status_code=404)
     h.db.revoke_device(body.id)
     h.live.revoked(body.id)
-    log.info("%s: device %d revoked by device %d", cong["slug"], body.id, device["id"])
+    log.info("%s: device %d revoked by %s", cong["slug"], body.id,
+             "hearchurch.com" if device.get("web") else f"device {device['id']}")
     return {"ok": True, **_account(cong["id"], device["id"])}
 
 
@@ -762,7 +825,9 @@ async def usage_history(request: Request, meetings: int = Query(default=50, ge=1
                     "free_minutes": u.get("free_minutes", 0), "paid_minutes": u.get("paid_minutes", 0),
                     "cost_usd": u.get("cost_usd", 0)})
     paid = [{"kind": r["kind"], "at": r["at"], "amount_usd": r["amount_usd"],
-             **({"hours": round(r["minutes"] / 60, 2)} if "minutes" in r else {})} for r in rows if r["kind"] != "usage"]
+             **({"hours": round(r["minutes"] / 60, 2)} if "minutes" in r else {}),
+             **({"receipt_url": f"/api/hc/receipts/{r['id'].split(':', 1)[1]}"} if r["kind"] == "top_up" else {})}
+            for r in rows if r["kind"] != "usage"]
     return {"billing": billing_for(request, cong["billing"]), "meetings": out, "charges": paid[:charges]}
 
 
@@ -775,7 +840,7 @@ def billing_for(request: Request | None, billing: str) -> str:
     (KNOWS_HEADER); older Mac apps (0.3.0 builds 18 and 19, which know only "credits" and "own_key") get "credits",
     which makes their engine translate through the hub (the proxy treats the congregation as internal regardless).
     Their app_version ("0.3.0") can't tell the builds apart, so the header decides. No request: the operator."""
-    if billing != "internal" or request is None:
+    if billing != "internal" or request is None or getattr(request.state, "hc_web", False):   # /account: as it is
         return billing
     return billing if "internal" in request.headers.get(KNOWS_HEADER, "") else "credits"
 
@@ -898,8 +963,8 @@ async def checkout(request: Request, body: Buy):
         "client_reference_id": str(cong["id"]),
         "metadata": meta,
         "payment_intent_data": {"metadata": pi_meta, "description": f"Hear Church credit: {display_name(cong)}"},
-        "success_url": f"{base}/api/hc/checkout/done",
-        "cancel_url": f"{base}/api/hc/checkout/cancelled",
+        "success_url": f"{base}/account?paid=1#billing" if _web(request) else f"{base}/api/hc/checkout/done",
+        "cancel_url": f"{base}/account#billing" if _web(request) else f"{base}/api/hc/checkout/cancelled",
     }
     main_email = _hear().db.main_email(cong["id"])
     customer = _hear().db.payment_profile(cong["id"])["customer_id"]

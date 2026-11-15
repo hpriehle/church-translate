@@ -793,6 +793,7 @@ private struct BillingSettings: View {
     @State private var note: String?
     @State private var saveCard = true
     @State private var confirmRemove = false
+    @State private var confirmBuy: HubClient.Bundle?   // 1-click always asks first (Maddie, 2026-11-15)
     @State private var cardBusy = false
     @State private var code = ""
     @State private var codeBusy = false
@@ -860,7 +861,7 @@ private struct BillingSettings: View {
                     }
                     HStack {
                         ForEach(b.bundles, id: \.self) { x in
-                            Button { Task { await buy(x.usd) } } label: {
+                            Button { if oneClick { confirmBuy = x } else { Task { await buy(x.usd) } } } label: {
                                 VStack(spacing: 1) {
                                     Text(price(x.usd, b.discountPercent)).bold()
                                     Text("\(Self.hours(x.hours)) hours").font(.caption)
@@ -887,6 +888,13 @@ private struct BillingSettings: View {
                      ? "One click charges your saved card (\(b.card?.label ?? "")). Hours don't expire. Unused hours can be refunded on request. The receipt goes to the congregation's main e-mail."
                      : "Hours don't expire. Unused hours can be refunded on request. A secure payment page opens in your browser; the receipt goes to the congregation's main e-mail.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            .confirmationDialog(confirmBuyTitle(b), isPresented: Binding(
+                get: { confirmBuy != nil }, set: { if !$0 { confirmBuy = nil } })) {
+                if let x = confirmBuy {
+                    Button("Buy for \(price(x.usd, b.discountPercent))") { Task { await buy(x.usd) } }
+                }
+                Button("Cancel", role: .cancel) { confirmBuy = nil }
             }
         }
     }
@@ -1046,6 +1054,12 @@ private struct BillingSettings: View {
         } catch {
             historyNote = error.localizedDescription
         }
+    }
+
+    /// "Buy 11 hours for $50 on Visa ••4242?"
+    private func confirmBuyTitle(_ b: HubClient.Billing) -> String {
+        guard let x = confirmBuy else { return "" }
+        return "Buy \(Self.hours(x.hours)) hours for \(price(x.usd, b.discountPercent)) on \(b.card?.short ?? "your card")?"
     }
 
     private func price(_ usd: Int, _ percent: Int?) -> String {

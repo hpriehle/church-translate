@@ -1,6 +1,6 @@
 ---
 // Every marketing page: metadata, the listener banner, the nav and the footer.
-import { NAV, FOOTER } from "../site.js";
+import { NAV, FOOTER, CTA } from "../site.js";
 
 interface Props {
   title: string;          // the full title tag, "<keyword> | Hear Church"
@@ -39,7 +39,7 @@ const canonical = new URL(path, "https://hearchurch.com").href.replace(/\/$/, pa
   <a class="brand" href="/"><img src="/download/icon.png" width="32" height="32" alt=""> Hear Church</a>
   <nav aria-label="Main">
     {NAV.map((n) => <a href={n.href} aria-current={path === n.href ? "page" : undefined}>{n.label}</a>)}
-    <a class="nav-get" href="/download">Download</a>
+    <a class="nav-get" href={CTA.href}>{CTA.label}</a>
   </nav>
 </header>
 <main id="main">

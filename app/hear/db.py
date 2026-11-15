@@ -187,6 +187,29 @@ CREATE TABLE IF NOT EXISTS payment_profiles (
     auto_last_pi TEXT,
     updated_at REAL
 );
+CREATE TABLE IF NOT EXISTS web_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    used_at REAL,
+    attempts INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS web_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    csrf TEXT NOT NULL,
+    email TEXT NOT NULL,
+    congregation_id INTEGER REFERENCES congregations(id),
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    last_seen REAL,
+    revoked_at REAL
+);
+CREATE INDEX IF NOT EXISTS web_codes_email ON web_codes(email, purpose);
+CREATE INDEX IF NOT EXISTS web_sessions_email ON web_sessions(email);
 CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
 CREATE INDEX IF NOT EXISTS code_redemptions_cong ON code_redemptions(congregation_id, status);
 CREATE INDEX IF NOT EXISTS slug_aliases_cong ON slug_aliases(congregation_id);
@@ -246,8 +269,8 @@ SITE_PAGES = frozenset({
 # Listener pages live at hearchurch.com/<slug>, so a slug may never be one of the site's own top-level paths
 # (tests/test_hear.py checks this list against the routes).
 RESERVED_SLUGS = frozenset({
-    "about", "admin", "api", "c", "clips", "favicon-ico", "find", "guide", "health", "help", "listen", "listener",
-    "login", "logout", "operator", "print", "privacy", "qr", "robots", "s", "signs", "signup", "speak", "static",
+    "about", "account", "admin", "api", "c", "clips", "favicon-ico", "find", "guide", "health", "help", "listen", "listener",
+    "login", "logout", "operator", "print", "privacy", "qr", "robots", "s", "signs", "signup", "speak", "start", "static",
     "stream", "support", "talk", "terms", "voices", "ws", "www"}) | SITE_PAGES
 
 
@@ -287,6 +310,9 @@ AUTO_TOPUP_EVERY_S = 24 * 3600   # at most one automatic top-up per this long
 AUTO_TOPUP_BELOW_S = 3600        # an auto top-up runs after a meeting when the paid hours left are below this
 
 
+WEB_CODE_TTL_S = 10 * 60     # the 6-digit codes e-mailed by hearchurch.com/start and /account
+WEB_CODE_TRIES = 5           # wrong guesses before such a code stops working
+WEB_SESSION_TTL_S = 30 * 24 * 3600   # a hearchurch.com/account sign-in lasts this long (unless signed out)
 MAX_EMAILS = 10              # addresses per congregation
 DEVICE_CODE_LEN = 8          # add-a-Mac codes "7KQM-X2PA": 30^8, ~39 bits, short-lived and behind failure limits
 DEVICE_CODE_TTL_S = 15 * 60
@@ -1280,3 +1306,88 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
         """May this congregation start a new meeting? Own key and internal: always. Credits: while this month's free hour or
         the balance has something left. A meeting already running is never stopped; only the next one waits for a top-up."""
         return cong["billing"] in NO_CREDIT_NEEDED or self.balance(cong["id"])["can_start"]
+
+    # ------------------------------------------------------------ congregation details (Mac Settings, /account)
+    def update_congregation(self, cid: int, *, name: str | None = None, stake: str | None = None,
+                            meeting_times: list | None = None, timezone: str | None = None) -> dict[str, Any] | None:
+        """Change what the congregation calls itself and when it meets; None leaves a field as it is. The slug
+        (listener link) doesn't follow the name: that is change_slug."""
+        sets, args = [], []
+        for col, v in (("name", name), ("stake", stake), ("timezone", timezone)):
+            if v is not None:
+                sets.append(f"{col} = ?")
+                args.append(v if col != "stake" else (v or None))
+        if meeting_times is not None:
+            sets.append("meeting_times = ?")
+            args.append(json.dumps(meeting_times))
+        if sets:
+            self._x(f"UPDATE congregations SET {', '.join(sets)} WHERE id = ?", (*args, cid))
+        return self.congregation(cid)
+
+    # ------------------------------------------------------------ hearchurch.com/start and /account (app/hear/web.py)
+    def new_web_code(self, email: str, purpose: str, ttl_s: float = WEB_CODE_TTL_S) -> str:
+        """A 6-digit code e-mailed to `email` ("signup": prove the address before the congregation is made;
+        "login": sign in to /account). Earlier unused codes of that address and purpose stop working."""
+        if purpose not in ("signup", "login"):
+            raise ValueError(purpose)
+        email = email.strip().lower()
+        code = f"{secrets.randbelow(10 ** 6):06d}"
+        now = time.time()
+        with self._lock:
+            self._db.execute("UPDATE web_codes SET expires_at = ? WHERE email = ? AND purpose = ? AND used_at IS NULL"
+                             " AND expires_at > ?", (now, email, purpose, now))
+            self._db.execute("INSERT INTO web_codes (email, purpose, code_hash, created_at, expires_at)"
+                             " VALUES (?,?,?,?,?)", (email, purpose, hash_token(f"{email}:{code}"), now, now + ttl_s))
+        return code
+
+    def use_web_code(self, email: str, purpose: str, code: str) -> bool:
+        """Is `code` the live code for this address and purpose? Uses it up if so. Each wrong guess counts; after
+        WEB_CODE_TRIES the code is dead."""
+        email = email.strip().lower()
+        code = re.sub(r"\s", "", code or "")
+        now = time.time()
+        with self._lock:
+            row = self._db.execute("SELECT id, code_hash, attempts FROM web_codes WHERE email = ? AND purpose = ?"
+                                   " AND used_at IS NULL AND expires_at > ? ORDER BY id DESC LIMIT 1",
+                                   (email, purpose, now)).fetchone()
+            if row is None or row["attempts"] >= WEB_CODE_TRIES:
+                return False
+            if not (code.isdigit() and hmac.compare_digest(row["code_hash"], hash_token(f"{email}:{code}"))):
+                self._db.execute("UPDATE web_codes SET attempts = attempts + 1 WHERE id = ?", (row["id"],))
+                return False
+            return self._db.execute("UPDATE web_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
+                                    (now, row["id"])).rowcount == 1
+
+    def new_web_session(self, email: str, cid: int | None, ttl_s: float = WEB_SESSION_TTL_S) -> tuple[str, str]:
+        """A signed-in browser: returns (session token for the cookie, CSRF token). Only hashes of the token are kept."""
+        token, csrf = new_token("hcw"), secrets.token_urlsafe(24)
+        now = time.time()
+        self._x("INSERT INTO web_sessions (token_hash, csrf, email, congregation_id, created_at, expires_at, last_seen)"
+                " VALUES (?,?,?,?,?,?,?)", (hash_token(token), csrf, email.strip().lower(), cid, now, now + ttl_s, now))
+        return token, csrf
+
+    def web_session(self, token: str) -> dict[str, Any] | None:
+        """The live session with this token (not expired, not signed out), or None."""
+        if not token:
+            return None
+        rows = self._q("SELECT * FROM web_sessions WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?",
+                       (hash_token(token), time.time()))
+        return dict(rows[0]) if rows else None
+
+    def touch_web_session(self, sid: int) -> None:
+        self._x("UPDATE web_sessions SET last_seen = ? WHERE id = ?", (time.time(), sid))
+
+    def set_web_session_congregation(self, sid: int, cid: int) -> None:
+        self._x("UPDATE web_sessions SET congregation_id = ? WHERE id = ?", (cid, sid))
+
+    def revoke_web_session(self, sid: int) -> None:
+        self._x("UPDATE web_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?", (time.time(), sid))
+
+    def revoke_web_sessions(self, email: str, cid: int | None = None) -> int:
+        """Sign an address out everywhere (of one congregation, or all). Returns how many sessions ended."""
+        sql = "UPDATE web_sessions SET revoked_at = ? WHERE email = ? AND revoked_at IS NULL"
+        args: tuple = (time.time(), email.strip().lower())
+        if cid is not None:
+            sql += " AND congregation_id = ?"
+            args += (cid,)
+        return self._x(sql, args).rowcount
