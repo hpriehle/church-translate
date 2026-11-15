@@ -3,6 +3,53 @@
 Survey of commit 24be883 (file:line there), then what branch `chat/hc-pricing` adds. Plan: future-pacing.md §4
 "Claude access & payment"; rules: docs/hear-church-plan.md:270-281.
 
+## Pricing now (Nov 14 decision; `chat/hc-v3-mac`, not deployed)
+
+This section is current; the sections below are the history and still say $5/h and a one-time free hour.
+
+- **Free plan:** every credits congregation gets **1 free language-hour per calendar month** (UTC; resets on the
+  1st at 00:00 UTC; unused free time does not carry over). It replaces the one-time first free hour, also for the
+  congregations that already exist (no migration: the ledger is worked out from the meetings each time). A meeting
+  counts in the month it **started**. Unlimited listeners: there is no listener cap anywhere.
+- **Bundles only** (`app/hear/db.py` `BUNDLES`): $20 = 4 h ($5.00/h), $50 = 11 h ($4.55/h), $100 = 25 h ($4.00/h),
+  $250 = 70 h ($3.57/h). No any-amount top-up.
+- **Stored as minutes:** `credits.seconds` is the language time bought (it was already a column; it now comes from
+  the bundle, not `cents / $5`). The $/h shown is derived. Top-ups from before the bundles keep the seconds they
+  got at $5/h. A top-up of an amount that is no bundle (by hand, or a pre-bundle Checkout session paid late) is
+  credited at $5/h.
+- **Ledger** (`Database._walk`): credit-billed meetings in start order; each first uses its month's free hour, the
+  rest comes off the top-ups **oldest first**, each at its own rate; what nothing covers is overdrawn (valued at
+  $5/h in `balance_usd`). `balance()` adds `month_used_min`, `free_month`, `free_resets_at`,
+  `free_min_per_month`, `bought_min`; `free_left_min` is this month's.
+- **Checkout** `POST /api/hc/checkout {usd}`: `usd` must be a bundle price; the line item is the bundle's price
+  with "N language-hours … ($x.xx per hour)", metadata adds `minutes` and `bundle`. Any other amount → **400
+  `not_a_bundle`** with a message naming the bundles (not mapped to the nearest bundle: nobody is charged a
+  different amount than the one they clicked).
+- **Webhook:** credits the bundle's minutes once (idempotent on the payment intent as before): `metadata.minutes`
+  when it matches the amount paid, else the bundle at `amount_total`, else $5/h.
+- **0.3.0 apps (builds 18/19):** they build buy buttons from `buy_usd` and label them `usd / usd_per_language_hour`.
+  The hub now sends `buy_usd: [20, 50, 100, 250]` and keeps `usd_per_language_hour: 5`, so every button is a
+  bundle and buying works; their labels say 4/10/20/50 hours for $20/$50/$100/$250, fewer than the bundle gives
+  (Checkout shows the right hours). Their "hours left" still shows free + paid together.
+- **`GET /api/hc/billing`** adds `bundles: [{usd, hours, usd_per_hour}]`, `free_hours_left`, `paid_hours_left`,
+  `free_hours_per_month`, `free_resets_at`; message "1 free hour left this month · 4 paid hours left." or "Out of
+  credit (…). This month's free hour is used up: buy credit to start the next meeting, or wait for next month's
+  free hour." `GET /api/hc/usage` charges add `hours` for top-ups.
+- **Refunds of unused credit:** pro rata at the top-up's own rate. The unused part of a top-up is its minutes not
+  yet used (oldest first, after the free hours), worth `unused_seconds × cents / seconds`: a $50 bundle with 5.5 h
+  unused refunds $25. `POST /api/admin/refunds` defaults to that (`Database.unused_cents`). Any refund (webhook or
+  admin) takes back `seconds × refunded / cents`: refunding $25 of the $50 bundle takes off 5.5 h. Rounding to
+  whole cents can leave a few seconds.
+- **Mac Billing tab:** free hour left this month (and when the next one comes), paid hours left, the four bundle
+  buttons (price, hours, $/h), meetings and payments (with hours). A hub without `bundles` falls back to its
+  `buy_usd` at its one rate. Onboarding's translation step names the monthly free hour and the bundles.
+- **Speak page** (`web/speak`): free and paid hours, the bundles in the menu.
+- **Site/terms:** `/pricing` (Free card + bundles table + calculator at bundle rates), home FAQ and schema, download
+  page, terms "Credits and refunds", privacy (hours per purchase).
+- **Tests:** `tests/test_bundles.py` (monthly reset and no carry-over, UTC month edges, oldest-first at each rate,
+  pro-rata refunds, admin default refund, hand credits with minutes), `tests/test_stripe.py` (bundle checkout, the
+  400, each bundle's hours from the webhook). `scripts/e2e_credits.py --usd 20|50|100|250` buys a bundle.
+
 ## Today (24be883)
 
 **Mac app**

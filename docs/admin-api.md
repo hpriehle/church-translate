@@ -9,8 +9,11 @@ else gets `403`. Note: `?key=` puts the password in the URL, so it shows up in a
 Siteboard calls from a server, an `Authorization` header would be better, but the hub doesn't accept one yet.
 
 **Conventions.** Times are Unix epoch seconds (UTC, float). Money comes as both `*_cents` (int) and `*_usd` (2
-decimals). A language-minute is one minute of speech heard in one language, and $5 buys one language-hour. Every
-congregation's first language-hour is free, and credits never expire. Errors come back as `{"error": <code>,
+decimals). A language-minute is one minute of speech heard in one language. Pricing (Nov 14): every credits
+congregation gets one free language-hour per calendar month (UTC, resets on the 1st, no carry-over); beyond it,
+bundles: $20 = 4 h, $50 = 11 h, $100 = 25 h, $250 = 70 h. A top-up is stored as the minutes it bought
+(`credits.seconds`); top-ups from before the bundles (and hand credits of other amounts) count at $5 per hour.
+Paid time comes off a congregation's top-ups oldest first, each at its own rate. Credits never expire. Errors come back as `{"error": <code>,
 "message": <text for a person>}` or as FastAPI's `{"detail": …}` (403, 404 and 422 on the older routes).
 
 Example values below come from a scratch database: two congregations, one 45-minute meeting in fr + es, a $25
@@ -32,7 +35,9 @@ Auth: send the operator password in the `X-Operator-Key` header (preferred: keep
  "all_time": {"meetings": 1, "language_hours": {"total": 1.5, "paid": 0.5, "free": 1.0, "own_key": 0.0, "internal": 0.0,
               "paid_usd": 2.5}},
  "credit": {"sold_usd": 25.0, "manual_usd": 5.0, "refunded_usd": 0.0, "outstanding_usd": 27.5, "overdrawn_usd": 0,
-            "usd_per_language_hour": 5.0},
+            "free_hours_per_month": 1.0, "legacy_usd_per_language_hour": 5.0,
+            "bundles": [{"usd": 20, "hours": 4, "usd_per_hour": 5.0}, {"usd": 50, "hours": 11, "usd_per_hour": 4.55},
+                        {"usd": 100, "hours": 25, "usd_per_hour": 4.0}, {"usd": 250, "hours": 70, "usd_per_hour": 3.57}]},
  "installs": {"devices": 2, "active_7d": 1, "active_30d": 1, "never_connected": 1,
               "by_version": {"1.4.0":   {"devices": 1, "active_7d": 1, "active_30d": 1},
                              "unknown": {"devices": 1, "active_7d": 0, "active_30d": 0}}}
@@ -83,7 +88,7 @@ page. When `next_before` is `null`, there are no more pages.
   {"id": "credit:2", "kind": "manual_credit", "at": 1794635908.36, "congregation_id": 2,
    "congregation": {"id": 2, "slug": "thies", "name": "Thiès Branch"},
    "amount_cents": 500, "amount_usd": 5.0, "payment_id": "goodwill-2026-11", "cents": 500,
-   "refunded_cents": 0, "refundable": false}
+   "refunded_cents": 0, "refundable": false, "minutes": 60.0, "bundle": null}
  ],
  "next_before": "1794635908.363085|credit:2"
 }
@@ -92,15 +97,17 @@ page. When `next_before` is `null`, there are no more pages.
 Kinds:
 - `top_up`: a credit whose `payment_id` is a Stripe id (`pi_…`, also `ch_`/`cs_`/`py_`). The webhook credits these
   with the payment intent id. `refundable`: it was paid with a `pi_` and part of it is still unrefunded.
-  `refunded_cents`: the total refunded from it so far.
+  `refunded_cents`: the total refunded from it so far. `minutes`: the language time it bought; `bundle`: its price in
+  dollars when it is a bundle ($20/$50/$100/$250), else null.
 - `manual_credit`: added by hand with `POST /api/admin/congregations/{id}/credits` under any other id (for example
   "goodwill-2026-11"). This is a naming rule: a hand credit filed under a real `pi_…` id counts as a top-up.
 - `refund`: one row each time a top-up's refunded total grows. `source`: `"admin"` (the route below, with
   `stripe_refund_id`), `"stripe"` (the `charge.refunded` webhook, for a refund made in the Stripe dashboard), or
   `"unlogged"` (refunded before the hub started logging refunds on this branch: one row for the whole amount).
 - `usage`: one meeting with metered speech (meetings with no speech aren't listed). `at` = when it started. Each
-  congregation's credit-billed meetings use up the free hour in order, so `cost_usd` is the speech beyond it at
-  $5 per language-hour. Own-key meetings show `billing: "own_key"` and internal ones
+  month (UTC, by the meeting's start), a congregation's credit-billed meetings use up that month's free hour in
+  order; `cost_usd` is the speech beyond it, at the rates of the top-ups it came from (oldest first; time no
+  top-up covers counts at $5 per hour). Own-key meetings show `billing: "own_key"` and internal ones
   `billing: "internal"`; both cost 0. `ended_at: null` means the meeting
   is still running and its numbers are still growing.
 
@@ -110,9 +117,10 @@ For each congregation, the sum of `amount_usd` equals its balance (to the cent, 
 
 Refunds through Stripe (the Refunds API on the payment intent), then takes the refund off the ledger.
 
-- `cents` is optional. It defaults to the **unused part** of that top-up: what's left of it after earlier refunds,
-  but never more than the congregation's current balance. Credit is one pool, so "unused" means "still in the
-  pool".
+- `cents` is optional. It defaults to the **unused part** of that top-up, pro rata at its own price: its minutes
+  not used yet (meetings use the oldest top-ups first, after the month's free hour) × what it cost per minute. A
+  $50 bundle (11 h) with 5.5 h unused refunds $25; a pre-bundle top-up, $5 per unused hour. Any refund takes
+  `seconds × refunded / cents` off that top-up: refunding $25 of the $50 bundle takes off 5.5 h.
 - Policy: unused credit can be refunded at any time, and used hours are final. The route still accepts any `cents`
   up to what's left of the top-up, so the admin can refund used credit by hand. When `cents` exceeds the unused
   part, the answer carries a `warning` and the balance goes negative.
@@ -224,8 +232,9 @@ POST /api/admin/congregations/7/billing?key=…
              "balance": {"metered_min": 120.0, "used_min": 0.0, "free_left_min": 60.0, "balance_min": 0.0,
                          "balance_usd": 0.0, "bought_usd": 0.0, "left_min": 60.0, "can_start": true},
              "balance_usd": 0.0, "language_hours_left": null, "out_of_credit": false, "usd_per_language_hour": 5.0,
-             "can_buy": false, "buy_usd": [10, 25, 50, 100], "buy_min_usd": 5, "buy_max_usd": 500,
-             "message": "Included: no charge."}}
+             "free_hours_left": null, "paid_hours_left": null, "free_hours_per_month": 1.0, "free_resets_at": 1796083200.0,
+             "bundles": [{"usd": 20, "hours": 4, "usd_per_hour": 5.0}, "…"],
+             "can_buy": false, "buy_usd": [20, 50, 100, 250], "message": "Included: no charge."}}
 ```
 
 The `billing` object is the same as `billing` in GET /api/admin/congregations/{id}. Errors:
@@ -287,7 +296,8 @@ again, connect it with a new code (Add device or Email me a code).
 ## Older admin routes (unchanged)
 
 `GET /api/admin/congregations` (the list, with balance), `POST /api/admin/congregations/{id}/credits
-{payment_id, cents}` (credit by hand, idempotent on payment_id), `POST /api/admin/congregations/{id}/hidden
+{payment_id, cents, minutes?}` (credit by hand, idempotent on payment_id; `minutes` defaults to the bundle at that
+price, else $5 per hour, so a goodwill credit can be `{"payment_id": "goodwill-dec", "cents": 1, "minutes": 120}`), `POST /api/admin/congregations/{id}/hidden
 {hidden}`. See the docstring at the top of `app/hear/api.py`.
 
 ## Limits
