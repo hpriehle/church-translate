@@ -29,7 +29,14 @@
    database must contain neither the English nor the translations, and a second congregation that used up its free
    hour gets 402 out_of_credit (its meeting's end is moved back past the proxy's trailing window). Costs a few
    cents (3 short sentences).
-10. PASS/FAIL per step, exit 1 on any failure; the hub is stopped and the temp dir deleted.
+10. codes and 1-click top-ups (no Stripe call): the operator makes a free_hours code and a percent_off code
+   (POST /api/admin/codes); the congregation redeems both (POST /api/hc/codes/redeem): the hours go up at once, the
+   discount waits; a wrong code gets "That code isn't valid."; a code entered at sign-up is applied to the new
+   congregation. Then a signed payment_intent.succeeded for a 1-click top-up of the $20 bundle with that discount
+   (as POST /api/hc/topup would have made it) is posted twice: credited once with the bundle's hours at the
+   discounted price, the discount used up. Without a key, /api/hc/topup and /api/hc/card/setup answer 503; with a
+   test key, /api/hc/card/setup makes a real TEST Checkout session in setup mode (nothing is charged).
+11. PASS/FAIL per step, exit 1 on any failure; the hub is stopped and the temp dir deleted.
 
 Without --real-anthropic: no Anthropic call (the hub gets no key; tests/test_wifi_only.py covers the proxy with a
 fake), no live Stripe keys, nothing deployed. Stripe is called only in step 3 (create a test Checkout session, then
@@ -60,6 +67,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ENV = Path("~/.config/hearchurch/stripe-test.env").expanduser()
 DEFAULT_HUB_ENV = Path("~/.config/hearchurch/hub.env").expanduser()
 CLAUDE_VARS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
+OPERATOR_PIN = "E2E_OPERATOR_PIN"   # the hub child's operator password (random per run), for step 10's admin calls
 PROD_LOG = "E2E_HUB_PROD_LOG"   # set for the hub child: log like the production hub (and the proxy's debug line)
 STRIPE_VARS = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PAYMENT_METHOD_CONFIG")
 BUNDLE_HOURS = {20: 4, 50: 11, 100: 25, 250: 70}   # app/hear/db.py BUNDLES
@@ -99,7 +107,7 @@ def serve(port: int, home: Path) -> None:
         async def town(self, lat, lng):
             return ""
 
-    main.S.settings = Settings.model_validate({"server": {"operator_pin": secrets.token_hex(8),
+    main.S.settings = Settings.model_validate({"server": {"operator_pin": os.environ.get(OPERATOR_PIN) or secrets.token_hex(8),
                                                           "public_url": f"http://127.0.0.1:{port}/"}})
     main.S.local_addrs = set()
     main.S.operator = Hub("operator")
@@ -366,8 +374,86 @@ async def run(base: str, env: dict[str, str], usd: int, r: Report, real: bool = 
                and abs(round(b3["balance_usd"] - b4["balance_usd"], 2) - cost8) <= 0.01,
                f"used {b4['balance']['used_min']} min, ${b3['balance_usd']:.2f} → ${b4['balance_usd']:.2f}")
 
+        await codes_and_one_click(c, auth, cid, key, whsec, r)
+
         if real:
             await real_translations(c, base, ws_base, auth, signup, st, tmp, r)
+
+
+# ------------------------------------------------------------------ step 10: codes and 1-click top-ups
+
+async def codes_and_one_click(c: httpx.AsyncClient, auth: dict, cid: str, key: str, whsec: str, r: Report) -> None:
+    op = {"key": os.environ[OPERATOR_PIN]}
+
+    async def billing() -> dict:
+        return (await c.get("/api/hc/billing", headers=auth)).json()
+
+    b0 = await billing()
+    made = [await c.post("/api/admin/codes", params=op, json=body) for body in (
+        {"type": "free_hours", "value": 2, "label": "E2E free hours"},
+        {"type": "percent_off", "value": 25, "label": "E2E discount"},
+        {"type": "free_hours", "value": 1, "label": "E2E sign-up"})]
+    if not r.step("10 the operator makes codes", all(m.status_code == 200 for m in made),
+                  ", ".join(str(m.status_code) for m in made)):
+        return
+    free, pct, at_signup = (m.json()["code"]["code"] for m in made)
+    bad = await c.post("/api/hc/codes/redeem", headers=auth, json={"code": "ZZZZ-ZZZZ"})
+    r.step("10 a wrong code is refused with one message", bad.status_code == 403
+           and bad.json().get("message") == "That code isn't valid.", f"HTTP {bad.status_code}")
+    got = await c.post("/api/hc/codes/redeem", headers=auth, json={"code": free.lower()})
+    j = got.json()
+    r.step("10 a free_hours code adds 2 hours at once", got.status_code == 200
+           and round(j["paid_hours_left"] - b0["paid_hours_left"], 2) == 2, f"{b0['paid_hours_left']} → "
+           f"{j.get('paid_hours_left')} paid hours")
+    got = await c.post("/api/hc/codes/redeem", headers=auth, json={"code": pct})
+    r.step("10 a percent_off code waits for the next bundle", got.status_code == 200
+           and got.json().get("discount", {}).get("percent") == 25, got.json().get("message", ""))
+    tag = secrets.token_hex(3)
+    su = await c.post("/api/hc/signup", json={"church": "E2E Test Church", "name": f"E2E Code {tag}",
+                                              "unit_type": "ward", "email": f"e2e-code-{tag}@example.invalid",
+                                              "code": at_signup})
+    sj = su.json()
+    ok = su.status_code == 200 and sj.get("code", {}).get("type") == "free_hours"
+    if ok:
+        sb = (await c.get("/api/hc/billing", headers={"Authorization": f"Bearer {sj['device_token']}"})).json()
+        ok = sb["paid_hours_left"] == 1
+    r.step("10 a code given at sign-up is applied to the new congregation", ok, f"HTTP {su.status_code}")
+
+    topup = await c.post("/api/hc/topup", headers=auth, json={"usd": 20})
+    setup = await c.post("/api/hc/card/setup", headers=auth)
+    if key:
+        r.step("10 card setup makes a Stripe TEST Checkout page in setup mode", setup.status_code == 200
+               and setup.json().get("id", "").startswith("cs_test_"), f"HTTP {setup.status_code}")
+        r.step("10 1-click without a saved card asks for one", topup.status_code == 409
+               and topup.json().get("error") == "no_card", f"HTTP {topup.status_code}")
+    else:
+        r.step("10 without a key, 1-click and card setup answer 503", topup.status_code == 503
+               and setup.status_code == 503, f"HTTP {topup.status_code}, {setup.status_code}")
+    if not whsec:
+        return
+    b1 = await billing()
+    disc = 1500   # $20 less 25%
+    pi = {"id": f"pi_e2e_click_{secrets.token_hex(6)}", "object": "payment_intent", "status": "succeeded",
+          "currency": "usd", "amount": disc, "amount_received": disc, "payment_method": "pm_e2e",
+          "metadata": {"congregation_id": str(cid), "cents": str(disc), "minutes": "240", "bundle": "20",
+                       "kind": "one_click", "percent_off": "25",
+                       "discount_redemption": str(await _redemption_id(c, op, cid))}}
+    body = event("payment_intent.succeeded", pi)
+    hdr = {"Stripe-Signature": sign(body, whsec), "Content-Type": "application/json"}
+    first = await c.post("/api/stripe/webhook", content=body, headers=hdr)
+    again = await c.post("/api/stripe/webhook", content=body, headers=hdr)
+    b2 = await billing()
+    r.step("10 a 1-click payment (25% off the $20 bundle) is credited once: 4 hours for $15",
+           first.json().get("credited") is True and again.json().get("credited") is False
+           and round(b2["paid_hours_left"] - b1["paid_hours_left"], 2) == 4
+           and round(b2["balance"]["bought_usd"] - b1["balance"]["bought_usd"], 2) == 15,
+           f"{b1['paid_hours_left']} → {b2['paid_hours_left']} paid hours")
+    r.step("10 the discount is used up", b2.get("discount") is None and b1.get("discount", {}).get("percent") == 25)
+
+
+async def _redemption_id(c: httpx.AsyncClient, op: dict, cid: str) -> int:
+    j = (await c.get(f"/api/admin/congregations/{cid}", params=op)).json()
+    return next(x["redemption_id"] for x in j["codes"] if x["type"] == "percent_off" and x["status"] == "pending")
 
 
 # ------------------------------------------------------------------ step 9: real translations through the hub
@@ -589,6 +675,7 @@ def main() -> int:
         child_env.update(claude)
         child_env[PROD_LOG] = "1"
     child_env["HEARCHURCH_HOME"] = str(tmp)
+    os.environ[OPERATOR_PIN] = child_env[OPERATOR_PIN] = secrets.token_hex(12)
     log = open(tmp / "hub.log", "w")
     hub = subprocess.Popen([sys.executable, __file__, "--serve", str(port), str(tmp)], cwd=ROOT, env=child_env,
                            stdout=log, stderr=subprocess.STDOUT, start_new_session=True)

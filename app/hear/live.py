@@ -134,6 +134,7 @@ class LiveSession:
 class Live:
     def __init__(self, db: Database, stream, grace_s: float = 60.0):
         self.db, self.stream, self.grace_s = db, stream, grace_s
+        self.after_end = None   # called with the congregation id when a meeting ends (auto top-up, app/hear/payments.py)
         self.sessions: dict[int, LiveSession] = {}
         self.waiting: dict[int, Hub] = {}   # listeners of a congregation that isn't live yet
         self.started = time.time()          # "boot": caption numbers restart when the server does
@@ -389,3 +390,8 @@ class Live:
         for b in s.streams.values():
             b.close_all()
         log.info("%s session ended", s.slug)
+        if self.after_end is not None:
+            try:
+                self.after_end(s.cid)
+            except Exception:
+                log.exception("after a meeting of %s", s.slug)

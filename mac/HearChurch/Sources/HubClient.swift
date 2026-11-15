@@ -140,6 +140,17 @@ enum HubClient {
         let usdPerHour: Double
     }
 
+    /// The congregation's saved card, as Stripe describes it (the card itself stays at Stripe).
+    struct Card: Equatable {
+        let brand: String; let last4: String; let expMonth: Int?; let expYear: Int?
+        var label: String {
+            let b = brand.isEmpty ? "Card" : brand == "amex" ? "Amex" : brand.prefix(1).uppercased() + brand.dropFirst()
+            return last4.isEmpty ? b : "\(b) ••••\(last4)"
+        }
+    }
+    /// Automatic top-up: after a meeting, when the paid hours left are under `belowHours`, buy the `usd` bundle.
+    struct AutoTopUp: Equatable { var enabled = false; var usd = 20; var belowHours = 1.0 }
+
     /// GET /api/hc/billing: how the congregation pays and what it has left.
     struct Billing: Equatable {
         let mode: String               // "credits", "own_key" or "internal" (no charge: no balance, nothing to buy)
@@ -152,6 +163,10 @@ enum HubClient {
         let canBuy: Bool
         let bundles: [Bundle]
         let message: String
+        var card: Card? = nil          // the saved card (brand, last 4), or none
+        var autoTopUp = AutoTopUp()
+        var discountPercent: Int? = nil   // a % off code waiting for the next bundle
+        var canSaveCard = false        // a hub that knows saved cards (and has Stripe)
         var ownKey: Bool { mode == "own_key" }
         var included: Bool { mode == "internal" }
     }
@@ -169,12 +184,23 @@ enum HubClient {
         let rate = num(json["usd_per_language_hour"]) ?? 5
         let amounts = (json["buy_usd"] as? [Int] ?? []).map { Bundle(usd: $0, hours: Double($0) / max(rate, 0.01), usdPerHour: rate) }
         let free = (num(b["free_left_min"]) ?? 0) / 60
-        return Billing(mode: json["billing"] as? String ?? "credits", balanceUSD: num(json["balance_usd"]) ?? 0,
-                       hoursLeft: num(json["language_hours_left"]), freeLeftHours: free,
-                       paidHoursLeft: num(json["paid_hours_left"]) ?? ((num(json["language_hours_left"]) ?? 0) - free),
-                       freeResetsAt: num(json["free_resets_at"]).map { Date(timeIntervalSince1970: $0) },
-                       outOfCredit: json["out_of_credit"] as? Bool ?? false, canBuy: json["can_buy"] as? Bool ?? false,
-                       bundles: bundles.isEmpty ? amounts : bundles, message: json["message"] as? String ?? "")
+        var out = Billing(mode: json["billing"] as? String ?? "credits", balanceUSD: num(json["balance_usd"]) ?? 0,
+                          hoursLeft: num(json["language_hours_left"]), freeLeftHours: free,
+                          paidHoursLeft: num(json["paid_hours_left"]) ?? ((num(json["language_hours_left"]) ?? 0) - free),
+                          freeResetsAt: num(json["free_resets_at"]).map { Date(timeIntervalSince1970: $0) },
+                          outOfCredit: json["out_of_credit"] as? Bool ?? false, canBuy: json["can_buy"] as? Bool ?? false,
+                          bundles: bundles.isEmpty ? amounts : bundles, message: json["message"] as? String ?? "")
+        if let c = json["card"] as? [String: Any] {
+            out.card = Card(brand: c["brand"] as? String ?? "", last4: c["last4"] as? String ?? "",
+                            expMonth: c["exp_month"] as? Int, expYear: c["exp_year"] as? Int)
+        }
+        if let a = json["auto_topup"] as? [String: Any] {
+            out.autoTopUp = AutoTopUp(enabled: a["enabled"] as? Bool ?? false, usd: a["usd"] as? Int ?? 20,
+                                      belowHours: num(a["below_hours"]) ?? 1)
+        }
+        out.discountPercent = (json["discount"] as? [String: Any])?["percent"] as? Int
+        out.canSaveCard = json["can_save_card"] as? Bool ?? false
+        return out
     }
 
     struct Meeting: Identifiable, Hashable {
@@ -209,12 +235,75 @@ enum HubClient {
     }
 
     /// POST /api/hc/checkout: a Stripe Checkout page for the bundle at that price, opened in the browser.
-    static func checkout(usd: Int, token: String) async throws -> URL {
-        let (json, status) = try await send("/api/hc/checkout", ["usd": usd], token: token)
+    /// saveCard: Stripe also keeps the card for 1-click and automatic top-ups.
+    static func checkout(usd: Int, saveCard: Bool = false, token: String) async throws -> URL {
+        var body: [String: Any] = ["usd": usd]
+        if saveCard { body["save_card"] = true }
+        let (json, status) = try await send("/api/hc/checkout", body, token: token)
         if status == 503 { throw Failure(message: "Buying credit isn't set up yet. Write to support@hearchurch.com.") }
         try check(json, status)
         guard let s = json["url"] as? String, let url = URL(string: s) else { throw Failure(message: "The payment page didn't open. Try again.") }
         return url
+    }
+
+    /// POST /api/hc/card/setup: Stripe's page to save a card (opened in the browser; the card never reaches us).
+    static func cardSetup(token: String) async throws -> URL {
+        let (json, status) = try await send("/api/hc/card/setup", [:], token: token)
+        if status == 503 { throw Failure(message: "Saving a card isn't set up yet. Write to support@hearchurch.com.") }
+        try check(json, status)
+        guard let s = json["url"] as? String, let url = URL(string: s) else { throw Failure(message: "Stripe's page didn't open. Try again.") }
+        return url
+    }
+
+    /// POST /api/hc/card/remove: forget the saved card (automatic top-up goes off with it).
+    static func removeCard(token: String) async throws {
+        let (json, status) = try await send("/api/hc/card/remove", [:], token: token)
+        try check(json, status)
+    }
+
+    enum TopUpResult { case paid(String); case confirm(URL) }
+    struct NeedsCheckout: LocalizedError { let message: String; var errorDescription: String? { message } }
+
+    /// POST /api/hc/topup: 1-click, the saved card pays for the bundle. .confirm(url): the bank wants 3-D Secure on
+    /// Stripe's page. NeedsCheckout: no saved card (or the bank wants the full payment page): use Checkout instead.
+    static func topUp(usd: Int, requestID: String, token: String) async throws -> TopUpResult {
+        let (json, status) = try await send("/api/hc/topup", ["usd": usd, "request_id": requestID], token: token)
+        let msg = message(json)
+        switch (status, json["error"] as? String) {
+        case (200..<300, _):
+            if json["status"] as? String == "requires_action", let s = json["url"] as? String, let url = URL(string: s) {
+                return .confirm(url)
+            }
+            return .paid(msg ?? "Payment made. The hours show in a few seconds.")
+        case (402, _): throw Failure(message: msg ?? "Your card was declined.")
+        case (409, "no_card"), (409, "needs_checkout"): throw NeedsCheckout(message: msg ?? "")
+        case (503, _): throw Failure(message: "Buying credit isn't set up yet. Write to support@hearchurch.com.")
+        default:
+            try check(json, status)
+            return .paid(msg ?? "")
+        }
+    }
+
+    /// POST /api/hc/auto-topup: automatic top-up on or off, and its bundle.
+    static func setAutoTopUp(enabled: Bool, usd: Int, token: String) async throws {
+        let (json, status) = try await send("/api/hc/auto-topup", ["enabled": enabled, "usd": usd], token: token)
+        try check(json, status)
+    }
+
+    /// POST /api/hc/codes/redeem: a code from Hear Church (own key, free hours, % off). Returns what it did.
+    static func redeemCode(_ code: String, token: String) async throws -> String {
+        let (json, status) = try await send("/api/hc/codes/redeem", ["code": code], token: token)
+        switch status {
+        case 200..<300:
+            if json["already"] as? Bool == true { return "You already used this code." }
+            return json["message"] as? String ?? "Code applied."
+        case 403 where json["error"] as? String == "bad_code": throw Failure(message: message(json) ?? "That code isn't valid.")
+        case 409: throw Failure(message: message(json) ?? "That code can't be used right now.")
+        case 429: throw tooManyTries(json)
+        default:
+            try check(json, status)
+            return ""
+        }
     }
 
     /// POST /api/hc/slug: the listener link becomes hearchurch.com/<slug>; the old one keeps redirecting.

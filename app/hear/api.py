@@ -2,7 +2,9 @@
 
 Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
   POST /api/hc/signup       church, name, unit_type, email, [stake, address, lat, lng, meeting_times, timezone,
-                            device_name] → {slug, claim}; an e-mail with a verification link is sent.
+                            device_name, code] → {slug, claim}; an e-mail with a verification link is sent.
+                            code: a code from Harrison (app/hear/payments.py), checked first (403 bad_code, nothing
+                            made) and redeemed for the new congregation (the answer's "code").
                             With [hearchurch] verify_email = false (for now: no e-mail service yet) it answers
                             {slug, device_token} at once and the congregation counts as verified.
   GET  /api/hc/verify?token=…   (the link in the e-mail) marks the e-mail verified; the congregation is live-capable
@@ -30,7 +32,8 @@ Accounts (V3.2, docs/v3-languages.md "Accounts"): several e-mails per congregati
                             hearchurch.com/<slug>; the old slug redirects there for good (slug_aliases, so printed QR
                             codes keep working). 422 bad_slug (format), 409 reserved / taken.
 Billing (prepaid credits, or the congregation's own Anthropic key through a one-time code Harrison makes):
-  POST /api/hc/own-key-code/check {code} → {ok} or 403 bad_code / 429 locked. Doesn't use the code up: onboarding
+  Saved card, 1-click and automatic top-ups, codes (own key, free hours, % off): app/hear/payments.py.
+  POST /api/hc/own-key-code/check {code} (deprecated: /api/hc/codes/check) → {ok} or 403 bad_code / 429 locked. Doesn't use the code up: onboarding
                             asks for the code before the key, and the congregation only exists after sign-up.
   POST /api/hc/own-key-code (device token) {code} → {ok, billing: "own_key"}; uses the code up for this
                             congregation (asking again is fine). 403 bad_code (unknown, or used by another), 429 locked.
@@ -41,11 +44,15 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
   GET  /api/hc/usage        (device token) → {billing, meetings: [{started_at, ended_at, languages, language_minutes,
                             language_hours, free_minutes, paid_minutes, cost_usd, billing}], charges: [{kind, at,
                             amount_usd}]}: the Billing tab's history, newest first (?meetings=, ?charges= limits).
-  POST /api/hc/checkout     (device token) {usd} → {url}: a Stripe Checkout page for the bundle at that price ($20,
+  POST /api/hc/checkout     (device token) {usd, save_card?} → {url} (less a pending % off code: percent_off,
+                            charged_usd; save_card keeps the card for 1-click): a Stripe Checkout page for the bundle at that price ($20,
                             $50, $100 or $250); any other amount is 400 not_a_bundle with a message naming the
                             bundles (0.3.0 apps only offer the prices in buy_usd, so they always hit a bundle).
                             503 not_configured without STRIPE_SECRET_KEY. Back to /api/hc/checkout/done or /cancelled.
-  POST /api/stripe/webhook  Stripe → hub, signed with STRIPE_WEBHOOK_SECRET: checkout.session.completed (paid) calls
+  POST /api/stripe/webhook  Stripe → hub, signed with STRIPE_WEBHOOK_SECRET. payment_intent.succeeded credits 1-click
+                            and automatic top-ups (and Checkout's, once either way); payment_intent.payment_failed,
+                            setup_intent.succeeded and checkout.session.completed in setup mode: payments.py.
+                            checkout.session.completed (paid) calls
                             credit_top_up with its payment_intent and amount_total (the bundle's hours), once per
                             payment;
                             charge.refunded takes amount_refunded back off the top-up with that payment_intent.
@@ -122,6 +129,9 @@ class Hear:
         self.connect_cong = FailureLimiter(10, 3600)     # wrong codes per congregation, then it is locked
         self.own_key_ip = FailureLimiter(10, 3600)       # wrong own-key codes per IP
         self.pair_ip = FailureLimiter(10, 15 * 60)       # wrong add-a-Mac codes per IP
+        self.codes_cong = FailureLimiter(20, 3600)       # wrong codes (own key, free hours, % off) per congregation
+        from . import payments
+        live.after_end = payments.after_meeting          # maybe an automatic top-up once a meeting ends
         self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
                        "signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
                        "email_addr": RateLimiter(3, 3600), "claim": RateLimiter(1200, 3600),
@@ -227,6 +237,7 @@ class SignUp(BaseModel):
     timezone: str = Field(default="", max_length=60)
     device_name: str = Field(default="Mac", max_length=60)
     emails: Annotated[list[str], Field(max_length=9)] = []   # more addresses besides the main one (`email`)
+    code: str = Field(default="", max_length=40)   # a code from Harrison (own key, free hours, % off): app/hear/payments.py
 
     @field_validator("email")
     @classmethod
@@ -269,6 +280,13 @@ async def signup(request: Request, body: SignUp):
     h = _hear()
     if (body.lat is None) != (body.lng is None):
         raise HTTPException(400, "Give both lat and lng, or neither.")
+    if body.code:   # checked before the congregation is made, so a typo can be fixed and sent again
+        from . import payments
+        if wait := h.own_key_ip.locked(_ip(request)):
+            return _locked(wait)
+        if h.db.check_code(body.code) is None:
+            h.own_key_ip.fail(_ip(request))
+            return payments._bad_code()
     lat, lng = body.lat, body.lng
     if lat is None and body.address:   # a failed lookup never blocks sign-up: the app asks for a map pin instead
         found = await _geocode(body.address)
@@ -279,15 +297,22 @@ async def signup(request: Request, body: SignUp):
         meeting_times=[m.model_dump() for m in body.meeting_times])
     for e in body.emails:   # the main one (`email`) was added with the congregation
         h.db.add_email(cong["id"], e)
+    redeemed: dict[str, Any] = {}
+    if body.code:
+        r = payments.redeem_for(request, cong, body.code)
+        redeemed = {"code": {k: v for k, v in r.items() if k != "ok"} if isinstance(r, dict)
+                    else {"error": "bad_code", "message": payments.BAD_CODE}}
+        cong = h.db.congregation(cong["id"])
     located = {"located": lat is not None, "lat": lat, "lng": lng}
     pin_note = "" if lat is not None else " We could not find the building on the map: please place its pin."
     if not h.verify_email:  # no e-mail confirmation for now: the congregation is live-capable at once
         h.db.set_verified(cong["id"])
         return {"ok": True, "slug": cong["slug"], "device_token": h.db.add_device(cong["id"], body.device_name),
                 "connect_code": h.db.new_connect_code(cong["id"]), "emails": h.db.emails(cong["id"]),
-                "congregation": _public(cong), **located, "message": "Signed up." + pin_note}
+                "congregation": _public(cong), "billing": billing_for(request, cong["billing"]), **located, **redeemed,
+                "message": "Signed up." + pin_note}
     claim = _send_link(request, cong, "verify", body.device_name)
-    return {"ok": True, "slug": cong["slug"], "claim": claim, "emails": h.db.emails(cong["id"]), **located,
+    return {"ok": True, "slug": cong["slug"], "claim": claim, "emails": h.db.emails(cong["id"]), **located, **redeemed,
             "message": "Check your e-mail for the verification link." + pin_note}
 
 
@@ -490,7 +515,15 @@ async def emails_add(request: Request, body: EmailChange):
     except ValueError as e:
         return JSONResponse({"error": "too_many", "message": str(e)}, status_code=409)
     log.info("%s: e-mail %s%s", cong["slug"], "added" if added else "kept", " as main" if body.main else "")
+    if body.main:
+        await _sync_receipts(cong["id"])
     return {"ok": True, "added": added, **_account(cong["id"], device["id"])}
+
+
+async def _sync_receipts(cid: int) -> None:
+    from . import payments
+
+    await payments.sync_customer_email(cid)
 
 
 @router.post("/api/hc/emails/main")
@@ -501,6 +534,7 @@ async def emails_main(request: Request, body: EmailChange):
     if not _hear().db.set_main_email(cong["id"], body.email):
         return JSONResponse({"error": "not_found", "message": "Add that address first."}, status_code=404)
     log.info("%s: main e-mail changed", cong["slug"])
+    await _sync_receipts(cong["id"])
     return {"ok": True, **_account(cong["id"], device["id"])}
 
 
@@ -760,6 +794,8 @@ def billing_info(cong: dict[str, Any], request: Request | None = None) -> dict[s
     whether the next meeting can start, the bundles, and whether credit can be bought here (Stripe set up on this
     server). With the device's request, "billing" is as billing_for() says (operator views pass none and see the
     real type)."""
+    from . import payments
+
     b = _hear().db.balance(cong["id"])
     credits = cong["billing"] == "credits"
     hours = round(b["left_min"] / 60, 2)
@@ -785,7 +821,7 @@ def billing_info(cong: dict[str, Any], request: Request | None = None) -> dict[s
             # bundle prices, and the old $5 rate (so they show fewer hours than the bundle gives; Checkout says it right)
             "usd_per_language_hour": LEGACY_CENTS_PER_LANGUAGE_HOUR / 100,
             "can_buy": credits and bool(stripe_keys()[0]),
-            "buy_usd": [x[0] // 100 for x in BUNDLES], "message": message}
+            "buy_usd": [x[0] // 100 for x in BUNDLES], "message": message, **payments.billing_extras(cong)}
 
 
 # ------------------------------------------------------------------ billing: buying credit (Stripe Checkout)
@@ -811,6 +847,11 @@ def _stripe_client(key: str):
 
 class Buy(BaseModel):
     usd: int = Field(ge=1, le=100_000)   # a bundle's price in dollars; anything else is refused in checkout()
+    save_card: bool = False              # also save the card for 1-click and automatic top-ups (newer apps)
+
+
+def payment_method_config() -> str:
+    return os.environ.get("STRIPE_PAYMENT_METHOD_CONFIG", "").strip()   # Hear Church's own set: card, wallets, Link
 
 
 def bundles_text() -> str:
@@ -837,35 +878,57 @@ async def checkout(request: Request, body: Buy):
         return JSONResponse({"error": "not_a_bundle", "bundles": [bundle_json(x) for x in BUNDLES],
                              "message": f"Credit comes in bundles: {bundles_text()}. Pick one of those, or update "
                                         "Hear Church to see them."}, status_code=400)
-    cents, hours, base = b[0], b[1], _base_url(request)
-    meta = {"congregation_id": str(cong["id"]), "slug": cong["slug"], "cents": str(cents),
-            "minutes": str(hours * 60), "bundle": str(cents // 100)}
+    from . import payments
+
+    hours, base = b[1], _base_url(request)
+    cents, disc = payments.discounted(b[0], cong["id"])
+    meta = payments.purchase_meta(cong, b, cents, disc, "checkout")
+    meta.pop("kind")   # (Checkout's metadata stays as it was before 1-click top-ups)
+    note = f", {disc['percent']}% off with your code" if disc else ""
+    pi_meta = {**meta, "kind": "checkout"}
+    if body.save_card:
+        pi_meta["save_card"] = "1"
     params = {
         "mode": "payment",
         "line_items": [{"quantity": 1, "price_data": {
             "currency": "usd", "unit_amount": cents,
             "product_data": {"name": "Hear Church credit",
                              "description": f"{hours} language-hours of live translation for {display_name(cong)} "
-                                            f"(${cents / 100 / hours:.2f} per hour)"}}}],
+                                            f"(${b[0] / 100 / hours:.2f} per hour{note})"}}}],
         "client_reference_id": str(cong["id"]),
         "metadata": meta,
-        "payment_intent_data": {"metadata": meta, "description": f"Hear Church credit: {display_name(cong)}"},
+        "payment_intent_data": {"metadata": pi_meta, "description": f"Hear Church credit: {display_name(cong)}"},
         "success_url": f"{base}/api/hc/checkout/done",
         "cancel_url": f"{base}/api/hc/checkout/cancelled",
     }
     main_email = _hear().db.main_email(cong["id"])
-    if main_email:   # the main (billing) e-mail: Checkout fills it in and Stripe's receipts go there
+    customer = _hear().db.payment_profile(cong["id"])["customer_id"]
+    try:
+        client = _stripe_client(key)
+        if body.save_card and not customer:
+            customer = await payments.customer_for(cong, client)
+    except Exception as e:
+        log.warning("stripe customer for %s failed: %s", cong["slug"], e)
+        raise HTTPException(502, "Stripe didn't answer: try again in a minute.")
+    if customer:   # Stripe's receipts go to the customer's e-mail: the main (billing) one
+        params["customer"] = customer
+    elif main_email:   # the main (billing) e-mail: Checkout fills it in and Stripe's receipts go there
         params["customer_email"] = main_email
-    pmc = os.environ.get("STRIPE_PAYMENT_METHOD_CONFIG", "").strip()   # Hear Church's own set: card, wallets, Link
+    if body.save_card:   # the card is kept for 1-click and automatic top-ups (the webhook stores it)
+        params["payment_intent_data"]["setup_future_usage"] = "off_session"
+    pmc = payment_method_config()
     if pmc:
         params["payment_method_configuration"] = pmc
     try:
-        session = await asyncio.to_thread(_stripe_client(key).v1.checkout.sessions.create, params)
+        session = await asyncio.to_thread(client.v1.checkout.sessions.create, params)
     except Exception as e:
         log.warning("stripe checkout for %s failed: %s", cong["slug"], e)
         raise HTTPException(502, "Stripe didn't answer: try again in a minute.")
     log.info("checkout %s: $%d bundle for %s", session.id, body.usd, cong["slug"])
-    return {"url": session.url, "id": session.id, "usd": body.usd, "hours": hours}
+    out = {"url": session.url, "id": session.id, "usd": body.usd, "hours": hours}
+    if disc:
+        out.update(percent_off=disc["percent"], charged_usd=cents / 100)
+    return out
 
 
 @router.get("/api/hc/checkout/done", response_class=HTMLResponse)
@@ -897,11 +960,23 @@ async def stripe_webhook(request: Request):
     except (ValueError, stripe.SignatureVerificationError):
         raise HTTPException(400, "Bad signature.")
     event = json.loads(payload)
-    if event.get("type") == "charge.refunded":
-        return _refunded((event.get("data") or {}).get("object") or {})
-    if event.get("type") not in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+    from . import payments
+
+    kind = event.get("type")
+    obj = (event.get("data") or {}).get("object") or {}
+    if kind == "charge.refunded":
+        return _refunded(obj)
+    if kind == "payment_intent.succeeded":
+        return await _pi_succeeded(obj)
+    if kind == "payment_intent.payment_failed":
+        return await payments.payment_failed(obj)
+    if kind == "setup_intent.succeeded":
+        return await _soft(payments.setup_intent_succeeded(obj), "setup intent", obj.get("id"))
+    if kind == "checkout.session.completed" and obj.get("mode") == "setup":
+        return await _soft(payments.checkout_setup_completed(obj), "card setup", obj.get("id"))
+    if kind not in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
         return {"ok": True, "credited": False}
-    s = (event.get("data") or {}).get("object") or {}
+    s = obj
     meta = s.get("metadata") or {}
     if s.get("payment_status") != "paid" or s.get("mode") != "payment" or s.get("currency") != "usd":
         log.warning("stripe: checkout %s not credited (%s, %s, %s)", s.get("id"), s.get("payment_status"),
@@ -910,11 +985,45 @@ async def stripe_webhook(request: Request):
     try:
         cid = int(meta.get("congregation_id") or s.get("client_reference_id"))
         cents = int(s["amount_total"])
-        credit, created = credit_top_up(cid, str(s.get("payment_intent") or s.get("id") or ""), cents,
-                                        _paid_minutes(meta, cents))
+        pid = str(s.get("payment_intent") or s.get("id") or "")
+        credit, created = credit_top_up(cid, pid, cents, _paid_minutes(meta, cents))
     except (KeyError, ValueError, TypeError) as e:
         log.error("stripe: checkout %s paid but not credited: %r", s.get("id"), e)
         return {"ok": True, "credited": False}
+    # the discount is used up; the card (when the church asked to save it) comes with payment_intent.succeeded
+    await payments.paid(pid, {**meta, "save_card": None}, cents, None, created)
+    return {"ok": True, "credited": created, "credit_id": credit["id"]}
+
+
+async def _soft(job, what: str, oid: Any) -> dict[str, Any]:
+    """A webhook step that calls Stripe back (to read the saved card): a Stripe hiccup answers 500 so Stripe retries."""
+    try:
+        return await job
+    except Exception as e:
+        log.warning("stripe: %s %s not handled yet: %s", what, oid, e)
+        return JSONResponse({"error": "retry"}, status_code=500)
+
+
+async def _pi_succeeded(pi: dict[str, Any]) -> dict[str, Any]:
+    """payment_intent.succeeded: a bundle paid by 1-click, automatic top-up or Checkout (then already credited by
+    checkout.session.completed, or credited here first; once either way). Payments without our metadata (anything
+    else on the Stripe account) are acknowledged and ignored."""
+    from . import payments
+
+    meta = pi.get("metadata") or {}
+    if not meta.get("congregation_id") or not meta.get("minutes"):
+        return {"ok": True, "credited": False}
+    try:
+        cid = int(meta["congregation_id"])
+        cents = int(pi.get("amount_received") or pi["amount"])
+        if pi.get("currency") != "usd":
+            raise ValueError(pi.get("currency"))
+        credit, created = credit_top_up(cid, str(pi["id"]), cents, _paid_minutes(meta, cents))
+    except (KeyError, ValueError, TypeError) as e:
+        log.error("stripe: payment %s succeeded but not credited: %r", pi.get("id"), e)
+        return {"ok": True, "credited": False}
+    pm = pi.get("payment_method")
+    await payments.paid(str(pi["id"]), meta, cents, pm if isinstance(pm, str) else (pm or {}).get("id"), created)
     return {"ok": True, "credited": created, "credit_id": credit["id"]}
 
 

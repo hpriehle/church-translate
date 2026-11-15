@@ -69,7 +69,7 @@ Auth: send the operator password in the `X-Operator-Key` header (preferred: keep
 ## GET /api/admin/transactions?congregation=&kind=&limit=&before=
 
 The ledger, newest first. All parameters are optional. `congregation`: a congregation id. `kind`: one of `top_up`,
-`manual_credit`, `refund`, `usage`. `limit`: 1–500 (default 50). `before`: the `next_before` from the previous
+`manual_credit`, `free_hours`, `refund`, `usage`. `limit`: 1–500 (default 50). `before`: the `next_before` from the previous
 page. When `next_before` is `null`, there are no more pages.
 
 ```json
@@ -98,7 +98,10 @@ Kinds:
 - `top_up`: a credit whose `payment_id` is a Stripe id (`pi_…`, also `ch_`/`cs_`/`py_`). The webhook credits these
   with the payment intent id. `refundable`: it was paid with a `pi_` and part of it is still unrefunded.
   `refunded_cents`: the total refunded from it so far. `minutes`: the language time it bought; `bundle`: its price in
-  dollars when it is a bundle ($20/$50/$100/$250), else null.
+  dollars when it is a bundle ($20/$50/$100/$250), else null (a bundle bought with a % off code is credited at the
+  price paid: `cents` 4000 and `minutes` 660 for the $50 bundle at 20% off, so `bundle` is null). 1-click and
+  automatic top-ups are `top_up`s like Checkout's.
+- `free_hours`: hours from a `free_hours` code (`payment_id` `code:<redemption id>`, `cents` 0, never refundable).
 - `manual_credit`: added by hand with `POST /api/admin/congregations/{id}/credits` under any other id (for example
   "goodwill-2026-11"). This is a naming rule: a hand credit filed under a real `pi_…` id counts as a top-up.
 - `refund`: one row each time a top-up's refunded total grows. `source`: `"admin"` (the route below, with
@@ -155,7 +158,87 @@ Errors (the ledger is untouched in every case):
 | 503 | `not_configured` | `STRIPE_SECRET_KEY` isn't set on the hub |
 | 422 | (FastAPI) | `cents` ≤ 0 or not a whole number |
 
-## Own-key codes
+## Codes (own key, free hours, % off)
+
+One table of codes Harrison makes in Siteboard and hands out (by hand, in an e-mail, on a call). Code:
+`app/hear/admin.py` (routes), `app/hear/db.py` (`create_code`, `redeem_code`), `app/hear/payments.py` (the church's
+side). Tests: `tests/test_cards_codes.py`.
+
+- **Types.** `own_key`: the congregation switches to its own Anthropic key (`billing: "own_key"`). `free_hours`:
+  adds `value` language-hours that never expire (they sit in the ledger like a top-up of $0, used after the month's
+  free hour and before later top-ups, oldest first). `percent_off`: `value`% (whole number, 1 to 99) off **one**
+  bundle purchase per redemption; it waits as a pending discount until the congregation's next bundle (Checkout or
+  1-click, not an automatic top-up) is paid, then it's used up.
+- **The code** is 8 characters from `ABCDEFGHJKMNPQRSTVWXYZ23456789` shown as `7KQM-X2PA`. Typing is forgiving: any
+  case, spaces or dashes. Codes are stored in plain so Siteboard can list them and Harrison can hand one out again.
+  The hub never logs a code (only its id and type).
+- **Who can use it.** `congregation_id` set: only that congregation. Unset: anyone, up to `max_uses` (default 1)
+  different congregations. One congregation redeems a code once; asking again answers `already: true` and changes
+  nothing.
+- **Status** (worked out): `void` (voided), `used` (uses = max_uses), `expired` (`expires_at` passed), else
+  `active`.
+
+### POST /api/admin/codes
+
+```json
+{"type": "free_hours", "value": 5, "label": "Easter gift", "congregation_id": null, "max_uses": 3, "expires_at": null}
+```
+
+Only `type` is required. `value`: hours for `free_hours` (more than 0, at most 1000; 0.5 works), percent for
+`percent_off`, ignored for `own_key`. `expires_at`: Unix seconds in the future, or null for never. Answer:
+
+```json
+{"ok": true,
+ "code": {"id": 1, "code": "5GA7-KZYG", "type": "free_hours", "value": 5, "label": "Easter gift",
+          "congregation_id": null, "max_uses": 3, "uses": 0, "expires_at": null, "voided_at": null,
+          "created_at": 1794720561.23, "status": "active", "redemptions": [],
+          "message": "5 free language-hours added. They never expire."}}
+```
+
+`message` is what the church sees when it redeems the code. Errors: `400 {"error": "bad_type"}`, `400
+{"error": "bad_value", "message": "percent_off: value is a whole percent from 1 to 99"}`, `400 {"error":
+"bad_expiry"}`, `404 {"error": "not_found"}` (no such congregation), 422 (FastAPI) for a wrong field type or
+`max_uses` outside 1–100000.
+
+### GET /api/admin/codes?type=&status=&congregation_id=&q=
+
+Newest first. Filters (all optional): `type` (`own_key`, `free_hours`, `percent_off`), `status` (`active`, `used`,
+`expired`, `void`), `congregation_id` (assigned to it or redeemed by it), `q` (part of the label or the code).
+
+```json
+{"codes": [
+  {"id": 2, "code": "GJJA-MBDM", "type": "percent_off", "value": 20, "label": "Launch", "congregation_id": 1,
+   "max_uses": 1, "uses": 1, "expires_at": null, "voided_at": null, "created_at": 1794720561.26, "status": "used",
+   "redemptions": [{"congregation_id": 1, "slug": "dakar-ward", "name": "Dakar Ward", "at": 1794720561.30,
+                    "status": "pending", "payment_id": null, "consumed_at": null}]},
+  {"id": 1, "code": "5GA7-KZYG", "type": "free_hours", "value": 5, "label": "Easter gift", "congregation_id": null,
+   "max_uses": 3, "uses": 0, "expires_at": null, "voided_at": null, "created_at": 1794720561.23, "status": "active",
+   "redemptions": []}]}
+```
+
+A redemption's `status`: `applied` (own key, free hours), `pending` (a % off not used yet) or `consumed` (the %
+off was used on `payment_id`, at `consumed_at`). Own-key codes made before this table (the Connecticut Ward and
+Riga codes) are listed with `"code": null`: only their hash was ever kept. They still work.
+
+### POST /api/admin/codes/{id}/void
+
+→ `{"ok": true, "code": {…as in the list, "status": "void"}}`. The code stops working at once (a multi-use code
+that was partly used too; what was already redeemed stays). Voiding again is fine. A used-up code answers `409
+{"error": "used"}`; an unknown id 404. A % off that is still pending for a congregation stays pending.
+
+### The church's side (for reference)
+
+`POST /api/hc/codes/redeem {code}` (the Mac, Settings → Billing → "Have a code?"), `POST /api/hc/codes/check
+{code}` (onboarding, before sign-up; uses nothing up), and `POST /api/hc/signup {…, code}` (checked before the
+congregation is made, redeemed right after). Every bad code (unknown, expired, used up, voided, someone else's)
+gets the same `403 {"error": "bad_code", "message": "That code isn't valid."}`. Ten bad tries per IP per hour (and
+20 per congregation) then `429 {"error": "locked", "retry_after": …}`. A second % off while one is pending:
+`409 {"error": "pending_discount"}` (the code is not used up).
+
+## Own-key codes (deprecated: use the codes routes above)
+
+These keep working for the Siteboard page as it is; they now read and write the codes table (type `own_key`), and
+the ids are the same ones.
 
 - `POST /api/admin/own-key-codes {"label": "Accra Ward"}` → `{"code": "HC-7KQM-X2PA-9TDW", "label": "Accra Ward"}`.
   This answer is **the only time the code is shown**: the hub stores only its hash, and the list never includes it.
@@ -192,6 +275,11 @@ One church in one call.
               "revoked_at": null}],
  "emails": [{"email": "bishop@example.org", "main": true, "added_at": 1794635908.33}],
  "own_key_codes": [],
+ "codes": [{"redemption_id": 1, "code_id": 2, "type": "percent_off", "value": 20, "label": "Launch",
+            "at": 1794720561.30, "status": "pending", "payment_id": null, "consumed_at": null}],
+ "card": {"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2030, "saved_at": 1794720600.0},
+ "auto_topup": {"enabled": false, "usd": 20, "below_hours": 1.0, "last_at": null},
+ "stripe_customer_id": "cus_…",
  "meetings": [{"session_id": 1, "code": "20261109-100012", "started_at": 1794635908.37, "ended_at": 1794635908.38,
                "billing": "credits", "languages": ["fr", "es"], "language_minutes": {"es": 45.0, "fr": 45.0},
                "minutes": 90.0, "free_minutes": 60.0, "paid_minutes": 30.0, "cost_usd": 2.5}],
@@ -204,7 +292,11 @@ One church in one call.
   `billing.balance.free_left_min`.
 - `meetings`: the newest first, including meetings with no speech (which show 0 minutes). `languages` are the
   languages offered, and `language_minutes` are the ones actually heard.
-- `own_key_codes`: the codes this congregation used.
+- `own_key_codes`: the own-key codes this congregation used (deprecated; `codes` has every code it redeemed).
+- `codes`: every code it redeemed, oldest first (a pending % off has `status: "pending"`).
+- `card`: the saved card (brand and last 4 only; the card itself is at Stripe), or null. `auto_topup`: on/off, the
+  bundle (`usd`), the threshold (`below_hours`: after a meeting, when the paid hours left are under this) and the
+  last attempt (`last_at`). `stripe_customer_id`: open it in the Stripe dashboard.
 - `congregation.aliases`: the congregation's old slugs, oldest first. Each one redirects (301) to the current
   `slug` for good, so printed QR codes keep working. The list (`GET /api/admin/congregations`) has them too.
 - `devices`: every Mac, revoked ones too (`revoked_at` set, listed last). `emails`: the main (billing) one first.

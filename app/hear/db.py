@@ -148,7 +148,47 @@ CREATE TABLE IF NOT EXISTS slug_aliases (
     congregation_id INTEGER NOT NULL REFERENCES congregations(id),
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT,
+    code_hash TEXT NOT NULL UNIQUE,
+    type TEXT NOT NULL,
+    value REAL NOT NULL DEFAULT 0,
+    label TEXT NOT NULL DEFAULT '',
+    congregation_id INTEGER REFERENCES congregations(id),
+    max_uses INTEGER NOT NULL DEFAULT 1,
+    uses INTEGER NOT NULL DEFAULT 0,
+    expires_at REAL,
+    voided_at REAL,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS code_redemptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_id INTEGER NOT NULL REFERENCES codes(id),
+    congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+    at REAL NOT NULL,
+    status TEXT NOT NULL,
+    payment_id TEXT,
+    consumed_at REAL,
+    UNIQUE (code_id, congregation_id)
+);
+CREATE TABLE IF NOT EXISTS payment_profiles (
+    congregation_id INTEGER PRIMARY KEY REFERENCES congregations(id),
+    customer_id TEXT,
+    payment_method_id TEXT,
+    card_brand TEXT,
+    card_last4 TEXT,
+    card_exp_month INTEGER,
+    card_exp_year INTEGER,
+    card_saved_at REAL,
+    auto_topup INTEGER NOT NULL DEFAULT 0,
+    auto_topup_cents INTEGER,
+    auto_last_at REAL,
+    auto_last_pi TEXT,
+    updated_at REAL
+);
 CREATE INDEX IF NOT EXISTS sessions_open ON sessions(congregation_id, ended_at);
+CREATE INDEX IF NOT EXISTS code_redemptions_cong ON code_redemptions(congregation_id, status);
 CREATE INDEX IF NOT EXISTS slug_aliases_cong ON slug_aliases(congregation_id);
 CREATE INDEX IF NOT EXISTS emails_address ON congregation_emails(email);
 CREATE INDEX IF NOT EXISTS device_codes_cong ON device_codes(congregation_id, kind);
@@ -240,6 +280,13 @@ CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"
 CODE_LEN = 12   # 30^12, about 59 bits: unguessable behind the hub's failure limits
 
 
+NEW_CODE_LEN = 8   # codes from the codes table (own key, free hours, % off): "7KQM-X2PA"
+CODE_TYPES = ("own_key", "free_hours", "percent_off")
+CODE_CREDIT_PREFIX = "code:"   # credits.payment_id of free hours from a code (cents 0)
+AUTO_TOPUP_EVERY_S = 24 * 3600   # at most one automatic top-up per this long
+AUTO_TOPUP_BELOW_S = 3600        # an auto top-up runs after a meeting when the paid hours left are below this
+
+
 MAX_EMAILS = 10              # addresses per congregation
 DEVICE_CODE_LEN = 8          # add-a-Mac codes "7KQM-X2PA": 30^8, ~39 bits, short-lived and behind failure limits
 DEVICE_CODE_TTL_S = 15 * 60
@@ -248,6 +295,31 @@ DEVICE_CODE_TTL_S = 15 * 60
 def new_own_key_code() -> str:
     c = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LEN))
     return f"HC-{c[:4]}-{c[4:8]}-{c[8:]}"
+
+
+def new_code() -> str:
+    """A code Harrison hands out (own key, free hours, % off): "7KQM-X2PA", 30^8 (~39 bits) behind the hub's
+    failure limits."""
+    c = "".join(secrets.choice(CODE_ALPHABET) for _ in range(NEW_CODE_LEN))
+    return format_code(c)
+
+
+def format_code(c: str) -> str:
+    return f"{c[:4]}-{c[4:]}" if len(c) == NEW_CODE_LEN else c
+
+
+def normalize_code(code: str) -> str | None:
+    """As typed, any case, spaces or dashes ("7kqm x2pa", "HC-7KQM-X2PA-9TDW") → "7KQMX2PA" / "7KQMX2PA9TDW", or
+    None if it can't be a code (the new 8-character ones and the old 12-character own-key ones)."""
+    c = re.sub(r"[\s-]", "", code or "").upper()
+    if c.startswith("HC") and len(c) == CODE_LEN + 2:
+        c = c[2:]
+    return c if len(c) in (CODE_LEN, NEW_CODE_LEN) and all(ch in CODE_ALPHABET for ch in c) else None
+
+
+class CodeError(Exception):
+    """A code can't be redeemed: str(e) is "invalid" (unknown, used, expired, voided, someone else's: the user only
+    ever hears "That code isn't valid.") or "pending_discount"."""
 
 
 def normalize_own_key_code(code: str) -> str | None:
@@ -262,6 +334,11 @@ def slugify(text: str) -> str:
     """"Dakar Ward" → "dakar-ward" (ASCII, lowercase, dashes)."""
     t = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", "-", t.lower()).strip("-")[:60].strip("-") or "congregation"
+
+
+def _not_refunded(c: dict[str, Any]) -> float:
+    """A credit's seconds less what refunds took back (free hours from a code cost nothing and are never refunded)."""
+    return c["seconds"] * (c["cents"] - c["refunded_cents"]) / c["cents"] if c["cents"] else c["seconds"]
 
 
 def _cong(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -284,6 +361,8 @@ class Database:
         self._lock = threading.Lock()
         with self._lock:
             self._db.execute("PRAGMA foreign_keys = ON")
+            had_codes = bool(self._db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'"
+                                              " AND name = 'codes'").fetchone())
             had_emails = bool(self._db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'"
                                                " AND name = 'congregation_emails'").fetchone())
             self._db.executescript(SCHEMA)
@@ -323,6 +402,13 @@ class Database:
             kcols = {r[1] for r in self._db.execute("PRAGMA table_info(own_key_codes)")}
             if "voided_at" not in kcols:   # databases made before codes could be voided
                 self._db.execute("ALTER TABLE own_key_codes ADD COLUMN voided_at REAL")
+            if not had_codes:   # databases made before the codes table: their own-key codes move over, same ids
+                self._db.execute("INSERT INTO codes (id, code, code_hash, type, value, label, max_uses, uses,"
+                                 " voided_at, created_at) SELECT id, NULL, code_hash, 'own_key', 0, label, 1,"
+                                 " used_at IS NOT NULL, voided_at, created_at FROM own_key_codes")
+                self._db.execute("INSERT INTO code_redemptions (code_id, congregation_id, at, status)"
+                                 " SELECT id, congregation_id, used_at, 'applied' FROM own_key_codes"
+                                 " WHERE used_at IS NOT NULL AND congregation_id IS NOT NULL")
             self._db.execute("CREATE INDEX IF NOT EXISTS sessions_code ON sessions(congregation_id, code)")
         if close_stale:
             self.close_stale_sessions()
@@ -604,70 +690,267 @@ class Database:
         self._x("UPDATE device_codes SET device_id = ? WHERE id = ?", (did, row["id"]))
         return self.congregation(row["congregation_id"]), token
 
-    # ------------------------------------------------------------ own-key codes
-    def mint_own_key_code(self, label: str) -> str:
-        """A new one-time code for a church (label: who it's for, e.g. "Dakar Ward"). Only its hash is kept, so
-        this is the one time the code can be seen."""
+    # ------------------------------------------------------------ codes (own key, free hours, % off)
+    def create_code(self, type: str, value: float = 0, label: str = "", congregation_id: int | None = None,
+                    max_uses: int = 1, expires_at: float | None = None, legacy: bool = False) -> dict[str, Any]:
+        """A new code (CODE_TYPES). Stored in plain so Harrison can list and hand it out again (never logged).
+        legacy: the old own-key format "HC-XXXX-XXXX-XXXX" with only its hash kept (the deprecated
+        /api/admin/own-key-codes route and `python -m app.hear.codes`); the answer then carries it once."""
+        if type not in CODE_TYPES:
+            raise ValueError(f"type: one of {', '.join(CODE_TYPES)}")
         label = " ".join((label or "").split())[:120]
-        if not label:
-            raise ValueError("say who the code is for")
-        code = new_own_key_code()
-        self._x("INSERT INTO own_key_codes (code_hash, label, created_at) VALUES (?,?,?)",
-                (hash_token(normalize_own_key_code(code)), label, time.time()))
-        return code
+        value = float(value or 0)
+        if type == "free_hours" and not 0 < value <= 1000:
+            raise ValueError("free_hours: value is the hours to add, more than 0 and at most 1000")
+        if type == "percent_off" and not (value == int(value) and 1 <= value <= 99):
+            raise ValueError("percent_off: value is a whole percent from 1 to 99")
+        if type == "own_key":
+            value = 0.0
+        if not isinstance(max_uses, int) or not 1 <= max_uses <= 100_000:
+            raise ValueError("max_uses: from 1 to 100000")
+        if congregation_id is not None and self.congregation(congregation_id) is None:
+            raise KeyError(congregation_id)
+        for _ in range(5):
+            code = new_own_key_code() if legacy else new_code()
+            try:
+                cur = self._x("INSERT INTO codes (code, code_hash, type, value, label, congregation_id, max_uses,"
+                              " expires_at, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                              (None if legacy else code, hash_token(normalize_code(code)), type, value, label,
+                               congregation_id, max_uses, expires_at, time.time()))
+            except sqlite3.IntegrityError:
+                continue
+            return {**self.code(cur.lastrowid), "code": code}
+        raise RuntimeError("could not make a unique code")
 
-    def own_key_code_ok(self, code: str) -> bool:
-        """True for a code that exists and hasn't been used. Doesn't use it up."""
-        c = normalize_own_key_code(code)
-        return bool(c and self._q("SELECT 1 FROM own_key_codes WHERE code_hash = ? AND used_at IS NULL"
-                                    " AND voided_at IS NULL", (hash_token(c),)))
+    def _code_row(self, code: str) -> sqlite3.Row | None:   # inside the lock
+        c = normalize_code(code)
+        return self._db.execute("SELECT * FROM codes WHERE code_hash = ?", (hash_token(c),)).fetchone() if c else None
 
-    def redeem_own_key_code(self, code: str, cid: int) -> bool:
-        """Use the code up and switch the congregation to its own key, in one transaction. Asking again for the
-        congregation that already used it is True (a retried request); any other used or unknown code is False."""
-        c = normalize_own_key_code(code)
-        if not c:
-            return False
-        h = hash_token(c)
+    @staticmethod
+    def _usable(row: sqlite3.Row | None, cid: int | None, now: float) -> bool:
+        return bool(row is not None and row["voided_at"] is None
+                    and (row["expires_at"] is None or row["expires_at"] > now)
+                    and row["uses"] < row["max_uses"]
+                    and (row["congregation_id"] is None or row["congregation_id"] == cid))
+
+    def check_code(self, code: str, cid: int | None = None, type: str | None = None) -> dict[str, Any] | None:
+        """The code, if `cid` (None: a congregation not made yet, at sign-up) could redeem it now (and it is of
+        `type`, when given); else None. Uses nothing up."""
+        with self._lock:
+            row = self._code_row(code)
+        if not self._usable(row, cid, time.time()) or (type and row["type"] != type):
+            return None
+        return self.code(row["id"])
+
+    def redeem_code(self, code: str, cid: int, type: str | None = None) -> dict[str, Any]:
+        """Use a code for congregation `cid`, all in one transaction: own_key switches its billing to own_key,
+        free_hours adds a credit of that many hours that never expire (cents 0, payment id "code:<redemption id>"),
+        percent_off is kept as a pending discount for its next bundle purchase. Returns {code, redemption,
+        already}: already True when this congregation had redeemed this code before (a retried request; nothing
+        happens again). CodeError("invalid") for an unknown, voided, expired, used-up or someone else's code (or
+        not of `type`), CodeError("pending_discount") for a percent_off while another discount still waits."""
+        now = time.time()
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
             try:
-                row = self._db.execute("SELECT used_at, congregation_id, voided_at FROM own_key_codes"
-                                       " WHERE code_hash = ?", (h,)).fetchone()
-                if (row is None or (row["used_at"] is None and row["voided_at"] is not None)
-                        or (row["used_at"] is not None and row["congregation_id"] != cid)):
-                    self._db.execute("ROLLBACK")
-                    return False
-                if row["used_at"] is None:
-                    self._db.execute("UPDATE own_key_codes SET used_at = ?, congregation_id = ? WHERE code_hash = ?",
-                                     (time.time(), cid, h))
-                self._db.execute("UPDATE congregations SET billing = 'own_key' WHERE id = ?", (cid,))
+                row = self._code_row(code)
+                if row is None or (type and row["type"] != type):
+                    raise CodeError("invalid")
+                red = self._db.execute("SELECT * FROM code_redemptions WHERE code_id = ? AND congregation_id = ?",
+                                       (row["id"], cid)).fetchone()
+                if red is not None:
+                    if row["type"] == "own_key":   # asked again (a retry): make sure the switch holds
+                        self._db.execute("UPDATE congregations SET billing = 'own_key' WHERE id = ?", (cid,))
+                    self._db.execute("COMMIT")
+                    return {"code": self._code_dict(row), "redemption": dict(red), "already": True}
+                if not self._usable(row, cid, now):
+                    raise CodeError("invalid")
+                if row["type"] == "percent_off" and self._db.execute(
+                        "SELECT 1 FROM code_redemptions r JOIN codes k ON k.id = r.code_id WHERE r.congregation_id = ?"
+                        " AND r.status = 'pending' AND k.type = 'percent_off'", (cid,)).fetchone():
+                    raise CodeError("pending_discount")
+                status = "pending" if row["type"] == "percent_off" else "applied"
+                rid = self._db.execute("INSERT INTO code_redemptions (code_id, congregation_id, at, status)"
+                                       " VALUES (?,?,?,?)", (row["id"], cid, now, status)).lastrowid
+                self._db.execute("UPDATE codes SET uses = uses + 1 WHERE id = ?", (row["id"],))
+                if row["type"] == "own_key":
+                    self._db.execute("UPDATE congregations SET billing = 'own_key' WHERE id = ?", (cid,))
+                elif row["type"] == "free_hours":
+                    self._db.execute("INSERT INTO credits (congregation_id, payment_id, cents, seconds, created_at)"
+                                     " VALUES (?,?,0,?,?)", (cid, f"{CODE_CREDIT_PREFIX}{rid}", row["value"] * 3600, now))
+                red = self._db.execute("SELECT * FROM code_redemptions WHERE id = ?", (rid,)).fetchone()
+                row = self._db.execute("SELECT * FROM codes WHERE id = ?", (row["id"],)).fetchone()
                 self._db.execute("COMMIT")
-                return True
-            except Exception:
-                self._db.execute("ROLLBACK")
+                return {"code": self._code_dict(row), "redemption": dict(red), "already": False}
+            except BaseException:
+                if self._db.in_transaction:
+                    self._db.execute("ROLLBACK")
                 raise
 
+    def pending_discount(self, cid: int) -> dict[str, Any] | None:
+        """The percent_off waiting for this congregation's next bundle purchase: {redemption_id, code_id, percent,
+        label}, or None."""
+        rows = self._q("SELECT r.id, r.code_id, k.value, k.label FROM code_redemptions r JOIN codes k ON k.id = r.code_id"
+                       " WHERE r.congregation_id = ? AND r.status = 'pending' AND k.type = 'percent_off'"
+                       " ORDER BY r.id LIMIT 1", (cid,))
+        return ({"redemption_id": rows[0]["id"], "code_id": rows[0]["code_id"], "percent": int(rows[0]["value"]),
+                 "label": rows[0]["label"]} if rows else None)
+
+    def consume_discount(self, redemption_id: int, payment_id: str) -> bool:
+        """A purchase with the discount was paid: it is used up (once; again is False)."""
+        return self._x("UPDATE code_redemptions SET status = 'consumed', payment_id = ?, consumed_at = ?"
+                       " WHERE id = ? AND status = 'pending'", (payment_id, time.time(), redemption_id)).rowcount > 0
+
+    def _code_dict(self, r: sqlite3.Row) -> dict[str, Any]:
+        now = time.time()
+        status = ("void" if r["voided_at"] else "used" if r["uses"] >= r["max_uses"]
+                  else "expired" if r["expires_at"] is not None and r["expires_at"] <= now else "active")
+        return {"id": r["id"], "code": format_code(r["code"]) if r["code"] else None, "type": r["type"],
+                "value": int(r["value"]) if r["value"] == int(r["value"]) else r["value"], "label": r["label"],
+                "congregation_id": r["congregation_id"], "max_uses": r["max_uses"], "uses": r["uses"],
+                "expires_at": r["expires_at"], "voided_at": r["voided_at"], "created_at": r["created_at"],
+                "status": status}
+
+    def code(self, kid: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT * FROM codes WHERE id = ?", (kid,))
+        return self._code_dict(rows[0]) if rows else None
+
+    def code_redemptions(self, kid: int | None = None, cid: int | None = None) -> list[dict[str, Any]]:
+        where, args = [], []
+        if kid is not None:
+            where.append("r.code_id = ?"); args.append(kid)
+        if cid is not None:
+            where.append("r.congregation_id = ?"); args.append(cid)
+        rows = self._q("SELECT r.*, c.slug, c.name, k.type, k.value, k.label FROM code_redemptions r"
+                       " JOIN congregations c ON c.id = r.congregation_id JOIN codes k ON k.id = r.code_id"
+                       + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY r.id", tuple(args))
+        return [dict(r) for r in rows]
+
+    def codes(self, type: str | None = None, status: str | None = None, congregation_id: int | None = None,
+              q: str = "") -> list[dict[str, Any]]:
+        """Every code, newest first, each with its redemptions; filters: type, status (active, used, expired,
+        void), congregation_id (assigned to it, or redeemed by it), q (in the label or the code)."""
+        reds: dict[int, list] = {}
+        for r in self.code_redemptions():
+            reds.setdefault(r["code_id"], []).append(
+                {"congregation_id": r["congregation_id"], "slug": r["slug"], "name": r["name"], "at": r["at"],
+                 "status": r["status"], "payment_id": r["payment_id"], "consumed_at": r["consumed_at"]})
+        out = []
+        for row in self._q("SELECT * FROM codes ORDER BY id DESC"):
+            d = {**self._code_dict(row), "redemptions": reds.get(row["id"], [])}
+            if type and d["type"] != type or status and d["status"] != status:
+                continue
+            if congregation_id is not None and d["congregation_id"] != congregation_id and not any(
+                    x["congregation_id"] == congregation_id for x in d["redemptions"]):
+                continue
+            if q and q.lower() not in d["label"].lower() and q.upper().replace("-", "") not in (
+                    d["code"] or "").replace("-", ""):
+                continue
+            out.append(d)
+        return out
+
+    def void_code(self, kid: int) -> str | None:
+        """Void a code so it stops working (a partly used multi-use code too). Returns its status after ("void";
+        voiding again is fine), "used" when it was already used up (nothing changes), None for an unknown id."""
+        with self._lock:
+            self._db.execute("UPDATE codes SET voided_at = ? WHERE id = ? AND uses < max_uses AND voided_at IS NULL",
+                             (time.time(), kid))
+            row = self._db.execute("SELECT uses, max_uses, voided_at FROM codes WHERE id = ?", (kid,)).fetchone()
+        return None if row is None else "void" if row["voided_at"] else "used"
+
+    # The own-key code calls from before the codes table (the CLI and /api/admin/own-key-codes, deprecated):
+    def mint_own_key_code(self, label: str) -> str:
+        """A one-time own-key code in the old format, only its hash kept: this is the one time it can be seen."""
+        label = " ".join((label or "").split())[:120]
+        if not label:
+            raise ValueError("say who the code is for")
+        return self.create_code("own_key", label=label, legacy=True)["code"]
+
+    def own_key_code_ok(self, code: str) -> bool:
+        return self.check_code(code, None, "own_key") is not None
+
+    def redeem_own_key_code(self, code: str, cid: int) -> bool:
+        try:
+            self.redeem_code(code, cid, "own_key")
+            return True
+        except CodeError:
+            return False
+
     def own_key_codes(self, cid: int | None = None) -> list[dict[str, Any]]:
-        """Every code made (or those congregation `cid` used), newest first, with its status ("unused", "used",
-        "void") and who used it. Never the code itself: only its hash is kept."""
-        rows = self._q("SELECT k.id, k.label, k.created_at, k.used_at, k.voided_at, k.congregation_id, c.slug, c.name"
-                       " FROM own_key_codes k LEFT JOIN congregations c ON c.id = k.congregation_id"
-                       + (" WHERE k.congregation_id = ?" if cid is not None else "") + " ORDER BY k.id DESC",
-                       (cid,) if cid is not None else ())
-        return [{"id": r["id"], "label": r["label"], "created_at": r["created_at"], "used_at": r["used_at"],
-                 "voided_at": r["voided_at"],
-                 "status": "used" if r["used_at"] else "void" if r["voided_at"] else "unused",
-                 "used_by": r["slug"], "used_by_id": r["congregation_id"], "used_by_name": r["name"]} for r in rows]
+        """The own-key codes (or those congregation `cid` used), newest first, as the old route listed them:
+        status "unused", "used" or "void", who used it, never the code itself."""
+        out = []
+        for d in self.codes(type="own_key", congregation_id=cid):
+            r = d["redemptions"][0] if d["redemptions"] else None
+            if cid is not None and (r is None or r["congregation_id"] != cid):
+                continue
+            out.append({"id": d["id"], "label": d["label"], "created_at": d["created_at"],
+                        "used_at": r["at"] if r else None, "voided_at": d["voided_at"],
+                        "status": "used" if r else "void" if d["voided_at"] else "unused",
+                        "used_by": r["slug"] if r else None, "used_by_id": r["congregation_id"] if r else None,
+                        "used_by_name": r["name"] if r else None})
+        return out
 
     def void_own_key_code(self, kid: int) -> str | None:
-        """Void an unused code so it stops working. Returns its status after ("void"; voiding again is fine), "used"
-        when it was already used (nothing changes), None for an unknown id."""
+        row = self.code(kid)
+        return None if row is None or row["type"] != "own_key" else self.void_code(kid)
+
+    # ------------------------------------------------------------ saved card and auto top-up
+    def payment_profile(self, cid: int) -> dict[str, Any]:
+        """The congregation's Stripe customer, saved card and auto top-up settings (all empty by default)."""
+        rows = self._q("SELECT * FROM payment_profiles WHERE congregation_id = ?", (cid,))
+        if rows:
+            d = dict(rows[0])
+            d["auto_topup"] = bool(d["auto_topup"])
+            return d
+        return {"congregation_id": cid, "customer_id": None, "payment_method_id": None, "card_brand": None,
+                "card_last4": None, "card_exp_month": None, "card_exp_year": None, "card_saved_at": None,
+                "auto_topup": False, "auto_topup_cents": None, "auto_last_at": None, "auto_last_pi": None,
+                "updated_at": None}
+
+    def _profile_set(self, cid: int, **fields) -> dict[str, Any]:
+        fields["updated_at"] = time.time()
         with self._lock:
-            self._db.execute("UPDATE own_key_codes SET voided_at = ? WHERE id = ? AND used_at IS NULL"
-                             " AND voided_at IS NULL", (time.time(), kid))
-            row = self._db.execute("SELECT used_at FROM own_key_codes WHERE id = ?", (kid,)).fetchone()
-        return None if row is None else "used" if row["used_at"] else "void"
+            self._db.execute("INSERT OR IGNORE INTO payment_profiles (congregation_id) VALUES (?)", (cid,))
+            self._db.execute(f"UPDATE payment_profiles SET {', '.join(f'{k} = ?' for k in fields)}"
+                             " WHERE congregation_id = ?", (*fields.values(), cid))
+        return self.payment_profile(cid)
+
+    def set_customer(self, cid: int, customer_id: str) -> dict[str, Any]:
+        return self._profile_set(cid, customer_id=customer_id)
+
+    def set_card(self, cid: int, payment_method_id: str, brand: str | None, last4: str | None,
+                 exp_month: int | None = None, exp_year: int | None = None) -> dict[str, Any]:
+        return self._profile_set(cid, payment_method_id=payment_method_id, card_brand=brand, card_last4=last4,
+                                 card_exp_month=exp_month, card_exp_year=exp_year, card_saved_at=time.time())
+
+    def clear_card(self, cid: int) -> dict[str, Any]:
+        """The card is removed: auto top-up goes off with it."""
+        return self._profile_set(cid, payment_method_id=None, card_brand=None, card_last4=None, card_exp_month=None,
+                                 card_exp_year=None, card_saved_at=None, auto_topup=0)
+
+    def set_auto_topup(self, cid: int, enabled: bool, cents: int | None = None) -> dict[str, Any]:
+        if cents is not None and bundle(cents) is None:
+            raise ValueError("not a bundle")
+        f: dict[str, Any] = {"auto_topup": int(bool(enabled))}
+        if cents is not None:
+            f["auto_topup_cents"] = cents
+        return self._profile_set(cid, **f)
+
+    def claim_auto_charge(self, cid: int, now: float | None = None, every_s: float = AUTO_TOPUP_EVERY_S) -> bool:
+        """Take the one auto top-up allowed per `every_s` (24 h): True once, and False for anyone asking again within
+        that time, so two meetings ending together never charge twice."""
+        now = time.time() if now is None else now
+        return self._x("UPDATE payment_profiles SET auto_last_at = ? WHERE congregation_id = ? AND auto_topup = 1"
+                       " AND payment_method_id IS NOT NULL AND (auto_last_at IS NULL OR auto_last_at <= ?)",
+                       (now, cid, now - every_s)).rowcount > 0
+
+    def set_auto_last_pi(self, cid: int, pi: str) -> None:
+        self._profile_set(cid, auto_last_pi=pi)
+
+    def congregation_by_customer(self, customer_id: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT congregation_id FROM payment_profiles WHERE customer_id = ?", (customer_id or "",))
+        return self.congregation(rows[0]["congregation_id"]) if rows else None
 
     # ------------------------------------------------------------ devices
     def add_device(self, cid: int, name: str) -> str:
@@ -930,8 +1213,8 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
                        " JOIN speech p ON p.session_id = s.id WHERE s.congregation_id = ?"
                        " GROUP BY s.id ORDER BY s.started_at, s.id", (cid,))
         credits = [dict(r) for r in self._q("SELECT * FROM credits WHERE congregation_id = ? ORDER BY id", (cid,))]
-        left = {c["id"]: c["seconds"] * (c["cents"] - c["refunded_cents"]) / c["cents"] for c in credits}
-        rate = {c["id"]: c["cents"] / c["seconds"] for c in credits}   # cents per second, the top-up's own
+        left = {c["id"]: _not_refunded(c) for c in credits}
+        rate = {c["id"]: c["cents"] / c["seconds"] for c in credits}   # cents per second, the top-up's own (0: a code)
         months: dict[str, float] = {}
         sessions: dict[int, dict[str, float]] = {}
         over = used = metered = 0.0
@@ -982,7 +1265,7 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
         usd = (sum(v * w["rate"][k] for k, v in w["unused"].items() if v > 0)
                - w["overdrawn"] * LEGACY_CENTS_PER_LANGUAGE_HOUR / 3600) / 100
         cents = sum(c["cents"] - c["refunded_cents"] for c in w["credits"])
-        bought = sum(c["seconds"] * (c["cents"] - c["refunded_cents"]) / c["cents"] for c in w["credits"])
+        bought = sum(_not_refunded(c) for c in w["credits"])
         free_left = max(0.0, FREE_SECONDS - w["month_used"])
         cong = self.congregation(cid)
         return {"metered_min": round(w["metered"] / 60, 2), "used_min": round(w["used"] / 60, 2),

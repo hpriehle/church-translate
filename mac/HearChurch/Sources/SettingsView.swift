@@ -781,7 +781,8 @@ private struct ListenerLinkSection: View {
     }
 }
 
-/// Settings → Billing (congregations on credit): what's left, buying more, and what the meetings used.
+/// Settings → Billing (congregations on credit): what's left, the saved card, buying more (1-click with a card),
+/// automatic top-up, codes, and what the meetings used.
 private struct BillingSettings: View {
     @EnvironmentObject var model: AppModel
     @State private var meetings: [HubClient.Meeting] = []
@@ -789,7 +790,16 @@ private struct BillingSettings: View {
     @State private var historyNote: String?
     @State private var problem: String?
     @State private var buying: Int?
-    @State private var opened = false
+    @State private var note: String?
+    @State private var saveCard = true
+    @State private var confirmRemove = false
+    @State private var cardBusy = false
+    @State private var code = ""
+    @State private var codeBusy = false
+    @State private var codeResult: String?
+    @State private var codeFailed = false
+    @State private var autoBusy = false
+    @State private var watching: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -801,11 +811,15 @@ private struct BillingSettings: View {
             } else {
                 balance
                 buy
+                card
+                auto
+                codes
                 history
             }
         }
         .formStyle(.grouped)
         .task { await load() }
+        .onDisappear { watching?.cancel() }
     }
 
     @ViewBuilder private var balance: some View {
@@ -834,15 +848,21 @@ private struct BillingSettings: View {
         }
     }
 
+    /// 1-click with a saved card; otherwise Stripe's payment page (offering to save the card).
+    private var oneClick: Bool { model.billing?.card != nil && model.billing?.canSaveCard == true }
+
     @ViewBuilder private var buy: some View {
         if let b = model.billing {
             Section {
                 if b.canBuy {
+                    if let p = b.discountPercent {
+                        Label("\(p)% off your next bundle (from your code)", systemImage: "tag").foregroundStyle(.green)
+                    }
                     HStack {
                         ForEach(b.bundles, id: \.self) { x in
                             Button { Task { await buy(x.usd) } } label: {
                                 VStack(spacing: 1) {
-                                    Text("$\(x.usd)").bold()
+                                    Text(price(x.usd, b.discountPercent)).bold()
                                     Text("\(Self.hours(x.hours)) hours").font(.caption)
                                     Text(String(format: "$%.2f/h", x.usdPerHour)).font(.caption2).foregroundStyle(.secondary)
                                 }
@@ -851,8 +871,11 @@ private struct BillingSettings: View {
                             .disabled(buying != nil)
                         }
                     }
-                    if buying != nil { ProgressView("Opening the payment page…").controlSize(.small) }
-                    if opened { Text("Pay in your browser. The credit shows here within a minute; reopen Settings to see it.").font(.callout).foregroundStyle(.secondary) }
+                    if !oneClick && b.canSaveCard {
+                        Toggle("Save this card for 1-click top-ups", isOn: $saveCard)
+                    }
+                    if let buying { ProgressView(oneClick ? "Charging your card for $\(buying)…" : "Opening the payment page…").controlSize(.small) }
+                    if let note { Text(note).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 } else {
                     Text("Buying credit isn't available yet. Write to support@hearchurch.com.").foregroundStyle(.secondary)
                 }
@@ -860,8 +883,82 @@ private struct BillingSettings: View {
             } header: {
                 Text("Buy hours")
             } footer: {
-                Text("Hours don't expire. Unused hours can be refunded on request. A secure payment page opens in your browser; the receipt goes to the congregation's main e-mail.")
+                Text(oneClick
+                     ? "One click charges your saved card (\(b.card?.label ?? "")). Hours don't expire. Unused hours can be refunded on request. The receipt goes to the congregation's main e-mail."
+                     : "Hours don't expire. Unused hours can be refunded on request. A secure payment page opens in your browser; the receipt goes to the congregation's main e-mail.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var card: some View {
+        if let b = model.billing, b.canSaveCard {
+            Section {
+                HStack {
+                    if let c = b.card {
+                        Label(c.label, systemImage: "creditcard")
+                        if let m = c.expMonth, let y = c.expYear {
+                            Text(String(format: "expires %02d/%d", m, y % 100)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Replace…") { Task { await addCard() } }.disabled(cardBusy)
+                        Button("Remove", role: .destructive) { confirmRemove = true }.disabled(cardBusy)
+                    } else {
+                        Text("No card saved").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Add a card…") { Task { await addCard() } }.disabled(cardBusy)
+                    }
+                }
+            } header: {
+                Text("Card")
+            } footer: {
+                Text("The card is saved with Stripe, on Stripe's own page; Hear Church only sees its brand and last 4 digits.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .confirmationDialog("Remove the saved card?", isPresented: $confirmRemove) {
+                Button("Remove card", role: .destructive) { Task { await removeCard() } }
+            } message: {
+                Text("Buying will open Stripe's payment page again, and automatic top-up turns off.")
+            }
+        }
+    }
+
+    @ViewBuilder private var auto: some View {
+        if let b = model.billing, b.canSaveCard {
+            Section {
+                Toggle("Top up automatically", isOn: Binding(
+                    get: { b.autoTopUp.enabled },
+                    set: { on in Task { await setAuto(on, b.autoTopUp.usd) } }))
+                    .disabled(b.card == nil || autoBusy)
+                Picker("Bundle", selection: Binding(
+                    get: { b.autoTopUp.usd },
+                    set: { usd in Task { await setAuto(b.autoTopUp.enabled, usd) } })) {
+                    ForEach(b.bundles, id: \.self) { x in Text("$\(x.usd) · \(Self.hours(x.hours)) hours").tag(x.usd) }
+                }
+                .disabled(b.card == nil || autoBusy)
+            } header: {
+                Text("Automatic top-up")
+            } footer: {
+                Text(b.card == nil
+                     ? "Save a card to turn this on."
+                     : "After a meeting, if fewer than \(Self.hours(b.autoTopUp.belowHours)) paid hour is left, your card is charged for this bundle: never during a meeting, at most once a day. Each time, the main e-mail gets a note. If the card fails, automatic top-up turns off.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var codes: some View {
+        Section("Have a code?") {
+            HStack {
+                TextField("Code", text: $code, prompt: Text("7KQM-X2PA"))
+                    .textFieldStyle(.roundedBorder).font(.body.monospaced())
+                    .onChange(of: code) { _, v in let f = HubClient.pairingFormat(v); if f != v { code = f } }
+                    .onSubmit { Task { await redeem() } }
+                Button("Redeem") { Task { await redeem() } }
+                    .disabled(codeBusy || code.filter { $0 != "-" }.count < 8)
+            }
+            if let codeResult {
+                Text(codeResult).foregroundStyle(codeFailed ? .red : .green).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -915,6 +1012,7 @@ private struct BillingSettings: View {
         switch k {
         case "top_up": return "Credit bought"
         case "manual_credit": return "Credit added"
+        case "free_hours": return "Free hours (code)"
         case "refund": return "Refund"
         default: return k
         }
@@ -950,18 +1048,127 @@ private struct BillingSettings: View {
         }
     }
 
+    private func price(_ usd: Int, _ percent: Int?) -> String {
+        guard let percent else { return "$\(usd)" }
+        let v = Double(usd) * Double(100 - percent) / 100
+        return v == v.rounded() ? "$\(Int(v))" : String(format: "$%.2f", v)
+    }
+
+    private var token: String? {
+        guard let t = Keychain.get(.deviceToken), !t.isEmpty else { return nil }
+        return t
+    }
+
     private func buy(_ usd: Int) async {
-        guard let token = Keychain.get(.deviceToken), !token.isEmpty else { return }
+        guard let token else { return }
         buying = usd
         defer { buying = nil }
+        problem = nil
+        note = nil
         do {
-            NSWorkspace.shared.open(try await HubClient.checkout(usd: usd, token: token))
-            opened = true
-            problem = nil
+            if oneClick {
+                switch try await HubClient.topUp(usd: usd, requestID: UUID().uuidString, token: token) {
+                case .paid(let message):
+                    note = message
+                case .confirm(let url):
+                    NSWorkspace.shared.open(url)
+                    note = "Your bank wants to confirm this payment: finish it in your browser. The hours show here within a minute."
+                }
+                watch()
+                return
+            }
+            NSWorkspace.shared.open(try await HubClient.checkout(usd: usd, saveCard: saveCard && model.billing?.canSaveCard == true, token: token))
+            note = "Pay in your browser. The credit shows here within a minute."
+            watch()
+        } catch let e as HubClient.NeedsCheckout {
+            // no card on file after all (removed on another Mac), or the bank wants the full page
+            note = e.message
+            if let url = try? await HubClient.checkout(usd: usd, saveCard: true, token: token) {
+                NSWorkspace.shared.open(url)
+                watch()
+            }
         } catch is HubClient.SignedOut {
             model.signOut()
         } catch {
             problem = error.localizedDescription
+        }
+    }
+
+    private func addCard() async {
+        guard let token else { return }
+        cardBusy = true
+        defer { cardBusy = false }
+        do {
+            NSWorkspace.shared.open(try await HubClient.cardSetup(token: token))
+            note = "Enter the card on Stripe's page in your browser. It shows here within a minute."
+            problem = nil
+            watch()
+        } catch is HubClient.SignedOut {
+            model.signOut()
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+
+    private func removeCard() async {
+        guard let token else { return }
+        cardBusy = true
+        defer { cardBusy = false }
+        do {
+            try await HubClient.removeCard(token: token)
+            await model.refreshBilling()
+        } catch is HubClient.SignedOut {
+            model.signOut()
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+
+    private func setAuto(_ on: Bool, _ usd: Int) async {
+        guard let token else { return }
+        autoBusy = true
+        defer { autoBusy = false }
+        do {
+            try await HubClient.setAutoTopUp(enabled: on, usd: usd, token: token)
+            await model.refreshBilling()
+        } catch is HubClient.SignedOut {
+            model.signOut()
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+
+    private func redeem() async {
+        guard let token, !code.isEmpty, !codeBusy else { return }
+        codeBusy = true
+        defer { codeBusy = false }
+        do {
+            codeResult = try await HubClient.redeemCode(code, token: token)
+            codeFailed = false
+            code = ""
+            await load()
+        } catch is HubClient.SignedOut {
+            model.signOut()
+        } catch {
+            codeResult = error.localizedDescription
+            codeFailed = true
+        }
+    }
+
+    /// After a payment or a card on Stripe's page: the webhook brings the change within seconds; look again for a while.
+    private func watch() {
+        watching?.cancel()
+        let before = model.billing
+        watching = Task {
+            for wait in [2, 3, 5, 5, 10, 15, 20, 30, 30] {
+                try? await Task.sleep(for: .seconds(wait))
+                if Task.isCancelled { return }
+                await model.refreshBilling()
+                if model.billing != before {
+                    await load()
+                    return
+                }
+            }
         }
     }
 }

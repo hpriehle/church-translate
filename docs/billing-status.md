@@ -50,6 +50,67 @@ This section is current; the sections below are the history and still say $5/h a
   pro-rata refunds, admin default refund, hand credits with minutes), `tests/test_stripe.py` (bundle checkout, the
   400, each bundle's hours from the webhook). `scripts/e2e_credits.py --usd 20|50|100|250` buys a bundle.
 
+## Saved card, 1-click and automatic top-ups, codes (Nov 15; `chat/hc-v3-mac`, not deployed)
+
+Code: `app/hear/payments.py` (routes and the webhook steps), `app/hear/db.py` (`codes`, `code_redemptions`,
+`payment_profiles`), `app/hear/api.py` (Checkout, sign-up, the webhook), `app/hear/admin.py` (admin codes).
+Tests: `tests/test_cards_codes.py` (Stripe and Resend are fakes). `scripts/e2e_credits.py` step 10.
+
+- **Saved card.** `POST /api/hc/card/setup` (device token) → `{url, id}`: a Stripe Checkout page in **setup mode**
+  (the card is typed on Stripe's page, never on ours). The hub makes the congregation's Stripe **Customer** the
+  first time (name, `metadata.congregation_id`, and the **main e-mail**, so Stripe's receipts go there; when the
+  main e-mail changes in the app the Customer's e-mail follows). When the page is done, the webhook
+  (`checkout.session.completed` with `mode: "setup"`, or `setup_intent.succeeded`) reads the SetupIntent and the
+  payment method back from Stripe and stores its id, brand, last 4 and expiry; it also becomes the Customer's
+  default. `POST /api/hc/card/remove` detaches it at Stripe, forgets it here and turns auto top-up off. Works from
+  onboarding too: it only needs the device token sign-up returns.
+- **1-click.** `POST /api/hc/topup {usd, request_id?}` charges the saved card for the bundle (a PaymentIntent with
+  `confirm: true`, on-session, `receipt_email` = main e-mail, `return_url` = `/api/hc/topup/done`; `request_id` is
+  the idempotency key, so a double click charges once). Answers `{status: "succeeded"|"processing", id, usd, hours,
+  charged_usd}`; `{status: "requires_action", url}` for 3-D Secure (the app opens `url`, Stripe's page); `402
+  {"error": "card_declined", message}`; `409 no_card` (the app falls back to Checkout); `400 not_a_bundle`; `503
+  not_configured`. **Credit comes only from the webhook** (`payment_intent.succeeded`, idempotent on the payment
+  intent id like every top-up).
+- **Checkout** (`POST /api/hc/checkout {usd, save_card?}`): unchanged for 0.3.0 apps. `save_card: true` (newer apps,
+  a checkbox) makes the Customer, sets `setup_future_usage: "off_session"`, and the card is stored when its
+  `payment_intent.succeeded` arrives. A congregation with a Customer pays as that Customer (`customer` instead of
+  `customer_email`).
+- **Automatic top-up** (optional, **off** by default): `POST /api/hc/auto-topup {enabled, usd?}` (needs a saved card;
+  default bundle $20). After a meeting **ends** (`Live.end` → `payments.after_meeting`, never during one), if the
+  congregation is on credits, auto top-up is on, a card is saved and its **paid** hours left (`balance_min`, the
+  monthly free hour not counted) are under 1 h, the hub charges the card **off-session** for the chosen bundle. At
+  most **one attempt per 24 h** (`payment_profiles.auto_last_at`, taken atomically before calling Stripe; Stripe
+  idempotency key `hc-auto-<cid>-<day>`). When the webhook credits it, the main e-mail gets "Hear Church: credit
+  added automatically" (Resend, no-reply@hearchurch.com). If the charge fails (declined, or the bank wants 3-D
+  Secure, which can't happen off-session), auto top-up turns **off** and the main e-mail gets "automatic top-up
+  didn't go through"; a later `payment_intent.payment_failed` for that payment does the same (once). Without
+  `RESEND_API_KEY` the e-mails are skipped (logged), the rest works.
+- **Codes** (see docs/admin-api.md "Codes"): `own_key`, `free_hours` (never expire; ledger kind `free_hours`,
+  credits row with `cents` 0 and `payment_id` `code:<redemption id>`), `percent_off` (pending until the next
+  Checkout or 1-click bundle is **paid**: the price is lowered when the payment is made, and the discount is used up
+  by the webhook, `metadata.discount_redemption`; an abandoned Checkout uses nothing up). `POST /api/hc/codes/redeem`
+  (device), `POST /api/hc/codes/check` (onboarding), `POST /api/hc/signup {…, code}`. Same answer for every bad
+  code: `403 {"error": "bad_code", "message": "That code isn't valid."}`; failure limits per IP and congregation.
+  Old own-key codes moved into the `codes` table with the same ids (only their hash, so `code: null` in the list);
+  the old routes `/api/hc/own-key-code[/check]` and `/api/admin/own-key-codes` keep working (deprecated).
+- **`GET /api/hc/billing`** adds `card: {brand, last4, exp_month, exp_year, saved_at} | null`, `auto_topup:
+  {enabled, usd, below_hours, last_at}`, `discount: {percent, label} | null`, `can_save_card`.
+- **Mac app** (Settings → Billing): card on file (brand ••••last4, Add/Replace/Remove), the bundle buttons (1-click
+  with a card, else Checkout with "Save this card"), auto top-up toggle and bundle picker, "Have a code?", history.
+
+### Stripe webhook events (test and live endpoints, `https://hearchurch.com/api/stripe/webhook`)
+
+| Event | Needed for |
+|---|---|
+| `checkout.session.completed` | Checkout bundle purchases (already on); **setup mode: saving a card** |
+| `checkout.session.async_payment_succeeded` | delayed Checkout payments (already on in test) |
+| `charge.refunded` | refunds (already on) |
+| `payment_intent.succeeded` | **new: credits 1-click and automatic top-ups**; stores a card saved during Checkout |
+| `payment_intent.payment_failed` | **new: turns auto top-up off and e-mails when an automatic charge fails late** |
+| `setup_intent.succeeded` | optional (a second path for saving a card; `checkout.session.completed` already covers it) |
+
+The webhook step that reads the card back from Stripe answers 500 if Stripe doesn't answer, so Stripe retries.
+
 ## Today (24be883)
 
 **Mac app**

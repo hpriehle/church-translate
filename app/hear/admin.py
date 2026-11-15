@@ -5,7 +5,10 @@ docs/admin-api.md:
   GET  /api/admin/stats
   GET  /api/admin/transactions?congregation=&kind=&limit=&before=
   POST /api/admin/refunds {payment_id, cents?}
-  POST /api/admin/own-key-codes/{id}/void
+  POST /api/admin/own-key-codes/{id}/void      (deprecated: the codes routes below cover own-key codes too)
+  POST /api/admin/codes {type, value, label, congregation_id?, max_uses?, expires_at?}
+  GET  /api/admin/codes?type=&status=&congregation_id=&q=
+  POST /api/admin/codes/{id}/void
   GET  /api/admin/congregations/{id}          (congregation.aliases: old slugs that redirect to the current one)
   GET  /api/admin/congregations/{id}/account   its e-mails (main first) and devices (revoked ones too)
   POST /api/admin/devices/{id}/revoke          the device's token stops working; its meeting ends
@@ -28,13 +31,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import api
-from .db import BUNDLES, bundle, FREE_SECONDS, LEGACY_CENTS_PER_LANGUAGE_HOUR
+from . import payments
+from .db import BUNDLES, CODE_CREDIT_PREFIX, CODE_TYPES, bundle, FREE_SECONDS, LEGACY_CENTS_PER_LANGUAGE_HOUR
 
 log = logging.getLogger("hear")
 router = APIRouter()
 
 DAY = 86400
-KINDS = ("top_up", "manual_credit", "refund", "usage")
+KINDS = ("top_up", "manual_credit", "free_hours", "refund", "usage")
 STRIPE_PREFIXES = ("pi_", "ch_", "cs_", "py_")   # a credit paid through Stripe; anything else was added by hand
 
 
@@ -95,7 +99,9 @@ def ledger(h: api.Hear, cid: int | None = None) -> list[dict[str, Any]]:
                      "stripe_refund_id": r["stripe_refund_id"]})
     for c in h.db.credits():
         stripe = c["payment_id"].startswith(STRIPE_PREFIXES)
-        rows.append({"id": f"credit:{c['id']}", "kind": "top_up" if stripe else "manual_credit", "at": c["created_at"],
+        kind = ("top_up" if stripe else "free_hours" if c["payment_id"].startswith(CODE_CREDIT_PREFIX)
+                else "manual_credit")
+        rows.append({"id": f"credit:{c['id']}", "kind": kind, "at": c["created_at"],
                      "congregation_id": c["congregation_id"], "amount_cents": c["cents"], "payment_id": c["payment_id"],
                      "cents": c["cents"], "refunded_cents": c["refunded_cents"],
                      "minutes": round(c["seconds"] / 60, 2), "bundle": c["cents"] // 100 if bundle(c["cents"]) else None,
@@ -312,6 +318,62 @@ async def admin_void_code(request: Request, kid: int):
     return {"ok": True, "code": code}
 
 
+# ------------------------------------------------------------------ codes (own key, free hours, % off)
+
+class NewCode(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    type: str = Field(max_length=20)
+    value: float = 0
+    label: str = Field(default="", max_length=120)
+    congregation_id: int | None = None
+    max_uses: int = Field(default=1, ge=1, le=100_000)
+    expires_at: float | None = None
+
+
+@router.post("/api/admin/codes")
+async def admin_create_code(request: Request, body: NewCode):
+    """A new code. Codes are kept in plain so they can be listed and handed out again; never logged."""
+    h = _operator(request)
+    if body.type not in CODE_TYPES:
+        return _err(400, "bad_type", f"type: one of {', '.join(CODE_TYPES)}.")
+    if body.expires_at is not None and body.expires_at <= time.time():
+        return _err(400, "bad_expiry", "expires_at must be in the future (Unix seconds).")
+    try:
+        code = h.db.create_code(body.type, body.value, body.label, body.congregation_id, body.max_uses,
+                                body.expires_at)
+    except KeyError:
+        return _err(404, "not_found", "No such congregation.")
+    except ValueError as e:
+        return _err(400, "bad_value", str(e))
+    log.info("code %d made (%s)", code["id"], code["type"])
+    return {"ok": True, "code": {**code, "redemptions": [], "message": payments.describe(code)}}
+
+
+@router.get("/api/admin/codes")
+async def admin_codes(request: Request, type: str = "", status: str = "", congregation_id: int | None = None,
+                      q: str = Query(default="", max_length=40)):
+    h = _operator(request)
+    if type and type not in CODE_TYPES:
+        raise HTTPException(400, f"type: one of {', '.join(CODE_TYPES)}.")
+    if status and status not in ("active", "used", "expired", "void"):
+        raise HTTPException(400, "status: one of active, used, expired, void.")
+    return {"codes": h.db.codes(type or None, status or None, congregation_id, q)}
+
+
+@router.post("/api/admin/codes/{kid}/void")
+async def admin_void_any_code(request: Request, kid: int):
+    """The code stops working (a multi-use code that was partly used too). 409 when it was already used up."""
+    h = _operator(request)
+    state = h.db.void_code(kid)
+    if state is None:
+        raise HTTPException(404, "No such code.")
+    if state == "used":
+        return _err(409, "used", "That code was already used up; voiding it changes nothing.")
+    log.info("code %d voided", kid)
+    code, = [c for c in h.db.codes() if c["id"] == kid]
+    return {"ok": True, "code": code}
+
+
 # ------------------------------------------------------------------ one congregation
 
 @router.get("/api/admin/congregations/{cid}")
@@ -343,6 +405,12 @@ async def admin_congregation(request: Request, cid: int, meetings: int = Query(d
         "devices": _devices(h, cid),
         "emails": h.db.emails(cid),
         "own_key_codes": h.db.own_key_codes(cid),
+        "codes": [{"redemption_id": r["id"], **{k: r[k] for k in ("code_id", "type", "label", "at", "status", "payment_id",
+                                                                   "consumed_at")},
+                   "value": int(r["value"]) if r["value"] == int(r["value"]) else r["value"]}
+                  for r in h.db.code_redemptions(cid=cid)],
+        "card": payments.card_json(cid), "auto_topup": payments.auto_json(cid),
+        "stripe_customer_id": h.db.payment_profile(cid)["customer_id"],
         "meetings": recent, "meetings_total": len(h.db.sessions(cid)),
         **_page(rows, "", transactions, ""),
     }
