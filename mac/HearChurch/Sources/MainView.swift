@@ -29,10 +29,9 @@ struct MainView: View {
         }
         // The microphone is only open while the checks can show its level (the orange dot; AirPods drop to call
         // quality). During a meeting the engine has it.
-        // Hidden (minimised, covered, another Space): no microphone and no meter.
-        .background(WindowVisibility { model.mainWindowVisible = $0 })
-        .onAppear { model.startMicPreview() }
-        .onDisappear { model.mic.stop() }
+        // Hidden (minimised, covered, another Space, another app in front, screen off): no microphone, no meter.
+        .onAppear { model.meterAppeared() }
+        .onDisappear { model.meterDisappeared() }
         .onChange(of: model.running) { _, running in running ? model.mic.stop() : model.startMicPreview() }
         .onChange(of: model.selectedInput) { model.startMicPreview() }
     }
@@ -900,7 +899,7 @@ struct WindowVisibility: NSViewRepresentable {
             super.viewDidMoveToWindow()
             observer.map(NotificationCenter.default.removeObserver)
             observer = nil
-            guard let window else { return }
+            guard let window else { report(); return }   // the window closed
             observer = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
                                                               object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.report() }
@@ -909,8 +908,7 @@ struct WindowVisibility: NSViewRepresentable {
         }
 
         private func report() {
-            guard let window else { return }
-            let visible = window.occlusionState.contains(.visible)
+            let visible = window?.occlusionState.contains(.visible) ?? false
             DispatchQueue.main.async { [weak self] in self?.changed(visible) }   // not during a view update
         }
     }

@@ -542,8 +542,8 @@ private struct MicrophoneStep: View {
                 Text("Turn Hear Church on there, then come back.").font(.callout).foregroundStyle(.secondary)
             }
         }
-        .onAppear { model.startMicPreview() }
-        .onDisappear { model.mic.stop() }
+        .onAppear { model.meterAppeared() }
+        .onDisappear { model.meterDisappeared() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.startMicPreview()   // back from System Settings
         }

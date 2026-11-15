@@ -67,6 +67,7 @@ struct RootView: View {
                 VStack(spacing: 0) { DownloadBar(); OnboardingView() }
             }
         }
+        .background(WindowVisibility { model.mainWindowVisible = $0 })   // the meter's microphone only while visible
         .onAppear { model.openSettings = { openSettings() } }
     }
 }

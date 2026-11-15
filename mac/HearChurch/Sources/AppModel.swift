@@ -33,11 +33,28 @@ final class AppModel: ObservableObject {
         engine.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         mic.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         network.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
-        Timer.publish(every: 3, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.tick() }.store(in: &bag)
+        // Only the hub check needs a clock; everything else follows events (the engine's status, power, windows).
+        Timer.publish(every: 10, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.tick() }.store(in: &bag)
+        engine.$status.sink { [weak self] st in self?.followRunning(st) }.store(in: &bag)
         engine.$status.sink { [weak self] st in self?.micWarningChanged(st) }.store(in: &bag)
         engine.$status.sink { [weak self] st in self?.followEngineMeeting(st) }.store(in: &bag)
         engine.onRunning = { [weak self] in self?.engineStarted() }
         mic.onDevicesChanged = { [weak self] in Task { await self?.engine.loadSettings() } }
+        Power.onChange = { [weak self] in self?.powerChanged() }
+        // The pre-meeting meter (and so the microphone) only while someone can see it.
+        let app = NotificationCenter.default
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
+                     NSApplication.didHideNotification, NSApplication.didUnhideNotification] {
+            app.publisher(for: name).sink { [weak self] _ in self?.previewConditionsChanged() }.store(in: &bag)
+        }
+        let ws = NSWorkspace.shared.notificationCenter
+        for (name, asleep) in [(NSWorkspace.screensDidSleepNotification, true), (NSWorkspace.screensDidWakeNotification, false),
+                               (NSWorkspace.sessionDidResignActiveNotification, true), (NSWorkspace.sessionDidBecomeActiveNotification, false)] {
+            ws.publisher(for: name).sink { [weak self] _ in
+                self?.screensAsleep = asleep
+                self?.previewConditionsChanged()
+            }.store(in: &bag)
+        }
     }
 
     /// The engine's sentence when the microphone is silent or gone, during a meeting.
@@ -377,16 +394,32 @@ final class AppModel: ObservableObject {
     }
 
     /// The level meter before a meeting, from the chosen input.
-    /// The main window can be seen (not minimised, covered or on another Space). Not published: nothing draws it.
-    var mainWindowVisible = true {
-        didSet {
-            guard mainWindowVisible != oldValue, profile.setupDone else { return }
-            if mainWindowVisible { startMicPreview() } else if !running { mic.stop() }
-        }
+    /// The main window can be seen (open, not minimised, covered or on another Space). Not published: nothing draws it.
+    var mainWindowVisible = false {
+        didSet { if mainWindowVisible != oldValue { previewConditionsChanged() } }
+    }
+    /// Views with the pre-meeting meter on screen (the main view, the microphone step of the first launch). A count,
+    /// not a flag: SwiftUI may show the next view before the last one has gone.
+    private var meterViews = 0 {
+        didSet { if (meterViews > 0) != (oldValue > 0) { previewConditionsChanged() } }
+    }
+    func meterAppeared() { meterViews += 1 }
+    func meterDisappeared() { meterViews = max(0, meterViews - 1) }
+    private var screensAsleep = false
+
+    /// Someone can see the meter: it is on screen in the main window, the window is visible, Hear Church is the
+    /// app in front (not hidden) and the screen is on. Otherwise the microphone is closed (no orange dot, no Core
+    /// Audio work). Start meeting doesn't need it: the engine opens the microphone itself.
+    private var previewWanted: Bool {
+        meterViews > 0 && mainWindowVisible && !screensAsleep && (NSApp.map { $0.isActive && !$0.isHidden } ?? true)
+    }
+
+    private func previewConditionsChanged() {
+        if previewWanted { startMicPreview() } else { mic.stop() }
     }
 
     func startMicPreview() {
-        guard !running, mainWindowVisible else { return }
+        guard !running, previewWanted else { return }
         mic.start(device: missingInput == nil ? selectedInput : "")
     }
 
@@ -443,19 +476,34 @@ final class AppModel: ObservableObject {
 
     func checkHub() async {
         lastHubCheck = Date()
-        hubReachable = await HubClient.reachable()
+        let r = await HubClient.reachable()
+        if r != hubReachable { hubReachable = r }
     }
 
+    /// Every 10 s. Assigning a @Published value redraws the windows even when it is unchanged, so only changes are set.
     private func tick() {
-        onBattery = Power.onBattery
-        keepAwake.set(running)
-        if running, meetingStarted == nil, let t = engine.status?.pipeline.started_at {
-            meetingStarted = Date(timeIntervalSince1970: t)
-        } else if !running {
-            meetingStarted = nil
-        }
-        if Date().timeIntervalSince(lastHubCheck) > (hubReachable == true ? 60 : 10) {
+        powerChanged()   // in case a power notification was missed
+        if engine.status == nil, engine.state != .running { keepAwake.set(false) }   // the engine stopped or failed
+        if Date().timeIntervalSince(lastHubCheck) > (hubReachable == true ? 59 : 9) {
             Task { await checkHub() }
+        }
+    }
+
+    private func powerChanged() {
+        let b = Power.onBattery
+        if b != onBattery { onBattery = b }
+    }
+
+    /// Keep the Mac awake and the elapsed time right while a meeting runs. `st` is the new status (the sink runs
+    /// before `engine.status` changes).
+    private func followRunning(_ st: EngineStatus?) {
+        guard let st else { return }   // briefly unreachable: keep what we know
+        let running = st.pipeline.running
+        keepAwake.set(running)
+        if running, meetingStarted == nil, let t = st.pipeline.started_at {
+            meetingStarted = Date(timeIntervalSince1970: t)
+        } else if !running, meetingStarted != nil {
+            meetingStarted = nil
         }
     }
 
@@ -466,7 +514,7 @@ final class AppModel: ObservableObject {
             out.append(Check(id: "mic", title: "Microphone allowed", state: .ok))
         case .notDetermined:
             out.append(Check(id: "mic", title: "Microphone", state: .bad, detail: "Hear Church needs to hear the meeting.",
-                             action: ("Allow", { Task { await self.mic.requestPermission(); self.mic.start() } })))
+                             action: ("Allow", { Task { await self.mic.requestPermission(); self.startMicPreview() } })))
         default:
             out.append(Check(id: "mic", title: "Microphone blocked", state: .bad,
                              detail: "Allow Hear Church in System Settings → Privacy & Security → Microphone.",

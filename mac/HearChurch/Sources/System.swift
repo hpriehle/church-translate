@@ -38,6 +38,18 @@ enum Power {
               let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? else { return false }
         return type == kIOPSBatteryPowerValue
     }
+
+    /// Called on the main thread when the Mac is plugged in or unplugged (instead of asking every few seconds).
+    @MainActor static var onChange: (() -> Void)? {
+        didSet {
+            guard source == nil else { return }
+            source = IOPSNotificationCreateRunLoopSource({ _ in
+                MainActor.assumeIsolated { Power.onChange?() }
+            }, nil)?.takeRetainedValue()
+            if let source { CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode) }
+        }
+    }
+    @MainActor private static var source: CFRunLoopSource?
 }
 
 enum LoginItem {
@@ -88,6 +100,7 @@ final class MicMonitor: ObservableObject {
     private var wanted = false    // start() was called with no stop() since, even if the input isn't open yet
     private var retries = 0
     private var retryTask: Task<Void, Never>?
+    private var lastShown: CFTimeInterval = 0
 
     init() {
         var addr = Self.address(kAudioHardwarePropertyDevices)
@@ -114,7 +127,8 @@ final class MicMonitor: ObservableObject {
             stop()
         }
         wanted = true
-        permission = AVCaptureDevice.authorizationStatus(for: .audio)
+        let p = AVCaptureDevice.authorizationStatus(for: .audio)
+        if p != permission { permission = p }
         guard permission == .authorized, engine == nil else { return }
         let e = AVAudioEngine()
         let input = e.inputNode
@@ -161,7 +175,7 @@ final class MicMonitor: ObservableObject {
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil
-        level.db = -80
+        if level.db != -80 { level.db = -80 }
         history = []
     }
 
@@ -188,9 +202,15 @@ final class MicMonitor: ObservableObject {
     }
 
     private func push(_ db: Float) {
-        // Whole dB only: the meter can't show less, and an unchanged value redraws nothing.
+        guard engine != nil else { return }   // a buffer that arrived after stop()
+        // Whole dB only (the meter can't show less, and an unchanged value redraws nothing), at most ~12 times a second
+        // whatever the input's sample rate.
         let shown = max(-80, db.rounded())
-        if shown != level.db { level.db = shown }
+        let now = CACurrentMediaTime()
+        if shown != level.db, now - lastShown >= 0.08 {
+            level.db = shown
+            lastShown = now
+        }
         history.append(db)
         if history.count > 100 { history.removeFirst(history.count - 100) }
         let heard = (history.max() ?? db) > -50
