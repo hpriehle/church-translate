@@ -1026,7 +1026,25 @@ async def ws_talk(ws: WebSocket):
 
 @app.get("/print", response_class=HTMLResponse)
 async def print_page(request: Request):
-    return _operator_page(request, WEB_DIR / "print.html", speaker_ok=True)
+    """One sign per downloaded translation language, the meeting's languages first (app/signs.py)."""
+    from .signs import render
+
+    r = _operator_page(request, WEB_DIR / "print.html", speaker_ok=True)
+    if r.status_code != 200:
+        return r
+    html = render((WEB_DIR / "print.html").read_text(encoding="utf-8"), await _downloaded_languages(),
+                  S.settings.meeting.targets)
+    return _remember_key(request, HTMLResponse(html, headers={"Cache-Control": "no-cache"}))
+
+
+async def _downloaded_languages() -> list[str]:
+    """The translation languages this computer can speak: in the app, the ones whose voice is downloaded;
+    a server has every language."""
+    if not S.app_mode:
+        return list(LANGUAGES)
+    from .packages import PACKAGES
+
+    return [p["id"] for p in await PACKAGES.status(list(LANGUAGES)) if p["id"] in LANGUAGES and p["state"] == "ready"]
 
 
 @app.websocket("/ws/operator")
