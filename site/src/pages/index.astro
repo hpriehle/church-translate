@@ -16,7 +16,7 @@ const faq = [
   ["How accurate is it?",
    "It is machine translation, so it will make mistakes, most often with names. Add your congregation's names in the app so they come through correctly."],
   ["What does it cost?",
-   "Translation is $5 per language per hour of speech, bought in advance as credit, and the first hour is free. Silence and pauses aren't counted, and listeners pay nothing. See hearchurch.com/pricing."],
+   "Every congregation gets one free language-hour each month, with unlimited listeners. More hours come in prepaid bundles, from $20 for 4 hours to $250 for 70 hours. Silence and pauses aren't counted, and listeners pay nothing. See hearchurch.com/pricing."],
 ];
 
 const schema = [
@@ -29,8 +29,9 @@ const schema = [
     description: "Live translation for church meetings. A Mac translates the service as it's spoken, and listeners follow along on their own phones with captions and a spoken voice.",
     url: "https://hearchurch.com/",
     downloadUrl: "https://hearchurch.com/download",
-    offers: { "@type": "Offer", price: "5.00", priceCurrency: "USD", url: "https://hearchurch.com/pricing",
-              description: "Prepaid credit: $5 per language per hour of speech. The first hour is free." },
+    offers: { "@type": "AggregateOffer", lowPrice: "0", highPrice: "250.00", priceCurrency: "USD", offerCount: 5,
+              url: "https://hearchurch.com/pricing",
+              description: "One free language-hour every month, unlimited listeners. Prepaid bundles: $20 for 4 hours, $50 for 11, $100 for 25, $250 for 70." },
   },
   {
     "@context": "https://schema.org",
