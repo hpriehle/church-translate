@@ -122,7 +122,7 @@ def test_internal_billing_as_the_mac_sees_it(client, hear):
         r = client.get(path)
         assert r.status_code == 200 and "internal" not in r.text.lower() and "billing" not in r.text.lower()
     # no credit can be bought for it
-    r = client.post("/api/hc/checkout", json={"usd": 25}, headers={**bearer(token), **KNOWS})
+    r = client.post("/api/hc/checkout", json={"usd": 20}, headers={**bearer(token), **KNOWS})
     assert r.status_code in (409, 503)
 
 
@@ -163,7 +163,7 @@ def test_usage_history_for_the_billing_tab(client, hear):
     m, = j["meetings"]
     assert m["language_hours"] == 1.5 and m["free_minutes"] == 60 and m["paid_minutes"] == 30 and m["cost_usd"] == 2.5
     assert m["language_minutes"] == {"es": 45, "fr": 45}
-    assert j["charges"] == [{"kind": "top_up", "at": j["charges"][0]["at"], "amount_usd": 25.0}]
+    assert j["charges"] == [{"kind": "top_up", "at": j["charges"][0]["at"], "amount_usd": 25.0, "hours": 5.0}]
     assert client.get("/api/hc/usage").status_code == 403
 
 

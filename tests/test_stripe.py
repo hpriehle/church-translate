@@ -52,17 +52,19 @@ def auth(token):
 
 def test_checkout_makes_a_card_only_session_for_the_congregation(client, hear, keys, fake_stripe):
     cong, token = make_cong(hear)
-    r = client.post("/api/hc/checkout", json={"usd": 25}, headers=auth(token))
+    r = client.post("/api/hc/checkout", json={"usd": 50}, headers=auth(token))
     assert r.status_code == 200, r.text
-    assert r.json() == {"url": "https://checkout.stripe.com/c/pay/cs_test_1", "id": "cs_test_1", "usd": 25}
+    assert r.json() == {"url": "https://checkout.stripe.com/c/pay/cs_test_1", "id": "cs_test_1", "usd": 50, "hours": 11}
     p, = fake_stripe.created
     assert fake_stripe.keys == ["sk_test_dummy"]
     assert p["mode"] == "payment" and "payment_method_types" not in p
     item, = p["line_items"]
-    assert item["quantity"] == 1 and item["price_data"]["currency"] == "usd" and item["price_data"]["unit_amount"] == 2500
-    assert "5 language-hours" in item["price_data"]["product_data"]["description"]
+    assert item["quantity"] == 1 and item["price_data"]["currency"] == "usd" and item["price_data"]["unit_amount"] == 5000
+    assert "11 language-hours" in item["price_data"]["product_data"]["description"]
+    assert "$4.55 per hour" in item["price_data"]["product_data"]["description"]
     assert p["client_reference_id"] == str(cong["id"]) and p["metadata"]["congregation_id"] == str(cong["id"])
-    assert p["payment_intent_data"]["metadata"]["cents"] == "2500"
+    assert p["payment_intent_data"]["metadata"]["cents"] == "5000"
+    assert p["metadata"]["minutes"] == "660" and p["metadata"]["bundle"] == "50"
     assert p["success_url"] == "https://hear.test/api/hc/checkout/done"
     assert p["cancel_url"] == "https://hear.test/api/hc/checkout/cancelled"
     assert client.get("/api/hc/checkout/done").status_code == 200
@@ -70,12 +72,16 @@ def test_checkout_makes_a_card_only_session_for_the_congregation(client, hear, k
 
 def test_checkout_refuses_bad_amounts_strangers_and_own_key(client, hear, keys, fake_stripe):
     cong, token = make_cong(hear)
-    for usd in (0, 4, 501, "ten"):
+    for usd in (0, -5, "ten"):
         assert client.post("/api/hc/checkout", json={"usd": usd}, headers=auth(token)).status_code == 422
-    assert client.post("/api/hc/checkout", json={"usd": 10}).status_code == 403
-    assert client.post("/api/hc/checkout", json={"usd": 10}, headers=auth("nope")).status_code == 403
+    for usd in (10, 25, 30, 500):   # no bundle at that price (0.3.0 apps offered $10 and $25): refused, not rounded
+        r = client.post("/api/hc/checkout", json={"usd": usd}, headers=auth(token))
+        assert r.status_code == 400 and r.json()["error"] == "not_a_bundle", r.text
+        assert "$20 (4 hours), $50 (11 hours), $100 (25 hours), $250 (70 hours)" in r.json()["message"]
+    assert client.post("/api/hc/checkout", json={"usd": 20}).status_code == 403
+    assert client.post("/api/hc/checkout", json={"usd": 20}, headers=auth("nope")).status_code == 403
     hear.db._x("UPDATE congregations SET billing = 'own_key' WHERE id = ?", (cong["id"],))
-    assert client.post("/api/hc/checkout", json={"usd": 10}, headers=auth(token)).status_code == 409
+    assert client.post("/api/hc/checkout", json={"usd": 20}, headers=auth(token)).status_code == 409
     assert fake_stripe.created == []
 
 
@@ -83,7 +89,7 @@ def test_without_a_stripe_key_buying_says_not_configured(client, hear, monkeypat
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     cong, token = make_cong(hear)
-    r = client.post("/api/hc/checkout", json={"usd": 10}, headers=auth(token))
+    r = client.post("/api/hc/checkout", json={"usd": 20}, headers=auth(token))
     assert r.status_code == 503 and r.json()["error"] == "not_configured"
     assert client.post("/api/stripe/webhook", content=b"{}").status_code == 503
     b = client.get("/api/hc/billing", headers=auth(token)).json()
@@ -96,7 +102,7 @@ def test_stripe_failing_is_a_502_not_a_crash(client, hear, keys, monkeypatch):
         raise stripe.APIConnectionError("no network here")
     monkeypatch.setattr(hear_api, "_stripe_client", boom)
     _, token = make_cong(hear)
-    assert client.post("/api/hc/checkout", json={"usd": 10}, headers=auth(token)).status_code == 502
+    assert client.post("/api/hc/checkout", json={"usd": 20}, headers=auth(token)).status_code == 502
 
 
 # ------------------------------------------------------------------ the webhook
@@ -131,8 +137,30 @@ def test_a_signed_paid_checkout_credits_once(client, hear, keys):
     r = hook(client, payload, signed(payload))
     assert r.status_code == 200 and r.json()["credited"] is False
     assert len(hear.db.credits(cong["id"])) == 1
-    b = client.get("/api/hc/billing", headers=auth(token)).json()
+    b = client.get("/api/hc/billing", headers=auth(token)).json()   # a $25 session from before the bundles: $5/h
     assert b["balance_usd"] == 25 and b["language_hours_left"] == 6 and not b["out_of_credit"] and b["can_buy"]
+
+
+def test_a_paid_bundle_credits_its_hours(client, hear, keys):
+    cong, token = make_cong(hear)
+    for cents, hours, pi in ((2000, 4, "pi_b20"), (5000, 11, "pi_b50"), (10000, 25, "pi_b100"), (25000, 70, "pi_b250")):
+        payload = completed(cong["id"], cents=cents, pi=pi,
+                            metadata={"congregation_id": str(cong["id"]), "cents": str(cents),
+                                      "minutes": str(hours * 60), "bundle": str(cents // 100)})
+        assert hook(client, payload, signed(payload)).json()["credited"] is True
+        assert hear.db.credit_by_payment(pi)["seconds"] == hours * 3600
+    b = client.get("/api/hc/billing", headers=auth(token)).json()
+    assert b["paid_hours_left"] == 110 and b["free_hours_left"] == 1 and b["language_hours_left"] == 111
+    assert b["balance_usd"] == 420 and b["balance"]["bought_usd"] == 420
+    # a bundle price paid without the bundle's metadata (made by hand) still gets the bundle's hours
+    payload = completed(cong["id"], cents=5000, pi="pi_plain50")
+    assert hook(client, payload, signed(payload)).json()["credited"] is True
+    assert hear.db.credit_by_payment("pi_plain50")["seconds"] == 11 * 3600
+    # metadata that doesn't match the amount paid is ignored
+    payload = completed(cong["id"], cents=2000, pi="pi_odd", metadata={"congregation_id": str(cong["id"]),
+                                                                       "cents": "25000", "minutes": "4200"})
+    assert hook(client, payload, signed(payload)).json()["credited"] is True
+    assert hear.db.credit_by_payment("pi_odd")["seconds"] == 4 * 3600
 
 
 def test_bad_and_replayed_signatures_are_refused(client, hear, keys):
@@ -167,8 +195,12 @@ def test_billing_answer_says_out_of_credit(client, hear, keys):
     hear.db.record_speech(cong["id"], "s1", [{"seq": i, "s": 60.0, "langs": ["fr"]} for i in range(90)])
     b = client.get("/api/hc/billing", headers=auth(token)).json()
     assert b["out_of_credit"] and b["balance_usd"] == -2.5 and b["language_hours_left"] == -0.5
-    assert "Out of credit (balance -$2.50). Buy credit to start the next meeting." == b["message"]
-    assert b["buy_usd"] == [10, 25, 50, 100] and b["usd_per_language_hour"] == 5
+    assert b["message"].startswith("Out of credit (balance -$2.50). This month's free hour is used up")
+    assert b["free_hours_left"] == 0 and b["paid_hours_left"] == -0.5
+    assert b["bundles"] == [{"usd": 20, "hours": 4, "usd_per_hour": 5.0}, {"usd": 50, "hours": 11, "usd_per_hour": 4.55},
+                            {"usd": 100, "hours": 25, "usd_per_hour": 4.0}, {"usd": 250, "hours": 70, "usd_per_hour": 3.57}]
+    # 0.3.0 apps make their buttons from these: every one is a bundle price
+    assert b["buy_usd"] == [20, 50, 100, 250] and b["usd_per_language_hour"] == 5
 
 
 def test_the_speak_page_reads_credit_and_buys_through_the_macs_hub_link(client, hear, monkeypatch):

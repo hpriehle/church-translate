@@ -281,7 +281,7 @@ async def test_resend_posts_the_message_and_never_logs_secrets(monkeypatch, capl
 def test_checkout_sends_receipts_to_the_main_email(client, hear, keys, fake_stripe):
     cong, token = make_cong(hear)
     hear.db.add_email(cong["id"], "treasurer@example.org", main=True)
-    assert client.post("/api/hc/checkout", json={"usd": 25}, headers=auth(token)).status_code == 200
+    assert client.post("/api/hc/checkout", json={"usd": 20}, headers=auth(token)).status_code == 200
     p, = fake_stripe.created
     assert p["customer_email"] == "treasurer@example.org"
 

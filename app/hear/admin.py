@@ -11,8 +11,9 @@ docs/admin-api.md:
   POST /api/admin/devices/{id}/revoke          the device's token stops working; its meeting ends
 
 The ledger has no table of its own: top-ups and manual credits are `credits` rows, refunds are `refunds` rows (one per
-change of a top-up's refunded total), and usage is the metered speech of each meeting. The free first language-hour
-is spent by a congregation's credit-billed meetings in order, so a meeting's cost is its speech beyond that hour.
+change of a top-up's refunded total), and usage is the metered speech of each meeting. Each calendar month (UTC) a
+congregation's credit-billed meetings first use that month's free language-hour, in the order they started; the rest
+is taken from its top-ups, oldest first, so a meeting's cost is what that time was bought at (db.Database._walk).
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import api
-from .db import CENTS_PER_LANGUAGE_HOUR, FREE_SECONDS
+from .db import BUNDLES, bundle, FREE_SECONDS, LEGACY_CENTS_PER_LANGUAGE_HOUR
 
 log = logging.getLogger("hear")
 router = APIRouter()
@@ -57,30 +58,28 @@ def _usd(cents: float) -> float:
 # ------------------------------------------------------------------ the ledger
 
 def usage(h: api.Hear) -> list[dict[str, Any]]:
-    """Every meeting with metered speech, oldest first: language-minutes per language, how much of it the free hour
-    covered, and its cost. Own-key and internal meetings are metered but cost nothing."""
+    """Every meeting with metered speech, oldest first: language-minutes per language, how much of it its month's
+    free hour covered, and its cost (at the rates of the top-ups it used). Own-key and internal meetings are metered
+    but cost nothing."""
     speech = h.db.speech_by_session()
-    used: dict[int, float] = {}
+    walks: dict[int, dict[str, Any]] = {}
     out = []
     for s in h.db.all_sessions():
         langs = speech.get(s["id"])
         if not langs:
             continue
-        secs = sum(langs.values())
         cid = s["congregation_id"]
-        free = paid = 0.0
-        if s["billing"] == "credits":
-            before = used.get(cid, 0.0)
-            used[cid] = before + secs
-            free = max(0.0, min(secs, FREE_SECONDS - before))
-            paid = secs - free
-        cost = paid / 3600 * CENTS_PER_LANGUAGE_HOUR
+        if cid not in walks:
+            walks[cid] = h.db._walk(cid)
+        w = walks[cid]["sessions"].get(s["id"]) or {"secs": sum(langs.values()), "free": 0.0, "paid": 0.0,
+                                                     "cost_cents": 0.0}
+        secs, free, paid, cost = w["secs"], w["free"], w["paid"], w["cost_cents"]
         out.append({"id": f"usage:{s['id']}", "kind": "usage", "at": s["started_at"], "congregation_id": cid,
                     "amount_cents": -round(cost), "session_id": s["id"], "code": s["code"], "billing": s["billing"],
                     "started_at": s["started_at"], "ended_at": s["ended_at"],
                     "language_minutes": {k: round(v / 60, 2) for k, v in sorted(langs.items())},
                     "minutes": round(secs / 60, 2), "free_minutes": round(free / 60, 2),
-                    "paid_minutes": round(paid / 60, 2), "cost_usd": _usd(cost), "_secs": (secs, free, paid)})
+                    "paid_minutes": round(paid / 60, 2), "cost_usd": _usd(cost), "_secs": (secs, free, paid, cost)})
     return out
 
 
@@ -99,6 +98,7 @@ def ledger(h: api.Hear, cid: int | None = None) -> list[dict[str, Any]]:
         rows.append({"id": f"credit:{c['id']}", "kind": "top_up" if stripe else "manual_credit", "at": c["created_at"],
                      "congregation_id": c["congregation_id"], "amount_cents": c["cents"], "payment_id": c["payment_id"],
                      "cents": c["cents"], "refunded_cents": c["refunded_cents"],
+                     "minutes": round(c["seconds"] / 60, 2), "bundle": c["cents"] // 100 if bundle(c["cents"]) else None,
                      "refundable": stripe and c["refunded_cents"] < c["cents"]})
         if c["refunded_cents"] > logged[c["id"]]:   # refunded before the refund log existed: one entry for it
             gap = c["refunded_cents"] - logged[c["id"]]
@@ -148,18 +148,18 @@ async def admin_transactions(request: Request, congregation: int | None = None, 
 # ------------------------------------------------------------------ stats
 
 def _hours(rows: list[dict[str, Any]]) -> dict[str, float]:
-    tot = free = paid = own = internal = 0.0
+    tot = free = paid = own = internal = cost = 0.0
     for r in rows:
-        secs, f, p = r["_secs"]
+        secs, f, p, c = r["_secs"]
         tot += secs
         if r["billing"] == "credits":
-            free, paid = free + f, paid + p
+            free, paid, cost = free + f, paid + p, cost + c
         elif r["billing"] == "internal":
             internal += secs
         else:
             own += secs
     return {"total": round(tot / 3600, 2), "paid": round(paid / 3600, 2), "free": round(free / 3600, 2),
-            "own_key": round(own / 3600, 2), "internal": round(internal / 3600, 2), "paid_usd": _usd(paid / 3600 * CENTS_PER_LANGUAGE_HOUR)}
+            "own_key": round(own / 3600, 2), "internal": round(internal / 3600, 2), "paid_usd": _usd(cost)}
 
 
 def installs(h: api.Hear, now: float) -> dict[str, Any]:
@@ -209,7 +209,9 @@ async def admin_stats(request: Request):
                    "refunded_usd": _usd(sum(c["refunded_cents"] for c in credits)),
                    "outstanding_usd": round(sum(b for b in balances if b > 0), 2),
                    "overdrawn_usd": round(sum(b for b in balances if b < 0), 2),
-                   "usd_per_language_hour": CENTS_PER_LANGUAGE_HOUR / 100},
+                   "free_hours_per_month": FREE_SECONDS / 3600,
+                   "bundles": [api.bundle_json(b) for b in BUNDLES],
+                   "legacy_usd_per_language_hour": LEGACY_CENTS_PER_LANGUAGE_HOUR / 100},
         "installs": installs(h, now),
     }
 
@@ -223,11 +225,10 @@ class Refund(BaseModel):
 
 
 def unused_cents(h: api.Hear, credit: dict[str, Any]) -> int:
-    """How much of this top-up the congregation hasn't used: what's left of it after refunds, but no more than the
-    congregation's balance (credit is one pool, so its unused part is what's still in the pool)."""
-    left = credit["cents"] - credit["refunded_cents"]
-    bal = round(h.db.balance(credit["congregation_id"])["balance_usd"] * 100)
-    return max(0, min(left, bal))
+    """What the unused part of this top-up is worth, pro rata at its own rate: its minutes not used yet (meetings
+    use the oldest top-ups first, after the month's free hour) times what it cost per minute. A $50 bundle (11 h)
+    with 5.5 h unused refunds $25; a top-up from before the bundles, at $5 per hour."""
+    return h.db.unused_cents(credit)
 
 
 def _err(status: int, error: str, message: str, **extra) -> JSONResponse:

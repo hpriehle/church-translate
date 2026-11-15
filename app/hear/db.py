@@ -10,14 +10,19 @@ Congregations that existed before billing are grandfathered as "own_key": they w
 own Claude Code login (app/hear/internal.py); its meetings are metered like the others but never debited or refused.
 
 Metering and the ledger: the Mac reports seconds of speech per heard language (`record_speech`, idempotent on the
-session and the Mac's chunk number). A congregation's balance is its top-ups (`add_credit`, idempotent on the Stripe
-payment id; a Stripe refund takes its amount back off that top-up, `refund_credit`) minus the language-minutes
-of its credit-billed sessions, after the free first hour. Each session keeps
+session and the Mac's chunk number). Credit is stored as the language-minutes bought (`credits.seconds`): a bundle
+gives its hours (BUNDLES: $20 = 4 h, $50 = 11 h, $100 = 25 h, $250 = 70 h); top-ups from before the bundles keep the
+minutes they got at $5 per language-hour. `add_credit` is idempotent on the Stripe payment id; a Stripe refund takes
+its amount back off that top-up at the top-up's own rate (`refund_credit`: refunding $25 of the $50 bundle takes off
+5.5 h). Every credit-billed congregation gets FREE_SECONDS (one language-hour) free per calendar month (UTC; a meeting
+counts in the month it started; unused free time does not carry over). What a month's meetings use beyond that is
+taken from the credit, oldest top-up first (`_walk`). Each session keeps
 the billing mode it started under, so own-key meetings are metered but never debited, also after a switch to
 credits. The balance may go negative (a meeting is never cut off); `can_start` then refuses the next one.
 """
 from __future__ import annotations
 
+import calendar
 import hashlib
 import hmac
 import json
@@ -152,9 +157,37 @@ CREATE INDEX IF NOT EXISTS credits_cong ON credits(congregation_id);
 CREATE INDEX IF NOT EXISTS refunds_credit ON refunds(credit_id);
 """
 
-# Prices (decided Nov 8): $5 per language-hour of speech, the first language-hour free per congregation.
-CENTS_PER_LANGUAGE_HOUR = 500
-FREE_SECONDS = 3600
+# Prices (decided Nov 14): one language-hour free every calendar month (UTC) per congregation, then credit bundles,
+# cheaper per hour as they grow: (price in cents, language-hours). Unlimited listeners.
+BUNDLES = ((2000, 4), (5000, 11), (10000, 25), (25000, 70))
+FREE_SECONDS = 3600            # per calendar month
+# Before the bundles (Nov 8): $5 per language-hour. Top-ups bought then keep their minutes at this rate; a top-up of
+# an amount that is no bundle (by hand) is credited at it; and an overdrawn balance is valued at it in dollars.
+LEGACY_CENTS_PER_LANGUAGE_HOUR = 500
+
+
+def bundle(cents: int) -> tuple[int, int] | None:
+    """The bundle sold at this price, as (cents, language-hours), or None."""
+    return next((b for b in BUNDLES if b[0] == cents), None)
+
+
+def credit_seconds(cents: int) -> float:
+    """Language-seconds a top-up of `cents` buys: the bundle's hours, or $5 per hour for any other amount."""
+    b = bundle(cents)
+    return float(b[1] * 3600) if b else cents * 3600 / LEGACY_CENTS_PER_LANGUAGE_HOUR
+
+
+def month_of(t: float) -> str:
+    """The calendar month (UTC) a time falls in, "2026-11": the free hour's period."""
+    return time.strftime("%Y-%m", time.gmtime(t))
+
+
+def next_month_start(t: float) -> float:
+    """When the month after `t` begins (UTC midnight on the 1st): the free hour resets then."""
+    y, m = time.gmtime(t)[:2]
+    y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return float(calendar.timegm((y, m, 1, 0, 0, 0)))
+
 BILLING_TYPES = ("credits", "own_key", "internal")
 NO_CREDIT_NEEDED = ("own_key", "internal")   # metered, but never refused for balance or debited
 MAX_CHUNK_S = 60.0     # one reported chunk of speech is never longer than this (the chunker cuts far sooner)
@@ -791,15 +824,20 @@ class Database:
         return {r["lang"]: round(r["s"], 2) for r in rows}
 
     # ------------------------------------------------------------ credits (the ledger)
-    def add_credit(self, cid: int, payment_id: str, cents: int) -> tuple[dict[str, Any], bool]:
-        """Credit a top-up paid with Stripe payment `payment_id` ($5 buys a language-hour). Idempotent: the same
-        payment again returns the stored credit and False. ValueError for a blank id, a non-positive amount, or a
-        payment id already used with another amount or congregation."""
+    def add_credit(self, cid: int, payment_id: str, cents: int,
+                   seconds: float | None = None) -> tuple[dict[str, Any], bool]:
+        """Credit a top-up paid with Stripe payment `payment_id`: `seconds` of language time (default: the bundle's
+        hours for a bundle price, else $5 per hour, `credit_seconds`). Idempotent: the same payment again returns the
+        stored credit and False. ValueError for a blank id, a non-positive amount, or a payment id already used with
+        another amount or congregation."""
         pid = (payment_id or "").strip()
         if not pid or len(pid) > 255:
             raise ValueError("a payment id is needed")
         if not isinstance(cents, int) or isinstance(cents, bool) or cents <= 0:
             raise ValueError("the amount must be a positive number of cents")
+        secs = credit_seconds(cents) if seconds is None else float(seconds)
+        if not secs > 0:
+            raise ValueError("the credit must be some language time")
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
             try:
@@ -810,8 +848,7 @@ class Database:
                         raise ValueError("that payment was already credited with another amount or congregation")
                     return dict(row), False
                 cur = self._db.execute("INSERT INTO credits (congregation_id, payment_id, cents, seconds, created_at)"
-                                       " VALUES (?,?,?,?,?)",
-                                       (cid, pid, cents, cents * 3600 / CENTS_PER_LANGUAGE_HOUR, time.time()))
+                                       " VALUES (?,?,?,?,?)", (cid, pid, cents, secs, time.time()))
                 row = self._db.execute("SELECT * FROM credits WHERE id = ?", (cur.lastrowid,)).fetchone()
                 self._db.execute("COMMIT")
                 return dict(row), True
@@ -824,7 +861,8 @@ class Database:
     def refund_credit(self, payment_id: str, refunded_cents: int, source: str = "stripe",
                       stripe_refund_id: str | None = None) -> tuple[dict[str, Any], bool]:
         """Stripe refunded `refunded_cents` in all (cumulative, as on the charge) of the top-up paid with
-        `payment_id`: that much comes back off the balance, at the rate the top-up was bought at. Idempotent and
+        `payment_id`: that much comes back off the balance pro rata, at the top-up's own rate (cents / seconds: refunding
+$25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
         order-proof: the refunded total only ever grows (a resent or late event changes nothing) and never exceeds
         the top-up. Returns (credit, changed). KeyError for a payment that was never credited, ValueError for a bad
         amount. The balance may go negative when credit already used is refunded. Each change is also written to
@@ -881,28 +919,81 @@ class Database:
             out.setdefault(r["session_id"], {})[r["lang"]] = r["s"]
         return out
 
-    def balance(self, cid: int) -> dict[str, Any]:
+    def _walk(self, cid: int, now: float | None = None) -> dict[str, Any]:
+        """The ledger of one congregation, worked out from its meetings and top-ups. Credit-billed meetings, in the
+        order they started, first use their month's free hour (FREE_SECONDS per UTC month, by the meeting's start);
+        the rest is taken from the top-ups, oldest first, each at its own rate; what no top-up covers is overdrawn.
+        Returns sessions {id: {secs, free, paid, cost_cents}} (all of its metered meetings; own-key and internal ones
+        cost nothing), unused {credit id: seconds}, overdrawn (seconds), used/metered seconds and this month's use."""
+        now = time.time() if now is None else now
+        rows = self._q("SELECT s.id, s.started_at, s.billing, SUM(p.seconds) AS secs FROM sessions s"
+                       " JOIN speech p ON p.session_id = s.id WHERE s.congregation_id = ?"
+                       " GROUP BY s.id ORDER BY s.started_at, s.id", (cid,))
+        credits = [dict(r) for r in self._q("SELECT * FROM credits WHERE congregation_id = ? ORDER BY id", (cid,))]
+        left = {c["id"]: c["seconds"] * (c["cents"] - c["refunded_cents"]) / c["cents"] for c in credits}
+        rate = {c["id"]: c["cents"] / c["seconds"] for c in credits}   # cents per second, the top-up's own
+        months: dict[str, float] = {}
+        sessions: dict[int, dict[str, float]] = {}
+        over = used = metered = 0.0
+        for r in rows:
+            secs = r["secs"] or 0.0
+            metered += secs
+            free = paid = cost = 0.0
+            if r["billing"] == "credits":
+                used += secs
+                m = month_of(r["started_at"])
+                free = max(0.0, min(secs, FREE_SECONDS - months.get(m, 0.0)))
+                months[m] = months.get(m, 0.0) + secs
+                paid = need = secs - free
+                for c in credits:
+                    if need <= 0:
+                        break
+                    take = min(need, left[c["id"]])
+                    if take > 0:
+                        left[c["id"]] -= take
+                        need -= take
+                        cost += take * rate[c["id"]]
+                if need > 0:
+                    over += need
+                    cost += need * LEGACY_CENTS_PER_LANGUAGE_HOUR / 3600
+            sessions[r["id"]] = {"secs": secs, "free": free, "paid": paid, "cost_cents": cost}
+        return {"sessions": sessions, "unused": left, "rate": rate, "overdrawn": over, "used": used,
+                "metered": metered, "month": month_of(now), "month_used": months.get(month_of(now), 0.0),
+                "credits": credits}
+
+    def unused_cents(self, credit: dict[str, Any]) -> int:
+        """What the unused part of a top-up is worth at its own rate: refunded on request (used hours are final)."""
+        w = self._walk(credit["congregation_id"])
+        return max(0, round(w["unused"].get(credit["id"], 0.0) * w["rate"].get(credit["id"], 0.0)))
+
+    def balance(self, cid: int, now: float | None = None) -> dict[str, Any]:
         """Where a congregation stands, in language-minutes (and dollars for what was bought):
         metered_min  all heard speech, own-key meetings included (stats)
-        used_min     what its credit-billed meetings used; the free hour goes first
-        free_left_min, balance_min / balance_usd (bought minus used beyond the free hour; may be negative),
-        bought_usd, left_min (free + balance), can_start (False only for credits with nothing left)."""
-        (metered, used), = self._q(
-            "SELECT COALESCE(SUM(p.seconds), 0), COALESCE(SUM(CASE WHEN s.billing = 'credits' THEN p.seconds END), 0)"
-            " FROM speech p JOIN sessions s ON s.id = p.session_id WHERE s.congregation_id = ?", (cid,))
-        (cents, bought), = self._q("SELECT COALESCE(SUM(cents - refunded_cents), 0),"
-                                   " COALESCE(SUM(seconds * (cents - refunded_cents) / cents), 0) FROM credits"
-                                   " WHERE congregation_id = ?", (cid,))
-        free_left = max(0.0, FREE_SECONDS - used)
-        bal = bought - max(0.0, used - FREE_SECONDS)
+        used_min     what its credit-billed meetings used, all time; month_used_min: this month (UTC)
+        free_left_min  what is left of this month's free hour (free_month "2026-11", free_resets_at: next 1st, UTC)
+        balance_min  bought minutes not used yet (negative when overdrawn); balance_usd: what those are worth at the
+                     rates they were bought at (an overdraft at $5 per hour)
+        bought_min / bought_usd  all top-ups less refunds; left_min (free + balance), can_start (False only for
+        credits with nothing left)."""
+        now = time.time() if now is None else now
+        w = self._walk(cid, now)
+        unused = sum(v for v in w["unused"].values() if v > 0)
+        bal = unused - w["overdrawn"]
+        usd = (sum(v * w["rate"][k] for k, v in w["unused"].items() if v > 0)
+               - w["overdrawn"] * LEGACY_CENTS_PER_LANGUAGE_HOUR / 3600) / 100
+        cents = sum(c["cents"] - c["refunded_cents"] for c in w["credits"])
+        bought = sum(c["seconds"] * (c["cents"] - c["refunded_cents"]) / c["cents"] for c in w["credits"])
+        free_left = max(0.0, FREE_SECONDS - w["month_used"])
         cong = self.congregation(cid)
-        return {"metered_min": round(metered / 60, 2), "used_min": round(used / 60, 2),
-                "free_left_min": round(free_left / 60, 2), "balance_min": round(bal / 60, 2),
-                "balance_usd": round(bal / 3600 * CENTS_PER_LANGUAGE_HOUR / 100, 2), "bought_usd": round(cents / 100, 2),
-                "left_min": round((free_left + bal) / 60, 2),
+        return {"metered_min": round(w["metered"] / 60, 2), "used_min": round(w["used"] / 60, 2),
+                "month_used_min": round(w["month_used"] / 60, 2), "free_month": w["month"],
+                "free_min_per_month": FREE_SECONDS // 60, "free_left_min": round(free_left / 60, 2),
+                "free_resets_at": next_month_start(now),
+                "balance_min": round(bal / 60, 2), "balance_usd": round(usd, 2), "bought_min": round(bought / 60, 2),
+                "bought_usd": round(cents / 100, 2), "left_min": round((free_left + bal) / 60, 2),
                 "can_start": (cong or {}).get("billing") in NO_CREDIT_NEEDED or free_left + bal > 0}
 
     def can_start(self, cong: dict[str, Any]) -> bool:
-        """May this congregation start a new meeting? Own key and internal: always. Credits: while the free hour or the balance
-        has something left. A meeting already running is never stopped; only the next one waits for a top-up."""
+        """May this congregation start a new meeting? Own key and internal: always. Credits: while this month's free hour or
+        the balance has something left. A meeting already running is never stopped; only the next one waits for a top-up."""
         return cong["billing"] in NO_CREDIT_NEEDED or self.balance(cong["id"])["can_start"]

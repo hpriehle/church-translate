@@ -34,19 +34,24 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
                             asks for the code before the key, and the congregation only exists after sign-up.
   POST /api/hc/own-key-code (device token) {code} → {ok, billing: "own_key"}; uses the code up for this
                             congregation (asking again is fine). 403 bad_code (unknown, or used by another), 429 locked.
-  GET  /api/hc/billing      (device token) → {billing, balance: {left_min, free_left_min, balance_usd, can_start, …},
-                            balance_usd, language_hours_left, out_of_credit, can_buy, buy_usd, message}
+  GET  /api/hc/billing      (device token) → {billing, balance: {left_min, free_left_min, free_resets_at, balance_min,
+                            balance_usd, can_start, …}, balance_usd, language_hours_left, free_hours_left,
+                            paid_hours_left, out_of_credit, can_buy, bundles: [{usd, hours, usd_per_hour}], buy_usd
+                            (the bundle prices, for 0.3.0 apps), message}
   GET  /api/hc/usage        (device token) → {billing, meetings: [{started_at, ended_at, languages, language_minutes,
                             language_hours, free_minutes, paid_minutes, cost_usd, billing}], charges: [{kind, at,
                             amount_usd}]}: the Billing tab's history, newest first (?meetings=, ?charges= limits).
-  POST /api/hc/checkout     (device token) {usd} → {url}: a Stripe Checkout page (card only) for that much credit;
+  POST /api/hc/checkout     (device token) {usd} → {url}: a Stripe Checkout page for the bundle at that price ($20,
+                            $50, $100 or $250); any other amount is 400 not_a_bundle with a message naming the
+                            bundles (0.3.0 apps only offer the prices in buy_usd, so they always hit a bundle).
                             503 not_configured without STRIPE_SECRET_KEY. Back to /api/hc/checkout/done or /cancelled.
   POST /api/stripe/webhook  Stripe → hub, signed with STRIPE_WEBHOOK_SECRET: checkout.session.completed (paid) calls
-                            credit_top_up with its payment_intent and amount_total, once per payment;
+                            credit_top_up with its payment_intent and amount_total (the bundle's hours), once per
+                            payment;
                             charge.refunded takes amount_refunded back off the top-up with that payment_intent.
   POST /api/hc/translate    (device token) translation on credits through the hub's Anthropic key (app/hear/proxy.py).
-  POST /api/admin/congregations/<id>/credits {payment_id, cents} (operator) → {created, credit, balance}: credit a
-                            top-up. Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
+  POST /api/admin/congregations/<id>/credits {payment_id, cents, minutes?} (operator) → {created, credit, balance}:
+                            credit a top-up (minutes default: the bundle's hours at a bundle price, else $5 per hour). Idempotent on payment_id (the Stripe step calls `credit_top_up` with the
                             payment's id); 409 when that id was credited with another amount or congregation.
   POST /api/admin/congregations/<id>/billing {billing: "credits"|"own_key"|"internal"} (operator; {mode: …} works
                             too) → {ok, billing: <as GET /api/hc/billing>}; 400 unknown type, 404 unknown congregation.
@@ -88,7 +93,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import HOME, LOG_DIR, WEB_DIR
-from .db import CENTS_PER_LANGUAGE_HOUR, DEVICE_CODE_TTL_S, RESERVED_SLUGS, Database
+from .db import (BUNDLES, DEVICE_CODE_TTL_S, FREE_SECONDS, LEGACY_CENTS_PER_LANGUAGE_HOUR, RESERVED_SLUGS, Database,
+                 bundle)
 from .geo import Geocoder, bounding_box, hide_coordinates_in_access_log, in_box
 from .live import Live
 from .mail import Mailer, RateLimiter, Resend
@@ -721,7 +727,8 @@ async def usage_history(request: Request, meetings: int = Query(default=50, ge=1
                     "language_hours": round(mins / 60, 2), "minutes": mins,
                     "free_minutes": u.get("free_minutes", 0), "paid_minutes": u.get("paid_minutes", 0),
                     "cost_usd": u.get("cost_usd", 0)})
-    paid = [{"kind": r["kind"], "at": r["at"], "amount_usd": r["amount_usd"]} for r in rows if r["kind"] != "usage"]
+    paid = [{"kind": r["kind"], "at": r["at"], "amount_usd": r["amount_usd"],
+             **({"hours": round(r["minutes"] / 60, 2)} if "minutes" in r else {})} for r in rows if r["kind"] != "usage"]
     return {"billing": billing_for(request, cong["billing"]), "meetings": out, "charges": paid[:charges]}
 
 
@@ -739,27 +746,46 @@ def billing_for(request: Request | None, billing: str) -> str:
     return billing if "internal" in request.headers.get(KNOWS_HEADER, "") else "credits"
 
 
+def bundle_json(b: tuple[int, int]) -> dict[str, Any]:
+    """A bundle as the app and the operator see it: {usd: 50, hours: 11, usd_per_hour: 4.55}."""
+    return {"usd": b[0] // 100, "hours": b[1], "usd_per_hour": round(b[0] / 100 / b[1], 2)}
+
+
+def _hours(h: float) -> str:
+    return f"{h:.1f}".removesuffix(".0")
+
+
 def billing_info(cong: dict[str, Any], request: Request | None = None) -> dict[str, Any]:
-    """What the operator page and the app show: the balance in dollars and language-hours, whether the next
-    meeting can start, and whether credit can be bought here (Stripe set up on this server). With the device's
-    request, "billing" is as billing_for() says (operator views pass none and see the real type)."""
+    """What the operator page and the app show: this month's free hour, the paid hours left (and what they are worth),
+    whether the next meeting can start, the bundles, and whether credit can be bought here (Stripe set up on this
+    server). With the device's request, "billing" is as billing_for() says (operator views pass none and see the
+    real type)."""
     b = _hear().db.balance(cong["id"])
     credits = cong["billing"] == "credits"
     hours = round(b["left_min"] / 60, 2)
+    free_h, paid_h = round(b["free_left_min"] / 60, 2), round(b["balance_min"] / 60, 2)
     owed = f"-${-b['balance_usd']:.2f}" if b["balance_usd"] < 0 else f"${b['balance_usd']:.2f}"
     if cong["billing"] == "internal":
         message = INCLUDED_MESSAGE
     elif not credits:
         message = "Translation is paid with your own API key."
     elif not b["can_start"]:
-        message = f"Out of credit (balance {owed}). Buy credit to start the next meeting."
+        message = (f"Out of credit (balance {owed}). This month's free hour is used up: buy credit to start the next "
+                   "meeting, or wait for next month's free hour.")
     else:
-        free = f", {b['free_left_min'] / 60:.1f} of them free" if b["free_left_min"] > 0 else ""
-        message = f"Credit {owed} · {hours:.1f} language-hours left{free}."
+        message = (f"{_hours(free_h)} free hour{'' if free_h == 1 else 's'} left this month · "
+                   f"{_hours(max(paid_h, 0))} paid hours left.")
     return {"billing": billing_for(request, cong["billing"]), "balance": b, "balance_usd": b["balance_usd"],
-            "language_hours_left": hours if credits else None, "out_of_credit": credits and not b["can_start"],
-            "usd_per_language_hour": CENTS_PER_LANGUAGE_HOUR / 100, "can_buy": credits and bool(stripe_keys()[0]),
-            "buy_usd": list(BUY_USD), "buy_min_usd": BUY_MIN_USD, "buy_max_usd": BUY_MAX_USD, "message": message}
+            "language_hours_left": hours if credits else None,
+            "free_hours_left": free_h if credits else None, "paid_hours_left": paid_h if credits else None,
+            "free_hours_per_month": FREE_SECONDS / 3600, "free_resets_at": b["free_resets_at"],
+            "out_of_credit": credits and not b["can_start"],
+            "bundles": [bundle_json(x) for x in BUNDLES],
+            # 0.3.0 apps make their buy buttons from buy_usd and label them usd / usd_per_language_hour: the
+            # bundle prices, and the old $5 rate (so they show fewer hours than the bundle gives; Checkout says it right)
+            "usd_per_language_hour": LEGACY_CENTS_PER_LANGUAGE_HOUR / 100,
+            "can_buy": credits and bool(stripe_keys()[0]),
+            "buy_usd": [x[0] // 100 for x in BUNDLES], "message": message}
 
 
 # ------------------------------------------------------------------ billing: buying credit (Stripe Checkout)
@@ -770,8 +796,6 @@ def billing_info(cong: dict[str, Any], request: Request | None = None) -> dict[s
 # can be offered: a session credits when it is paid, either at checkout.session.completed (payment_status "paid")
 # or later at checkout.session.async_payment_succeeded. Both credit once per payment intent.
 
-BUY_USD = (10, 25, 50, 100)        # the amounts the operator page offers
-BUY_MIN_USD, BUY_MAX_USD = 5, 500  # one top-up, whole dollars ($5 = one language-hour)
 
 
 def stripe_keys() -> tuple[str, str]:
@@ -786,13 +810,19 @@ def _stripe_client(key: str):
 
 
 class Buy(BaseModel):
-    usd: int = Field(ge=BUY_MIN_USD, le=BUY_MAX_USD)
+    usd: int = Field(ge=1, le=100_000)   # a bundle's price in dollars; anything else is refused in checkout()
+
+
+def bundles_text() -> str:
+    return ", ".join(f"${b[0] // 100} ({b[1]} hours)" for b in BUNDLES)
 
 
 @router.post("/api/hc/checkout")
 async def checkout(request: Request, body: Buy):
-    """(device token) {usd} → {url}: a Stripe Checkout page where the church pays for that much credit. 503
-    not_configured without a Stripe key on this server, 409 for a congregation that uses its own key."""
+    """(device token) {usd} → {url}: a Stripe Checkout page where the church pays for the bundle at that price. 400
+    not_a_bundle for any other amount (older apps offered $10/$25/$50/$100; they now get the bundle prices to show,
+    and an amount that is no bundle is refused rather than charged as a different one). 503 not_configured without
+    a Stripe key on this server, 409 for a congregation that uses its own key."""
     cong = _device_congregation(request)
     _limit(request, "checkout", f"cong{cong['id']}")
     key = stripe_keys()[0]
@@ -802,15 +832,21 @@ async def checkout(request: Request, body: Buy):
     if cong["billing"] != "credits":
         raise HTTPException(409, INCLUDED_MESSAGE if cong["billing"] == "internal"
                             else "This congregation pays with its own API key.")
-    cents, base = body.usd * 100, _base_url(request)
-    meta = {"congregation_id": str(cong["id"]), "slug": cong["slug"], "cents": str(cents)}
-    hours = cents / CENTS_PER_LANGUAGE_HOUR
+    b = bundle(body.usd * 100)
+    if b is None:
+        return JSONResponse({"error": "not_a_bundle", "bundles": [bundle_json(x) for x in BUNDLES],
+                             "message": f"Credit comes in bundles: {bundles_text()}. Pick one of those, or update "
+                                        "Hear Church to see them."}, status_code=400)
+    cents, hours, base = b[0], b[1], _base_url(request)
+    meta = {"congregation_id": str(cong["id"]), "slug": cong["slug"], "cents": str(cents),
+            "minutes": str(hours * 60), "bundle": str(cents // 100)}
     params = {
         "mode": "payment",
         "line_items": [{"quantity": 1, "price_data": {
             "currency": "usd", "unit_amount": cents,
             "product_data": {"name": "Hear Church credit",
-                             "description": f"{hours:g} language-hours of live translation for {display_name(cong)}"}}}],
+                             "description": f"{hours} language-hours of live translation for {display_name(cong)} "
+                                            f"(${cents / 100 / hours:.2f} per hour)"}}}],
         "client_reference_id": str(cong["id"]),
         "metadata": meta,
         "payment_intent_data": {"metadata": meta, "description": f"Hear Church credit: {display_name(cong)}"},
@@ -828,8 +864,8 @@ async def checkout(request: Request, body: Buy):
     except Exception as e:
         log.warning("stripe checkout for %s failed: %s", cong["slug"], e)
         raise HTTPException(502, "Stripe didn't answer: try again in a minute.")
-    log.info("checkout %s: $%d for %s", session.id, body.usd, cong["slug"])
-    return {"url": session.url, "id": session.id, "usd": body.usd}
+    log.info("checkout %s: $%d bundle for %s", session.id, body.usd, cong["slug"])
+    return {"url": session.url, "id": session.id, "usd": body.usd, "hours": hours}
 
 
 @router.get("/api/hc/checkout/done", response_class=HTMLResponse)
@@ -874,7 +910,8 @@ async def stripe_webhook(request: Request):
     try:
         cid = int(meta.get("congregation_id") or s.get("client_reference_id"))
         cents = int(s["amount_total"])
-        credit, created = credit_top_up(cid, str(s.get("payment_intent") or s.get("id") or ""), cents)
+        credit, created = credit_top_up(cid, str(s.get("payment_intent") or s.get("id") or ""), cents,
+                                        _paid_minutes(meta, cents))
     except (KeyError, ValueError, TypeError) as e:
         log.error("stripe: checkout %s paid but not credited: %r", s.get("id"), e)
         return {"ok": True, "credited": False}
@@ -900,15 +937,28 @@ def _refunded(charge: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "refunded": changed, "credit_id": credit["id"], "refunded_cents": credit["refunded_cents"]}
 
 
-def credit_top_up(cid: int, payment_id: str, cents: int) -> tuple[dict[str, Any], bool]:
+def _paid_minutes(meta: dict[str, Any], cents: int) -> float | None:
+    """The minutes a paid Checkout session buys: those its bundle said when it was made (metadata, if it matches the
+    amount paid), else None (add_credit then uses the bundle at that price, or $5 per hour for a session made before
+    the bundles)."""
+    try:
+        if int(meta.get("cents") or 0) == cents and int(meta.get("minutes") or 0) > 0:
+            return float(int(meta["minutes"]))
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def credit_top_up(cid: int, payment_id: str, cents: int,
+                  minutes: float | None = None) -> tuple[dict[str, Any], bool]:
     """Credit a paid top-up to a congregation, once per payment: called by the Stripe webhook
-    (checkout.session.completed → its payment_intent id and amount_total) and the operator's admin route. Returns
-    (credit, created). KeyError for an unknown congregation, ValueError for a bad amount or a payment id already
-    used differently."""
+    (checkout.session.completed → its payment_intent id, amount_total and bundle) and the operator's admin route.
+    `minutes` defaults to the bundle at that price, else $5 per hour. Returns (credit, created). KeyError for an
+    unknown congregation, ValueError for a bad amount or a payment id already used differently."""
     h = _hear()
     if h.db.congregation(cid) is None:
         raise KeyError(cid)
-    credit, created = h.db.add_credit(cid, payment_id, cents)
+    credit, created = h.db.add_credit(cid, payment_id, cents, None if minutes is None else minutes * 60)
     if created:
         log.info("credit: %s cents to congregation %d (%s)", cents, cid, payment_id)
     return credit, created
@@ -1179,6 +1229,7 @@ class TopUp(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     payment_id: str = Field(min_length=1, max_length=255)
     cents: int = Field(gt=0, le=10_000_000)
+    minutes: float | None = Field(default=None, gt=0, le=1_000_000)
 
 
 @router.post("/api/admin/congregations/{cid}/credits")
@@ -1188,7 +1239,7 @@ async def admin_credit(request: Request, cid: int, body: TopUp):
 
     main.require_operator(request)
     try:
-        credit, created = credit_top_up(cid, body.payment_id, body.cents)
+        credit, created = credit_top_up(cid, body.payment_id, body.cents, body.minutes)
     except KeyError:
         raise HTTPException(404, "No such congregation.")
     except ValueError as e:
