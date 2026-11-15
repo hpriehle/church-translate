@@ -182,6 +182,10 @@ function versionOf(name) {
   return name.replace(/^hearchurch-oss-|\.tar\.gz$/g, "");
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
 async function latestRelease(env, key = "latest.json") {
   const obj = await env.FILES.get(key);
   return obj ? obj.json() : null;
