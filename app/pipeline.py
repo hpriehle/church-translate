@@ -75,6 +75,7 @@ class Pipeline:
         self.library = Library(HOME / "scripture")   # published scripture wording (see scripture.py)
         self.refs = RefDetector(settings.scripture.max_verses)
         self._installing: dict[str, asyncio.Task] = {}
+        self.health = None              # health.HealthCollector: counters for the hub's meeting health reports
         self.stt_skipped = 0            # chunks skipped because CPU speech recognition fell behind
         self._behind_logged = -1e9
         self._stepped_announced = ""
@@ -246,12 +247,23 @@ class Pipeline:
         self.operator.publish({"type": "log", "level": "info", "text": "Stop requested — finishing what was already said"})
 
     # ------------------------------------------------------------ capture thread callbacks
+    def _health(self, what: str, *args) -> None:
+        """Count something for the meeting health report (health.py); never stops a meeting."""
+        h = getattr(self, "health", None)   # test doubles built without __init__ have none
+        if h is not None:
+            try:
+                getattr(h, what)(*args)
+            except Exception:  # pragma: no cover
+                pass
+
     def _on_chunk_thread(self, chunk: Chunk) -> None:
         chunk.meeting = self.meeting_id   # the meeting it was heard in (a later meeting may start before it is done)
+        self._health("chunk", chunk.voiced_s)
         self.loop.call_soon_threadsafe(self.chunk_q.put_nowait, chunk)
 
     def _on_level_thread(self, db: float) -> None:
         self.level_db = db
+        self._health("level", db)
 
     def _on_end_thread(self, err: str | None) -> None:
         self.loop.call_soon_threadsafe(self._capture_ended, err)
@@ -310,6 +322,7 @@ class Pipeline:
         if rec.status == "pending":
             rec.status = "done"
         self.publish_rec(rec)
+        self._health("finished", rec)
         if self.metrics:
             self.metrics.write(rec)
         self.records.pop(rec.seq, None)
@@ -326,16 +339,19 @@ class Pipeline:
             try:
                 await self.stt_ready.wait()
                 if self._behind(chunk, rec):
+                    self._health("stt_behind")
                     self._finalize(rec)
                     continue
                 res = await self.loop.run_in_executor(self.stt_exec, self._recognise, chunk.audio, self.source)
             except Exception as e:
                 log.exception("stt failed")
+                self._health("stt_failed")
                 rec.status, rec.note = "failed", f"stt: {e}"
                 self._finalize(rec)
                 continue
             rec.stt_ms = round(res.ms, 1)
             rec.t_stt_done = time.monotonic()
+            self._health("recognised", rec.voiced_s, bool(res.text), rec.t_stt_done - rec.t_speech_end)
             if self.stt.stepped_down and self.stt.stepped_down != self._stepped_announced:
                 self._stepped_announced = self.stt.stepped_down
                 self.operator.publish({"type": "log", "level": "warning", "text": self.stt.stepped_down})

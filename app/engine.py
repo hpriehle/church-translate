@@ -463,6 +463,8 @@ class PublishClient(EngineClient):
         self._meter_owner = hashlib.sha256(f"{url}\n{token}".encode()).hexdigest()[:16]
         self._meter_dirty, self._meter_saved = False, 0.0
         self._load_meter()
+        from .health import HealthReporter
+        self.health = HealthReporter(self._post_health)
 
     # Metering (credits): seconds of speech per chunk, in the languages someone listens to, are kept here and sent
     # every METER_EVERY_S until the hub acknowledges them (so a dropped link only delays them; the hub stores each
@@ -542,6 +544,37 @@ class PublishClient(EngineClient):
         except ValueError:
             data = {}
         return r.status_code, data if isinstance(data, dict) else {}
+
+    async def run_forever(self) -> None:
+        health = asyncio.create_task(self._health_loop())
+        try:
+            await super().run_forever()
+        finally:
+            health.cancel()
+
+    async def _post_health(self, body: dict[str, Any]) -> int:
+        return (await self.hub_api("POST", "/api/hc/health", body))[0]
+
+    async def _health_loop(self) -> None:
+        """Meeting health reports for the hub (health.py), over HTTP: also while the link is down (they are dropped
+        then). Engine errors in a meeting are reported as they happen."""
+        from .health import ErrorHandler
+
+        handler = ErrorHandler(self.health)
+        logging.getLogger().addHandler(handler)
+        try:
+            while True:
+                await asyncio.sleep(1.0)
+                try:
+                    p = getattr(_m().S, "pipeline", None)
+                    if p is None:
+                        continue
+                    p.health = self.health.collector
+                    self.health.tick(p, self.session_code, None if self.private else self.listeners_by_lang)
+                except Exception as e:  # pragma: no cover - a report never stops a meeting
+                    log.debug("health tick: %s", e)
+        finally:
+            logging.getLogger().removeHandler(handler)
 
     async def _session(self, ws) -> None:
         M = _m()

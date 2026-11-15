@@ -208,6 +208,20 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     last_seen REAL,
     revoked_at REAL
 );
+CREATE TABLE IF NOT EXISTS health (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+    device_id INTEGER,
+    session_id INTEGER,
+    code TEXT NOT NULL DEFAULT '',
+    meeting TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    at REAL NOT NULL,
+    received_at REAL NOT NULL,
+    report TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS health_cong ON health(congregation_id, received_at);
+CREATE INDEX IF NOT EXISTS health_received ON health(received_at);
 CREATE INDEX IF NOT EXISTS web_codes_email ON web_codes(email, purpose);
 CREATE INDEX IF NOT EXISTS web_codes_hash ON web_codes(code_hash);
 CREATE INDEX IF NOT EXISTS web_sessions_email ON web_sessions(email);
@@ -256,6 +270,8 @@ BILLING_TYPES = ("credits", "own_key", "internal")
 NO_CREDIT_NEEDED = ("own_key", "internal")   # metered, but never refused for balance or debited
 MAX_CHUNK_S = 60.0     # one reported chunk of speech is never longer than this (the chunker cuts far sooner)
 MAX_LANGS = 20
+HEALTH_KEEP_S = 30 * 86400   # meeting health reports are kept 30 days
+HEALTH_KINDS = ("start", "periodic", "end", "error")
 
 CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", "city", "lat", "lng", "meeting_times",
                "timezone", "email", "email_verified", "created_at", "hidden", "billing")
@@ -1127,6 +1143,44 @@ class Database:
                 self._db.execute("ROLLBACK")
                 raise
         return taken
+
+    # ------------------------------------------------------------ meeting health reports (app/health.py)
+    def record_health(self, cid: int, device_id: int | None, reports: list[dict[str, Any]],
+                      now: float | None = None) -> int:
+        """Store the Mac's health reports (already checked by the API: dicts with a known kind). Each names its hub
+        session code (may be "": the hub hadn't named it, or refused the meeting); the session is looked up among the
+        congregation's own. A report's `at` (the Mac's clock) is kept unless it is more than a day off. Reports older
+        than HEALTH_KEEP_S are deleted. Returns how many were stored."""
+        now = time.time() if now is None else now
+        ids: dict[str, int | None] = {}
+        rows = []
+        for r in reports:
+            code = str(r.get("session") or "")[:40]
+            if code not in ids:
+                found = self._q("SELECT id FROM sessions WHERE congregation_id = ? AND code = ? ORDER BY id DESC"
+                                " LIMIT 1", (cid, code)) if code else []
+                ids[code] = found[0]["id"] if found else None
+            at = r.get("at")
+            at = float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) and abs(at - now) < 86400 \
+                else now
+            rows.append((cid, device_id, ids[code], code, str(r.get("meeting") or "")[:40], r["kind"], at, now,
+                         json.dumps(r, separators=(",", ":"))))
+        with self._lock:
+            self._db.executemany("INSERT INTO health (congregation_id, device_id, session_id, code, meeting, kind, at,"
+                                 " received_at, report) VALUES (?,?,?,?,?,?,?,?,?)", rows)
+            self._db.execute("DELETE FROM health WHERE received_at < ?", (now - HEALTH_KEEP_S,))
+        return len(rows)
+
+    def health(self, cid: int, since: float = 0.0, limit: int = 1000, session: str = "") -> list[dict[str, Any]]:
+        """A congregation's health reports received after `since` (unix time), oldest first, at most `limit` (the
+        newest of them)."""
+        sql = "SELECT * FROM health WHERE congregation_id = ? AND received_at > ?"
+        args: tuple = (cid, since)
+        if session:
+            sql, args = sql + " AND code = ?", args + (session,)
+        rows = self._q(f"SELECT * FROM ({sql} ORDER BY id DESC LIMIT ?) ORDER BY id", args + (limit,))
+        return [{**{k: r[k] for k in ("id", "device_id", "session_id", "code", "meeting", "kind", "at", "received_at")},
+                 "report": json.loads(r["report"])} for r in rows]
 
     def speech_by_language(self, cid: int) -> dict[str, float]:
         """Seconds of heard speech per language, over all of a congregation's sessions."""

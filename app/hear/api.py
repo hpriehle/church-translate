@@ -9,6 +9,7 @@ Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
                             {slug, device_token} at once and the congregation counts as verified.
   GET  /api/hc/verify?token=…   (the link in the e-mail) marks the e-mail verified; the congregation is live-capable
   POST /api/hc/claim        {claim} → 202 {pending} until the link was clicked, then once {device_token, slug}
+  POST /api/hc/health       (device token) {reports: [...]} → the Mac's meeting health reports (app/health.py)
   POST /api/hc/location     (device token) {lat, lng, [address]} or {address} (geocoded) → moves the building's pin
   POST /api/hc/device-link  {email, [slug, device_name]} → e-mails a magic link to add another Mac; the new Mac
                             then polls /api/hc/claim with the returned {claim} exactly like above
@@ -104,8 +105,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import HOME, LOG_DIR, WEB_DIR
-from .db import (BUNDLES, DEVICE_CODE_TTL_S, FREE_SECONDS, LEGACY_CENTS_PER_LANGUAGE_HOUR, RESERVED_SLUGS, Database,
-                 bundle)
+from .db import (BUNDLES, DEVICE_CODE_TTL_S, FREE_SECONDS, HEALTH_KINDS, LEGACY_CENTS_PER_LANGUAGE_HOUR,
+                 RESERVED_SLUGS, Database, bundle)
 from .geo import Geocoder, bounding_box, hide_coordinates_in_access_log, in_box
 from .live import Live
 from .mail import Mailer, RateLimiter, Resend
@@ -143,7 +144,8 @@ class Hear:
                        "verify": RateLimiter(60, 3600), "checkout": RateLimiter(20, 3600),
                        "email_code": RateLimiter(10, 3600), "email_code_addr": RateLimiter(3, 3600),
                        "pair_code": RateLimiter(30, 3600), "emails": RateLimiter(60, 3600),
-                       "slug": RateLimiter(20, 3600), "web_link": RateLimiter(30, 3600)}
+                       "slug": RateLimiter(20, 3600), "web_link": RateLimiter(30, 3600),
+                       "health": RateLimiter(900, 3600)}
 
 
 class FailureLimiter:
@@ -803,6 +805,89 @@ async def own_key_code_redeem(request: Request, body: OwnKeyCode):
 async def billing(request: Request):
     """(device token) How this congregation pays ("credits", "own_key" or "internal") and what it has left."""
     return billing_info(_device_congregation(request), request)
+
+
+HEALTH_MAX_BODY = 64 * 1024
+HEALTH_MAX_REPORTS = 50
+HEALTH_MAX_REPORT = 8 * 1024
+
+
+@router.post("/api/hc/health")
+async def health(request: Request):
+    """(device token) The Mac's meeting health reports (app/health.py): {"reports": [{v, kind, at, meeting, session,
+    …}]}, kind start | periodic | end | error. Stored for 30 days (GET /api/admin/congregations/{id}/health), one INFO
+    log line each. No audio and no text of what was said is in them. Reports that aren't objects with a known kind, or
+    are larger than HEALTH_MAX_REPORT, are skipped."""
+    device, cong = device_and_congregation(request)
+    _limit(request, "health", f"device:{device['id']}")
+    if int(request.headers.get("content-length") or 0) > HEALTH_MAX_BODY:
+        raise HTTPException(413, "Too large.")
+    body = await request.body()
+    if len(body) > HEALTH_MAX_BODY:
+        raise HTTPException(413, "Too large.")
+    try:
+        data = json.loads(body)
+    except ValueError:
+        raise HTTPException(400, "Not JSON.")
+    reports = data.get("reports") if isinstance(data, dict) else None
+    if not isinstance(reports, list):
+        raise HTTPException(400, "No reports.")
+    good = [r for r in reports[:HEALTH_MAX_REPORTS] if isinstance(r, dict) and r.get("kind") in HEALTH_KINDS
+            and len(json.dumps(r)) <= HEALTH_MAX_REPORT]
+    stored = _hear().db.record_health(cong["id"], device["id"], good) if good else 0
+    for r in good:
+        log.info("%s", health_line(cong["slug"], r))
+    return {"ok": True, "stored": stored}
+
+
+def _num(x: Any) -> float | None:
+    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else None
+
+
+def health_line(slug: str, r: dict[str, Any]) -> str:
+    """One log line for a health report: "riga-2 health: mic -32 dB speech 18s/30s, asr 6 seg, lag 4s, tr 6/6 ok,
+    listeners en:3"."""
+    kind = r.get("kind")
+    head = f"{slug} health" + ("" if kind == "periodic" else f" {kind}")
+    if kind == "error":
+        e = r.get("error") if isinstance(r.get("error"), dict) else {}
+        return f"{head}: {str(e.get('type') or '')[:80]}: {str(e.get('message') or '')[:200]}"
+    parts = []
+    if kind == "start":
+        sys_ = r.get("system") if isinstance(r.get("system"), dict) else {}
+        langs = ",".join(map(str, r.get("speakers") or [])) + "→" + ",".join(map(str, r.get("targets") or []))
+        parts.append(f"{langs} input {str(r.get('input') or '?')[:60]!r} app {sys_.get('app') or '?'}"
+                     f" ({sys_.get('build') or '?'}) {sys_.get('arch') or '?'}")
+    mic = r.get("mic") if isinstance(r.get("mic"), dict) else {}
+    db_, speech, win = _num(mic.get("rms_db")), _num(mic.get("speech_s")), _num(r.get("window_s"))
+    parts.append(f"mic {'-' if db_ is None else f'{db_:.0f}'} dB speech {speech or 0:.0f}s/{win or 0:.0f}s")
+    asr = r.get("asr") if isinstance(r.get("asr"), dict) else {}
+    a = f"asr {_num(asr.get('segments')) or 0:.0f} seg"
+    if r.get("asr_stepped_down"):
+        a += " (stepped down)"
+    if _num(asr.get("skipped_behind")):
+        a += f" {asr['skipped_behind']} skipped behind"
+    parts.append(a)
+    lag_now, lag_max = _num(r.get("lag_now")), _num(r.get("lag_max"))
+    if lag_now is not None or lag_max is not None:
+        parts.append(f"lag {lag_now or 0:.0f}s" + (f" (max {lag_max:.0f}s)" if lag_max and lag_max > (lag_now or 0)
+                                                   else ""))
+    tr = r.get("tr") if isinstance(r.get("tr"), dict) else {}
+    req = sum(_num(t.get("req")) or 0 for t in tr.values() if isinstance(t, dict))
+    ok = sum(_num(t.get("ok")) or 0 for t in tr.values() if isinstance(t, dict))
+    failed = sum(_num(t.get("failed")) or 0 for t in tr.values() if isinstance(t, dict))
+    if req:
+        t = f"tr {ok:.0f}/{req:.0f} ok"
+        if failed:
+            err = next((str(x.get("err")) for x in tr.values() if isinstance(x, dict) and x.get("err")), "")
+            t += f" ({failed:.0f} failed{': ' + err[:80] if err else ''})"
+        parts.append(t)
+    listeners = r.get("listeners") if isinstance(r.get("listeners"), dict) else {}
+    if listeners:
+        parts.append("listeners " + " ".join(f"{str(k)[:12]}:{_num(v) or 0:.0f}" for k, v in listeners.items()))
+    if _num(r.get("errors")):
+        parts.append(f"{r['errors']} errors")
+    return f"{head}: " + ", ".join(parts)
 
 
 @router.get("/api/hc/usage")

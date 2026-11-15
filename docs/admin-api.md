@@ -385,6 +385,72 @@ The device's token stops working for good: its app calls get 403, a meeting it i
 removed from the congregation."), and its link to the hub closes. The row stays for the history. To use that Mac
 again, connect it with a new code (Add device or Email me a code).
 
+## Meeting health (what is happening on a church's Mac)
+
+During every meeting the Mac's engine (`app/health.py`) sends the hub small health reports with its device token:
+`POST /api/hc/health {"reports": [...]}`. One goes out when the meeting starts (`kind: "start"`, with a settings
+snapshot), every 30 s (`"periodic"`), when it ends (`"end"`), and at once on an engine error (`"error"`, at most one
+every 10 s; later ones are counted in the next periodic report). Reports are best effort: sent in the background,
+dropped when the Mac is offline. They never contain audio, anything that was said or translated, or anything about
+a listener but how many there are. The hub logs one INFO line per report:
+
+```
+riga-2 health start: ru→en input 'MacBook Pro Microphone' app 0.3.0 (19) x86_64, mic -32 dB speech 0s/0s, asr 0 seg
+riga-2 health: mic -32 dB speech 18s/30s, asr 6 seg, lag 4s (max 6s), tr 6/6 ok, listeners en:3
+riga-2 health error: RuntimeError: stt failed: …
+```
+
+Reports are kept 30 days (older ones are deleted as new ones arrive).
+
+### GET /api/admin/congregations/{id}/health?since=&session=&limit=
+
+`since`: Unix time, reports received after it (default: the last 24 hours). `session`: only one hub session code's.
+`limit` (1–5000, default 1000): the newest that many. Oldest first. 404 for an unknown congregation.
+
+```json
+{"congregation": {"id": 7, "slug": "riga-2", "name": "Riga"},
+ "since": 1794563600.0,
+ "reports": [
+  {"id": 41, "device_id": 3, "device": "Crystal's MacBook Pro", "session_id": 118, "code": "S1",
+   "meeting": "20261115-093200", "kind": "periodic", "at": 1794650000.0, "received_at": 1794650000.4,
+   "report": {
+     "v": 1, "kind": "periodic", "at": 1794650000.0, "meeting": "20261115-093200", "session": "S1",
+     "window_s": 30.0, "speakers": ["ru"], "targets": ["en"], "input": "MacBook Pro Microphone", "mic_warning": null,
+     "mic": {"rms_db": -32.4, "peak_db": -8.0, "loud_s": 19.0, "speech_s": 18.2},
+     "asr": {"segments": 6, "seconds": 17.5, "empty": 0, "failed": 0, "skipped_behind": 0},
+     "asr_engine": "faster-whisper", "asr_model": "small", "asr_stepped_down": "", "asr_rtf": 0.8, "asr_queue": 0,
+     "lag_now": 4.2, "lag_max": 6.0,
+     "tr": {"en": {"req": 6, "ok": 6, "failed": 0, "skipped": 0, "err": ""}},
+     "voice": {"en": {"ok": 6, "failed": 0, "dropped": 0, "err": ""}},
+     "listeners": {"en": 3}, "errors": 0,
+     "system": {"arch": "x86_64", "cpu": "Intel(R) Core(TM) i7-8850H CPU @ 2.60GHz", "cores": 12,
+                "os": "Darwin 14.6", "app": "0.3.0", "build": "19", "cpu_pct": 182.5, "rss_mb": 1630}}}]}
+```
+
+The row's `at` is the Mac's clock (the hub's time instead when the Mac's is more than a day off); `received_at` is
+the hub's, and `since` filters on it. `session_id`/`code`: the hub session the report names; `code` is `""` and
+`session_id` null when the hub hadn't named the session yet or refused the meeting.
+
+What the report fields mean:
+
+| Field | Meaning |
+|---|---|
+| `window_s` | Seconds this report covers (since the previous one). |
+| `speakers`, `targets` | Speaker language(s) set, translation languages on. |
+| `input`, `mic_warning` | The audio input in use, and why it isn't delivering sound (if the app knows). |
+| `mic.rms_db`, `mic.peak_db` | Mic level over the window, dBFS (`null`: no audio came in at all). |
+| `mic.loud_s` | Seconds the level was above −45 dBFS. `mic.speech_s`: seconds the voice detector took as speech. |
+| `asr.segments`, `asr.seconds` | Pieces of speech recognised as text, and their length. `empty`: recognised as nothing (noise). `failed`: recognition errors. `skipped_behind`: skipped because recognition fell too far behind. |
+| `asr_engine`, `asr_model`, `asr_stepped_down` | The speech recognition in use; `asr_stepped_down` says when the Mac moved to a smaller model to keep up. `asr_rtf`: its time per second of speech. `asr_queue`: pieces waiting. |
+| `lag_now`, `lag_max` | Seconds behind live now, and the most in the window (captions behind the speaker, or speech waiting for recognition). |
+| `tr.<lang>` | Translations asked / done / failed / skipped (noise), with the last failure message. |
+| `voice.<lang>` | Voiced lines done / failed / dropped (too far behind), with the last failure message. |
+| `listeners` | Phones per language (on the Mac's Wi-Fi plus through the hub). |
+| `errors`, `last_error` | Engine errors in the window, the last one's type and message (cut to 200 characters). |
+| `system` | CPU architecture and model, cores, OS, app version and build, the engine's CPU % (of one core) and memory. |
+| `settings` (start) | Input device setting, input channel and gain, sharing (online / local), translation backend, speech recognition setting, voice engine per language. |
+| `error` (error) | `{type, message}` of the error. |
+
 ## Older admin routes (unchanged)
 
 `GET /api/admin/congregations` (the list, with balance), `POST /api/admin/congregations/{id}/credits

@@ -199,6 +199,8 @@ final class AppModel: ObservableObject {
         var env: [String: String] = ["HEARCHURCH_DEVICE_NAME": deviceName]
         // The hub records it per Mac (the operator's install stats by app version).
         if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String { env["HEARCHURCH_APP_VERSION"] = v }
+        // The build number goes in the meeting health reports (app/health.py).
+        if let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String { env["HEARCHURCH_APP_BUILD"] = b }
         if let key = Keychain.get(.apiKey) {
             // Unadvertised: a subscription token runs through the command-line tool instead of the API.
             env[HubClient.isSubscriptionToken(key) ? "CLAUDE_CODE_OAUTH_TOKEN" : "ANTHROPIC_API_KEY"] = key

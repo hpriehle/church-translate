@@ -12,6 +12,7 @@ docs/admin-api.md:
   GET  /api/admin/congregations/{id}          (congregation.aliases: old slugs that redirect to the current one)
   GET  /api/admin/congregations/{id}/account   its e-mails (main first) and devices (revoked ones too)
   POST /api/admin/devices/{id}/revoke          the device's token stops working; its meeting ends
+  GET  /api/admin/congregations/{id}/health?since=&session=&limit=   the Macs' meeting health reports (30 days)
 
 The ledger has no table of its own: top-ups and manual credits are `credits` rows, refunds are `refunds` rows (one per
 change of a top-up's refunded total), and usage is the metered speech of each meeting. Each calendar month (UTC) a
@@ -414,6 +415,22 @@ async def admin_congregation(request: Request, cid: int, meetings: int = Query(d
         "meetings": recent, "meetings_total": len(h.db.sessions(cid)),
         **_page(rows, "", transactions, ""),
     }
+
+
+@router.get("/api/admin/congregations/{cid}/health")
+async def admin_health(request: Request, cid: int, since: float | None = Query(default=None, ge=0),
+                       session: str = Query(default="", max_length=40),
+                       limit: int = Query(default=1000, ge=1, le=5000)):
+    """The meeting health reports its Macs sent (app/health.py), received after `since` (unix time; default the last
+    24 hours), oldest first; `session` keeps one session code's. Kept 30 days."""
+    h = _operator(request)
+    c = h.db.congregation(cid)
+    if c is None:
+        raise HTTPException(404, "No such congregation.")
+    since = time.time() - DAY if since is None else since
+    names = {d["id"]: d["name"] for d in h.db.devices(cid, revoked=True)}
+    reports = [{**r, "device": names.get(r["device_id"])} for r in h.db.health(cid, since, limit, session)]
+    return {"congregation": _who(c, cid), "since": since, "reports": reports}
 
 
 # ------------------------------------------------------------------ e-mails and devices
