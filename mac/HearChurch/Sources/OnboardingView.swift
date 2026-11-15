@@ -574,7 +574,7 @@ private struct ClaudeStep: View {
             }
         } else {
             StepTitle(title: "Translation",
-                      subtitle: "Hear Church translates on prepaid credit: $5 per language for each hour of speech, and the first hour is free.")
+                      subtitle: "One language-hour free every month, unlimited listeners. More hours come in prepaid bundles, from $20 for 4 hours.")
             Text("Nothing to set up here: continue, and your first hour is free. You can buy credit later in Settings → Billing.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 4)

@@ -811,17 +811,22 @@ private struct BillingSettings: View {
     @ViewBuilder private var balance: some View {
         Section("Credit") {
             if let b = model.billing {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(String(format: "%.1f", max(0, b.hoursLeft ?? 0))).font(.system(size: 34, weight: .semibold)).monospacedDigit()
-                    Text("hours left").foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Self.hours(b.freeLeftHours)).font(.system(size: 34, weight: .semibold)).monospacedDigit()
+                        Label("free this month", systemImage: "gift").foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Self.hours(max(0, b.paidHoursLeft))).font(.system(size: 34, weight: .semibold)).monospacedDigit()
+                        Text("paid hours left").foregroundStyle(.secondary)
+                    }
                     Spacer()
-                    Text(Self.usd(b.balanceUSD)).font(.title3).monospacedDigit().foregroundStyle(b.balanceUSD < 0 ? .red : .primary)
+                    if b.paidHoursLeft < 0 {
+                        Text(Self.usd(b.balanceUSD)).font(.title3).monospacedDigit().foregroundStyle(.red)
+                    }
                 }
-                Text("An hour is one language for one hour of speech: a meeting translated into two languages uses two hours an hour. \(Self.usd(b.usdPerHour)) per hour.")
+                Text(freeLine(b))
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if b.freeLeftHours > 0 {
-                    Label(String(format: "%.1f free hours left", b.freeLeftHours), systemImage: "gift").foregroundStyle(.secondary)
-                }
                 if b.outOfCredit { Text(b.message).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             } else {
                 Text(problem ?? "Loading…").foregroundStyle(.secondary)
@@ -834,11 +839,12 @@ private struct BillingSettings: View {
             Section {
                 if b.canBuy {
                     HStack {
-                        ForEach(b.buyUSD, id: \.self) { usd in
-                            Button { Task { await buy(usd) } } label: {
+                        ForEach(b.bundles, id: \.self) { x in
+                            Button { Task { await buy(x.usd) } } label: {
                                 VStack(spacing: 1) {
-                                    Text("$\(usd)").bold()
-                                    Text(String(format: "%g hours", Double(usd) / max(b.usdPerHour, 0.01))).font(.caption)
+                                    Text("$\(x.usd)").bold()
+                                    Text("\(Self.hours(x.hours)) hours").font(.caption)
+                                    Text(String(format: "$%.2f/h", x.usdPerHour)).font(.caption2).foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity)
                             }
@@ -852,9 +858,9 @@ private struct BillingSettings: View {
                 }
                 if let problem, model.billing != nil { Text(problem).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             } header: {
-                Text("Buy credit")
+                Text("Buy hours")
             } footer: {
-                Text("A secure payment page opens in your browser. The receipt goes to the congregation's main e-mail.")
+                Text("Hours don't expire. Unused hours can be refunded on request. A secure payment page opens in your browser; the receipt goes to the congregation's main e-mail.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -888,6 +894,9 @@ private struct BillingSettings: View {
                         Text(Self.kind(c.kind))
                         Text(c.at.formatted(date: .abbreviated, time: .omitted)).foregroundStyle(.secondary)
                         Spacer()
+                        if let h = c.hours, c.kind != "refund" {
+                            Text("\(Self.hours(h)) hours").foregroundStyle(.secondary).monospacedDigit()
+                        }
                         Text((c.amountUSD > 0 ? "+" : "") + Self.usd(c.amountUSD)).monospacedDigit()
                     }
                 }
@@ -912,6 +921,18 @@ private struct BillingSettings: View {
     }
 
     static func usd(_ v: Double) -> String { v < 0 ? String(format: "-$%.2f", -v) : String(format: "$%.2f", v) }
+
+    /// 4 → "4", 1.5 → "1.5", 0.25 → "0.3".
+    static func hours(_ h: Double) -> String {
+        let s = String(format: "%.1f", h)
+        return s.hasSuffix(".0") ? String(s.dropLast(2)) : s
+    }
+
+    private func freeLine(_ b: HubClient.Billing) -> String {
+        var s = "One language-hour free every month; unused free time doesn't carry over."
+        if let r = b.freeResetsAt { s += " Next free hour: \(r.formatted(date: .abbreviated, time: .omitted))." }
+        return s + " An hour is one language for one hour of speech: a meeting translated into two languages uses two hours an hour. Listeners are unlimited."
+    }
 
     private func load() async {
         guard model.profile.setupDone, let token = Keychain.get(.deviceToken), !token.isEmpty else { return }

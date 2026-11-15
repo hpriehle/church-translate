@@ -133,16 +133,24 @@ enum HubClient {
 
     // MARK: billing (Settings → Billing) and the listener link
 
+    /// A credit bundle: its price, the language-hours it gives, and what an hour comes to.
+    struct Bundle: Equatable, Hashable {
+        let usd: Int
+        let hours: Double
+        let usdPerHour: Double
+    }
+
     /// GET /api/hc/billing: how the congregation pays and what it has left.
     struct Billing: Equatable {
         let mode: String               // "credits", "own_key" or "internal" (no charge: no balance, nothing to buy)
         let balanceUSD: Double
-        let hoursLeft: Double?         // language-hours: the free hour and the credit
-        let freeLeftHours: Double
+        let hoursLeft: Double?         // language-hours: this month's free hour and the paid hours
+        let freeLeftHours: Double      // what's left of this month's free hour (resets on the 1st, UTC)
+        let paidHoursLeft: Double      // bought hours not used yet (negative when overdrawn)
+        let freeResetsAt: Date?
         let outOfCredit: Bool
         let canBuy: Bool
-        let buyUSD: [Int]
-        let usdPerHour: Double
+        let bundles: [Bundle]
         let message: String
         var ownKey: Bool { mode == "own_key" }
         var included: Bool { mode == "internal" }
@@ -153,11 +161,20 @@ enum HubClient {
         try check(json, status)
         let b = json["balance"] as? [String: Any] ?? [:]
         func num(_ v: Any?) -> Double? { (v as? Double) ?? (v as? Int).map(Double.init) }
+        let bundles = (json["bundles"] as? [[String: Any]] ?? []).compactMap { x -> Bundle? in
+            guard let usd = x["usd"] as? Int, let hours = num(x["hours"]), hours > 0 else { return nil }
+            return Bundle(usd: usd, hours: hours, usdPerHour: num(x["usd_per_hour"]) ?? Double(usd) / hours)
+        }
+        // a hub from before the bundles: its amounts at its one rate
+        let rate = num(json["usd_per_language_hour"]) ?? 5
+        let amounts = (json["buy_usd"] as? [Int] ?? []).map { Bundle(usd: $0, hours: Double($0) / max(rate, 0.01), usdPerHour: rate) }
+        let free = (num(b["free_left_min"]) ?? 0) / 60
         return Billing(mode: json["billing"] as? String ?? "credits", balanceUSD: num(json["balance_usd"]) ?? 0,
-                       hoursLeft: num(json["language_hours_left"]), freeLeftHours: (num(b["free_left_min"]) ?? 0) / 60,
+                       hoursLeft: num(json["language_hours_left"]), freeLeftHours: free,
+                       paidHoursLeft: num(json["paid_hours_left"]) ?? ((num(json["language_hours_left"]) ?? 0) - free),
+                       freeResetsAt: num(json["free_resets_at"]).map { Date(timeIntervalSince1970: $0) },
                        outOfCredit: json["out_of_credit"] as? Bool ?? false, canBuy: json["can_buy"] as? Bool ?? false,
-                       buyUSD: (json["buy_usd"] as? [Int]) ?? [10, 25, 50, 100], usdPerHour: num(json["usd_per_language_hour"]) ?? 5,
-                       message: json["message"] as? String ?? "")
+                       bundles: bundles.isEmpty ? amounts : bundles, message: json["message"] as? String ?? "")
     }
 
     struct Meeting: Identifiable, Hashable {
@@ -168,6 +185,7 @@ enum HubClient {
     }
     struct Charge: Identifiable, Hashable {
         let kind: String; let at: Date; let amountUSD: Double
+        var hours: Double? = nil       // the language-hours a top-up gave (a bundle's hours)
         var id: String { "\(kind)\(at.timeIntervalSince1970)" }
     }
 
@@ -184,12 +202,13 @@ enum HubClient {
                     ownKey: m["billing"] as? String == "own_key", included: m["billing"] as? String == "internal")
         }
         let charges = (json["charges"] as? [[String: Any]] ?? []).map { c in
-            Charge(kind: c["kind"] as? String ?? "", at: Date(timeIntervalSince1970: num(c["at"])), amountUSD: num(c["amount_usd"]))
+            Charge(kind: c["kind"] as? String ?? "", at: Date(timeIntervalSince1970: num(c["at"])), amountUSD: num(c["amount_usd"]),
+                   hours: c["hours"] == nil ? nil : num(c["hours"]))
         }
         return (meetings, charges)
     }
 
-    /// POST /api/hc/checkout: a Stripe Checkout page for that much credit, opened in the browser.
+    /// POST /api/hc/checkout: a Stripe Checkout page for the bundle at that price, opened in the browser.
     static func checkout(usd: Int, token: String) async throws -> URL {
         let (json, status) = try await send("/api/hc/checkout", ["usd": usd], token: token)
         if status == 503 { throw Failure(message: "Buying credit isn't set up yet. Write to support@hearchurch.com.") }
