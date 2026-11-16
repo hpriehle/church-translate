@@ -65,7 +65,12 @@ upper bound and as a *relative* ranking.
 | Omnilingual CTC 300M v2 (fp32) | 45.7% | 14.5% | 0.85 | 7 s | 3.3 GB |
 | Omnilingual CTC 1B v2 (fp32) | 39.2% | 12.2% | 2.53 | 165 s (first load, cold disk) | 5.5 GB |
 | whisper-small-wolof (int8) | 62.1% | 29.4% | 0.74 | 2 s | 0.7 GB |
-| Whosper-large-v2 (merged, int8) | see below | | | | |
+| Whosper-large-v2 (merged, int8) | not finished | | ~36–150 s per 15 s utterance (RTF ~2.5–10) | | 2 GB |
+
+Whosper (the adapter merged into large-v2, converted to CTranslate2 int8) was stopped after 22 of 40
+utterances: on the loaded box it took 36–150 s per utterance (a 1.55B autoregressive model is the slowest
+option by far). Its text looked close to Omnilingual 1B's, but it
+wasn't a top pick anyway: training-data licences (Kallaama) aren't clear and FLEURS is in its training data.
 
 Why WER looks high: FLEURS references write numbers as digits (`1990`) while every model spells them out in
 Wolof, and Wolof spelling varies (French loanwords: `pyramid`/`piramit`, `lumiyeer`/`limier`). CER is the
@@ -91,7 +96,25 @@ SentencePiece tokenizer are simple to reimplement. That port is the real enginee
 
 ## Sermon clip (judged by eye)
 
-Pending (see update below).
+Clip: the first 3 minutes of `archive.org/download/Sermons_201307/Diamono.mp3`, a Wolof sermon recorded
+in a hall (one speaker, room echo, Wolof mixed with French). It's a public archive.org item, likely a Muslim
+sermon rather than a church one; no Wolof church recording with a clear licence turned up in the time box.
+(A GRN "Jesus Story" Wolof recording, © 2006 Jesus Film Project, was also downloaded but is studio-read, not
+preaching, so it wasn't used.) Cut into fixed 20 s windows, no VAD. Audio is not committed.
+
+- **Omnilingual CTC 300M:** produces text for every window. Many words are recognisable Wolof (`yàlla`,
+  `xale`, `jigéen`, `góor`, `takk`, `jabar`, `jëkkër`) and the topic (girls, marriage, the age at which
+  children are married, `cinq ans`, `problème`) comes through, but word boundaries and spelling are often
+  wrong and long stretches are garbled. French code-switching comes out spelled phonetically.
+  Example (40 s): `… xale yi xaari ñu kenn ñoom bi ñuy génn ñu góoy ñi … jigéen bu ñu endal … góor bu ñu endal …`
+- **whisper-small-wolof:** cleaner spelling where it outputs anything, but it **drops most of the speech**:
+  whole 20 s windows came out as 3–5 words (`canna di anna ceegal`, `waccam na amul jëkkër di matas`).
+  That's the model trained on clips under 6 s; it doesn't handle long, fast preaching.
+
+Verdict: Omnilingual 300M gives a translator something to work with (gist-level); whisper-small-wolof loses
+too much. Neither is good enough for verbatim Wolof captions. Speed on this clip isn't meaningful: the box's
+load average was 23 on 4 cores during the run (Omnilingual 300M RTF 3.4, whisper-small 2.2 here, vs 0.85 and
+0.74 on FLEURS earlier in the day).
 
 ## Harrison decides
 
