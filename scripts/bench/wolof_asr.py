@@ -110,7 +110,7 @@ def main():
             txt = eng(w)
             work += time.time() - t
             outs.append({"t": round(i * a.window), "text": txt})
-            print(f"[{i * a.window:5.0f}s] {txt}", flush=True)
+            print(f"[{i * a.window:5.0f}s] {txt}  ({time.time() - t:.0f} s)", flush=True)
         res.update(clip=str(a.clip), audio_s=round(len(audio) / 16000, 1), work_s=round(work, 1),
                    rtf=round(work / (len(audio) / 16000), 3), windows=outs)
     else:
@@ -127,6 +127,8 @@ def main():
             hyps.append(norm(hyp) or "<empty>")
             per.append({"file": p.name, "ref": ref, "hyp": hyp, "s": round(dt, 2)})
             print(f"{len(per):4d} {dt:5.1f}s | {hyp[:90]}", flush=True)
+            # partial results, so a slow run cut off by a time box still yields per-utterance output
+            a.out.with_suffix(".partial.json").write_text(json.dumps(per, ensure_ascii=False, indent=1))
         res.update(n=len(per), audio_s=round(audio_s, 1), work_s=round(work, 1), rtf=round(work / audio_s, 3),
                    wer=round(jiwer.wer(refs, hyps), 4), cer=round(jiwer.cer(refs, hyps), 4), items=per)
         print(f"WER {res['wer']:.3f}  CER {res['cer']:.3f}  RTF {res['rtf']:.3f}  n={len(per)}")
