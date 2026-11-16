@@ -25,7 +25,8 @@ from .chunker import Chunk, Chunker, SileroVad
 from .config import HOME, LOG_DIR, Settings, tts_for
 from .metrics import ChunkRecord, LangResult, MetricsLog, live_stats
 from .languages import SPEAKER_LANGUAGES
-from .stt import AutoLanguage, Transcriber, build_prompt, resolve_engine
+from .stt import AutoLanguage, SttResult, Transcriber, build_prompt, resolve_engine
+from . import wolof_asr
 from .translate.prompts import whisper_hints
 
 log = logging.getLogger("pipeline")
@@ -83,8 +84,12 @@ class Pipeline:
         # Each chunk's language is detected among all languages; one spoken that isn't a speaker language is
         # recognised as itself (never forced into one: that would be Whisper's free translation) and, once it is
         # heard for sure, added to the meeting's speaker languages by `on_new_speaker` (main.auto_add_speaker).
-        self.autolang = AutoLanguage(set(SPEAKER_LANGUAGES))
+        # Wolof can't be heard by the detector: never added, and a meeting with Wolof routes by wolof_asr.route.
+        self.autolang = AutoLanguage(set(SPEAKER_LANGUAGES) - wolof_asr.UNDETECTABLE)
         self.on_new_speaker: Callable[[str], None] | None = None
+        # Wolof speech recognition (its own model, see wolof_asr.py), loaded while Wolof is a speaker language.
+        self.wolof = wolof_asr.WolofRecogniser(stt.engine)
+        self._wolof_missing_told = False
 
     def add_channel(self, ch: Channel) -> None:
         self.channels[ch.code] = ch
@@ -144,13 +149,66 @@ class Pipeline:
 
     def _recognise(self, audio, prev_src: str):
         """Speech-recognition thread: the chunk's language (the speaker languages are a prior, see AutoLanguage),
-        then its words."""
-        d = self.autolang.decide(self.stt.language_probs(audio), self.speakers, prev_src)
-        lang = d.language
-        prompt = build_prompt(self.hints, self.prev_en if self.prev_lang == lang else "", lang)
-        res = self.stt.transcribe(audio, prompt, lang)
-        res.detected, res.add = d.detected, d.add
+        then its words.
+
+        With Wolof among the speaker languages (docs/wolof-speaker.md), Whisper's detector, which can't hear Wolof,
+        only picks out the other speaker languages when it is sure (wolof_asr.route); the rest is Wolof, heard by
+        the Wolof model. Nothing is added to the speaker languages automatically then: a Wolof chunk the detector
+        takes for French or Javanese twice in a row must not turn the meeting's Wolof into Whisper's French."""
+        speakers = self.speakers
+        if wolof_asr.WOLOF in speakers:
+            others = [c for c in speakers if c not in wolof_asr.UNDETECTABLE]
+            lang, detected = wolof_asr.route(self.stt.language_probs(audio) if others else {}, speakers, prev_src)
+            add = ""
+        else:
+            d = self.autolang.decide(self.stt.language_probs(audio), speakers, prev_src)
+            lang, detected, add = d.language, d.detected, d.add
+        if lang == wolof_asr.WOLOF:
+            res = self._recognise_wolof(audio)
+        else:
+            prompt = build_prompt(self.hints, self.prev_en if self.prev_lang == lang else "", lang)
+            res = self.stt.transcribe(audio, prompt, lang)
+        res.detected, res.add = detected, add
         return res
+
+    def _recognise_wolof(self, audio) -> SttResult:
+        """A Wolof chunk: the Wolof model, with Whisper's checks for empty, non-speech and repeated output."""
+        try:
+            return self.stt.transcribe(audio, "", wolof_asr.WOLOF, raw=self.wolof.transcribe)
+        except wolof_asr.ModelMissing:
+            if not self._wolof_missing_told:
+                self._wolof_missing_told = True
+                self._tell("warning", "Wolof speech recognition is still downloading: Wolof speech is skipped until "
+                                      "it's ready.")
+            return SttResult(text="", ms=0.0, language=wolof_asr.WOLOF, dropped_reason="no Wolof model")
+
+    def _tell(self, level: str, text: str) -> None:
+        """A line in the operator's log, from any thread."""
+        msg = {"type": "log", "level": level, "text": text}
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.operator.publish, msg)
+        else:
+            self.operator.publish(msg)
+
+    def sync_wolof(self) -> None:
+        """Load the Wolof model while Wolof is a speaker language (and it's downloaded), free it when it no longer
+        is. On the speech-recognition thread, so a load never runs alongside a chunk."""
+        wolof = getattr(self, "wolof", None)
+        if wolof is None:
+            return
+        want = wolof_asr.WOLOF in self.speakers
+        if want:
+            self._wolof_missing_told = False
+        if want == wolof.ready or (want and not wolof.available()):
+            return
+
+        def run() -> None:
+            if want:
+                if not wolof.load() and wolof.error:
+                    self._tell("error", wolof.error)
+            else:
+                wolof.unload()
+        self.stt_exec.submit(run)
 
     def _hints(self) -> list[str]:
         hints: list[str] = []
@@ -489,6 +547,7 @@ class Pipeline:
         self.glossaries = glossaries
         self.hints = self._hints()
         self.stt.cfg = settings.stt
+        self.sync_wolof()
         for code, ch in self.channels.items():
             ch.backlog.cfg = settings.backlog
             ch.mixer.max_age_s = settings.backlog.drop_above_s + 5

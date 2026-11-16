@@ -7,6 +7,9 @@ Phase 4 adds hashes, more languages and our own download host.
 The Wolof voice also needs torch and transformers (about 800 MB), which the Mac app leaves out and fetches
 from hearchurch.com with that voice: wolof_libs.json in the app names the signed archive and its hash
 (mac/wolof_libs.sh builds it). From a checkout there is no such file: the libraries are in the virtualenv.
+
+Wolof speech recognition ("speech-wo", for a Wolof speaker language) comes from hearchurch.com too, never from
+Hugging Face: wolof_asr.json names this computer's model archive and its hash (docs/wolof-speaker.md).
 """
 from __future__ import annotations
 
@@ -25,6 +28,7 @@ from typing import Any, Callable
 
 import httpx
 
+from . import wolof_asr
 from .config import HOME, PIPER_DIR, ROOT
 
 log = logging.getLogger("packages")
@@ -79,6 +83,8 @@ LIBS_USERS = ("wo", "zh")       # these two share the downloaded libraries (the 
 FASTER_WHISPER_MB = 486
 FASTER_WHISPER_STEP_MB = 148    # the "base" model it can step down to (see stt.FW_LADDER)
 SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127, "pt": 126, "uk": 228, "fa": 127, "ne": 63, "vi": 63, "zh": 176, "en": 126, "lv": 64}
+# Wolof speech recognition before its model is published (wolof_asr.json): the expected sizes.
+WOLOF_ASR_MB = {"mlx": 1700, "onnx": 330}
 LIBS_MANIFEST = ROOT / "wolof_libs.json"
 LIBS_DIR = HOME / "packages"
 
@@ -112,6 +118,8 @@ class Package:
     g2pw: bool = False
     piper_voices: tuple[str, ...] = ()
     libs: dict[str, Any] | None = None
+    model: dict[str, Any] | None = None   # a model from our download host (wolof_asr.json): {"id", "url", "sha256", ...}
+    unavailable: str = ""        # why it can't be downloaded (not published for this computer yet)
     state: str = "unknown"       # "ready" | "missing" | "downloading" | "failed"
     error: str = ""
     done_bytes: int = 0
@@ -160,7 +168,15 @@ def _piper_files(voice: str) -> list[tuple[str, Path]]:
              PIPER_DIR / f"{voice}.{ext}") for ext in ("onnx", "onnx.json")]
 
 
-def package_for(code: str, stt_model: str) -> Package | None:
+def package_for(code: str, stt_model: str, asr_runtime: str = "") -> Package | None:
+    if code == wolof_asr.PACKAGE_ID:   # Wolof speech recognition: needed when Wolof is a speaker language
+        from .stt import resolve_engine
+
+        rt = asr_runtime or wolof_asr.runtime(resolve_engine("auto"))
+        entry = wolof_asr.manifest(rt)
+        size = round(entry["size"] / 1e6) if entry else WOLOF_ASR_MB[rt]
+        return Package(code, "Wolof speech recognition", size, model=entry,
+                       unavailable="" if entry else "Wolof speech recognition can't be downloaded yet.")
     if code == "speech":
         if "faster-whisper" not in stt_model:
             return Package("speech", "Speech recognition", SIZES_MB["speech"], hf_repos=(stt_model,))
@@ -197,6 +213,7 @@ def package_for(code: str, stt_model: str) -> Package | None:
 class Packages:
     def __init__(self, stt_model: str = "mlx-community/whisper-large-v3-turbo") -> None:
         self.stt_model = stt_model
+        self.asr_runtime = ""            # "mlx" | "onnx" for the Wolof model ("": from this computer)
         self.items: dict[str, Package] = {}
         self._libs_lock = asyncio.Lock()   # Wolof and Chinese can start at once and share one archive
         self.on_ready: Callable[[], None] | None = None   # e.g. load the voices that were missing
@@ -206,7 +223,7 @@ class Packages:
         out = []
         for code in ["speech", *languages]:
             if code not in self.items:
-                p = package_for(code, self.stt_model)
+                p = package_for(code, self.stt_model, self.asr_runtime)
                 if p is None:
                     continue
                 self.items[code] = p
@@ -223,6 +240,8 @@ class Packages:
 
     @staticmethod
     def _present(p: Package) -> bool:
+        if p.id == wolof_asr.PACKAGE_ID:
+            return wolof_asr.installed(p.model)
         if not all(_hf_cached(r, p.hf_only) for r in p.hf_repos):
             return False
         if p.libs and not (LIBS_DIR / p.libs["id"]).is_dir():
@@ -234,6 +253,13 @@ class Packages:
     @staticmethod
     def _done_bytes(p: Package) -> int:
         n = sum(_bytes_in(_hf_dir(r)) for r in p.hf_repos + p.hf_extra)
+        if p.model:
+            archive = wolof_asr.MODELS_DIR / f'{p.model["id"]}.tar.gz'
+            part = archive.with_name(archive.name + ".part")
+            if part.exists():
+                n += part.stat().st_size
+            elif archive.exists():   # downloaded, being checked and unpacked
+                n += p.model["size"]
         if p.libs:
             archive = LIBS_DIR / f'{p.libs["id"]}.tar.gz'
             part = archive.with_name(archive.name + ".part")
@@ -256,7 +282,7 @@ class Packages:
 
     async def remove(self, code: str) -> None:
         """Delete one language's downloaded voice. Speech recognition is needed for every language, so it stays."""
-        p = self.items.get(code) or package_for(code, self.stt_model)
+        p = self.items.get(code) or package_for(code, self.stt_model, self.asr_runtime)
         if p is None or code == "speech":
             raise ValueError(f"{code} can't be removed")
         if p.state == "downloading":
@@ -268,6 +294,8 @@ class Packages:
 
     @staticmethod
     def _delete(p: Package) -> None:
+        if p.model:
+            wolof_asr.remove(p.model)
         for repo in p.hf_repos + p.hf_extra:
             shutil.rmtree(_hf_dir(repo), ignore_errors=True)
         if p.g2pw:
@@ -284,6 +312,9 @@ class Packages:
 
     def download_missing(self, languages: list[str]) -> None:
         for p in self.wanted(languages):
+            if p.unavailable:
+                p.state, p.error = "failed", p.unavailable
+                continue
             if p.state in ("missing", "failed") and (p.task is None or p.task.done()):
                 p.state, p.error, p.done_bytes = "downloading", "", 0
                 p.task = asyncio.create_task(self._download(p))
@@ -292,6 +323,10 @@ class Packages:
         from huggingface_hub import snapshot_download
 
         try:
+            if p.model:
+                archive = wolof_asr.MODELS_DIR / f'{p.model["id"]}.tar.gz'
+                await _fetch(p.model["url"], archive)
+                await asyncio.to_thread(wolof_asr.install, archive, p.model)
             if p.libs:
                 async with self._libs_lock:
                     if not (LIBS_DIR / p.libs["id"]).is_dir():

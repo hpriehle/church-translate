@@ -37,6 +37,9 @@ class SttResult:
     add: str = ""               # a language heard that isn't a speaker language yet, to be added (AutoLanguage)
 
 
+# Speaker languages Whisper doesn't know (they have their own recogniser: wolof_asr.py).
+WHISPER_UNKNOWN = {"wo"}
+
 # Several speaker languages: a chunk keeps the previous chunk's language unless another one of the meeting's
 # languages is clearly more likely (by this much probability), so a short or unclear chunk doesn't flip.
 STICKY = 0.15
@@ -299,6 +302,8 @@ class Transcriber:
                         language: str | None = None) -> tuple[str, float, float, float]:
         """Returns (text, max no_speech_prob, mean avg_logprob, max compression ratio)."""
         language = language or self.cfg.language
+        if language in WHISPER_UNKNOWN:   # e.g. the warm-up of a Wolof-only meeting: Whisper detects instead
+            language = None
         if self.engine == "mlx":
             import mlx_whisper
 
@@ -341,13 +346,17 @@ class Transcriber:
         total = sum(picked.values()) or 1.0
         return {c: p / total for c, p in picked.items()}
 
-    def transcribe(self, audio: np.ndarray, prompt: str = "", language: str | None = None) -> SttResult:
+    def transcribe(self, audio: np.ndarray, prompt: str = "", language: str | None = None,
+                   raw=None) -> SttResult:
+        """`raw`: another model's recogniser, audio -> (text, no-speech prob, mean logprob, compression ratio), whose
+        output gets the same checks (the Wolof model, see wolof_asr.py)."""
         t0 = time.monotonic()
-        reloaded = self.engine == "faster-whisper" and self._fw_wanted() != self._fw_name
-        text, nsp, alp, cr = self._transcribe_raw(audio, prompt, language)
+        reloaded = raw is not None or (self.engine == "faster-whisper" and self._fw_wanted() != self._fw_name)
+        text, nsp, alp, cr = raw(audio) if raw is not None else self._transcribe_raw(audio, prompt, language)
+        text = _clean(text)
         res = SttResult(text=text, ms=(time.monotonic() - t0) * 1000, no_speech_prob=nsp, avg_logprob=alp,
                         language=language or self.cfg.language)
-        if not reloaded:   # a chunk that also loaded a model says nothing about its speed
+        if not reloaded:   # a chunk that also loaded a model (or another model's) says nothing about Whisper's speed
             self._measure(len(audio) / 16000, res.ms / 1000)
         low = text.lower().strip(" .!?,")
         if not text:

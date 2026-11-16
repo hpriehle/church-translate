@@ -134,6 +134,20 @@ private struct LanguageSettings: View {
                     Spacer()
                     PackageBadge(package: model.package("speech"), sizeMB: speechDownloadMB)
                 }
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("Wolof speech recognition")
+                        Text("Needed when someone speaks Wolof").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    PackageBadge(package: model.package(wolofSpeechPackage), sizeMB: wolofSpeechDownloadMB)
+                    switch model.package(wolofSpeechPackage)?.state {
+                    case "ready": Button("Remove") { Task { problem = await model.removeWolofSpeech() } }
+                    case "downloading": EmptyView()
+                    case "failed": Button("Try again") { model.downloadLanguage(wolofSpeechPackage) }
+                    default: Button("Download") { model.downloadLanguage(wolofSpeechPackage) }
+                    }
+                }
             }
         }
         .formStyle(.grouped)

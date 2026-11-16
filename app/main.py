@@ -173,7 +173,9 @@ def auto_add_speaker(code: str) -> None:
     """Speech recognition heard a language that isn't a speaker language, for sure (pipeline.AutoLanguage): it
     becomes one, so it is recognised and translated (paid) instead of passed through as Whisper's own rough
     translation. The operator is told and can take it out again (then it isn't added again this meeting)."""
-    if code in S.settings.meeting.speakers or code not in SPEAKER_LANGUAGES:
+    from .wolof_asr import UNDETECTABLE
+
+    if code in S.settings.meeting.speakers or code not in SPEAKER_LANGUAGES or code in UNDETECTABLE:
         return
     name = NAMES_EN.get(code, SPEAKER_LANGUAGES[code])
     log.warning("%s detected: added to the speaker languages", name)
@@ -365,6 +367,10 @@ async def lifespan(app: FastAPI):
     from .packages import PACKAGES
 
     PACKAGES.stt_model, PACKAGES.on_ready = _stt_repo(S.settings.stt), _package_ready
+    from .stt import resolve_engine
+    from .wolof_asr import runtime
+
+    PACKAGES.asr_runtime = runtime(resolve_engine(S.settings.stt.engine))
     S.version = await asyncio.to_thread(_code_version)
     S.local_addrs = netinfo.local_addresses()
     new_listen_key()
@@ -390,6 +396,7 @@ async def lifespan(app: FastAPI):
         S.pipeline.add_channel(ch)
         ch.on = lang.code in st.meeting.targets
     S.pipeline.start_tasks()
+    S.pipeline.sync_wolof()   # a meeting with a Wolof speaker: its model, if downloaded
     bg = [asyncio.create_task(status_loop()), asyncio.create_task(_ensure_stt()),
           asyncio.create_task(tunnel_loop())]
     if S.app_mode:
@@ -497,6 +504,7 @@ async def _ensure_stt() -> None:
 def _package_ready() -> None:
     _load_missing_voices()
     asyncio.create_task(_ensure_stt())
+    S.pipeline.sync_wolof()   # Wolof speech recognition just arrived
 
 
 def _shutdown() -> None:
@@ -1119,13 +1127,18 @@ async def api_status(request: Request):
 
 
 def _package_languages(given: Any) -> list[str]:
-    """Which languages' packages to report: the ones asked for (the app's setup) or the switched-on ones."""
+    """Which languages' packages to report: the ones asked for (the app's setup) or the switched-on ones.
+    "speech-wo" is Wolof speech recognition, which a Wolof speaker language needs (the "wo" package is the Wolof
+    voice, which only a Wolof translation needs)."""
+    from .wolof_asr import PACKAGE_ID, WOLOF
+
     if isinstance(given, str):
         given = [c for c in given.split(",") if c]
     if isinstance(given, list) and given:
-        return [c for c in given if c in LANGUAGES]
+        return [c for c in given if c in LANGUAGES or c == PACKAGE_ID]
     m = S.settings.meeting   # every heard or spoken language
-    return [c for c in dict.fromkeys(m.targets + m.speakers) if c in LANGUAGES]
+    spoken = [PACKAGE_ID if c == WOLOF else c for c in m.speakers]
+    return [c for c in dict.fromkeys(m.targets + spoken) if c in LANGUAGES or c == PACKAGE_ID]
 
 
 @app.get("/api/packages")
@@ -1157,14 +1170,20 @@ async def api_packages_remove(request: Request):
     require_operator(request)
     from .packages import PACKAGES
 
+    from .wolof_asr import PACKAGE_ID, WOLOF
+
     code = str((await request.json()).get("language") or "")
     ch = S.pipeline.channels.get(code)
     if ch and ch.on and S.pipeline.running:
         raise HTTPException(400, f"{ch.lang.name} is being translated: uncheck it first, or stop the meeting.")
+    if code == PACKAGE_ID and WOLOF in S.settings.meeting.speakers and S.pipeline.running:
+        raise HTTPException(400, "Wolof is being spoken: take it out of the speaker languages first, or stop the meeting.")
     try:
         await PACKAGES.remove(code)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if code == PACKAGE_ID:
+        S.pipeline.wolof.unload()
     if ch:
         if ch.on:
             set_targets([c for c in S.settings.meeting.targets if c != code])

@@ -18,6 +18,7 @@ mac/dist/
 mac/dist-intel/
 download/.wrangler/
 mac/wolof-libs/
+mac/models-out/
 mac/oss-cache/
 site/node_modules/
 site/dist/

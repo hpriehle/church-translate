@@ -11,8 +11,8 @@ language paused ("listen in the room").
 
 Now a meeting is two sets:
 
-- **speakers**: the languages people may speak at the microphone. Any of the 12 except Wolof (Whisper has no
-  Wolof): fr, es, ru, pt, uk, fa, ne, vi, zh, en, lv.
+- **speakers**: the languages people may speak at the microphone. Any of the 12. Wolof (since 2026-11-16) has its
+  own speech recognition, downloaded when it is first picked, and its own routing (docs/wolof-speaker.md).
 - **targets**: the translation languages = the pills on the listen page. Any of the 12: fr, wo, es, ru, pt, uk,
   fa, ne, vi, zh, en, lv.
 

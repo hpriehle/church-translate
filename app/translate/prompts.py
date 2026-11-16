@@ -165,6 +165,15 @@ _CHRISTIAN = [  # a congregation of another church: no Latter-day Saint wording 
 ]
 
 
+# A Wolof speaker language (wolof_asr.py): its speech recognition is much rougher than Whisper's.
+WOLOF_INPUT = """
+WOLOF INPUT
+Wolof fragments come from a speech recognizer trained on little Wolof: spelling varies, word boundaries can be \
+wrong, and French words are mixed in (written in French). Translate what the speaker most likely meant; never \
+comment on the transcript or its quality.
+"""
+
+
 def source_names(srcs: list[str]) -> str:
     """"Russian", "Russian or Latvian", "French, Spanish or English"."""
     from ..languages import NAMES_EN
@@ -236,6 +245,8 @@ def build_system_prompt(glossary: dict[str, Any], audience: str, lang: str = "fr
             books=_lines(glossary.get("books", [])),
             local=_pivot(glossary, "French") + local_txt,
         )
+    if "wo" in srcs:
+        text += WOLOF_INPUT
     if glossary.get("_church") == "christian":
         for pattern, repl in _CHRISTIAN:
             text = re.sub(pattern, repl, text)

@@ -85,16 +85,22 @@ enum Churches {
     static let all = [latterDaySaints, "Catholic", "Baptist", "Methodist", "Non-denominational"]
 }
 
-/// The 12 languages: each can be a translation language (a listen pill); all but Wolof can be spoken.
+/// The 12 languages: each can be a translation language (a listen pill), and each can be spoken.
 // Speech model download (app/packages.py): Intel Macs use the smaller CPU model.
-// Wolof needs torch, which has no current Intel Mac builds.
+// The Wolof voice needs torch, which has no current Intel Mac builds.
+// Wolof speech recognition is its own download (app/wolof_asr.py), on both: Kiriku (mlx) on Apple Silicon,
+// Omnilingual ASR (ONNX) on Intel. The engine reports the real size; these are shown until it does.
 #if arch(arm64)
 let speechDownloadMB = 1615.0
 let wolofSupported = true
+let wolofSpeechDownloadMB = 1700.0
 #else
 let speechDownloadMB = 486.0
 let wolofSupported = false
+let wolofSpeechDownloadMB = 330.0
 #endif
+/// The engine's package for Wolof speech recognition (the "wo" package is the Wolof voice).
+let wolofSpeechPackage = "speech-wo"
 
 struct OutputLanguage: Identifiable, Equatable {
     let id: String
@@ -103,8 +109,20 @@ struct OutputLanguage: Identifiable, Equatable {
     let flag: String
     let available: Bool
     let sizeMB: Double        // its voice download (app/packages.py SIZES_MB)
-    /// Why this Mac can't use it, shown in setup and Settings. Only Wolof on Intel, so far.
-    var unavailableReason: String? { available ? nil : "Not available on Intel Macs" }
+    /// Why this Mac can't use it, shown in setup and Settings. Only the Wolof voice on Intel, so far.
+    var unavailableReason: String? { available ? nil : "No Wolof voice on Intel Macs. Wolof can still be spoken: pick it as a speaker language." }
+
+    /// Usable in that role on this Mac: Wolof can be spoken on every Mac, even where its voice can't be used.
+    func available(as role: AppModel.LanguageRole) -> Bool { role == .speaker ? true : available }
+    func unavailableReason(as role: AppModel.LanguageRole) -> String? { available(as: role) ? nil : unavailableReason }
+
+    /// The engine package a language needs in a role: a Wolof speaker needs Wolof speech recognition, not the voice.
+    static func packageID(_ code: String, _ role: AppModel.LanguageRole) -> String {
+        code == "wo" && role == .speaker ? wolofSpeechPackage : code
+    }
+    func sizeMB(as role: AppModel.LanguageRole) -> Double {
+        OutputLanguage.packageID(id, role) == wolofSpeechPackage ? wolofSpeechDownloadMB : sizeMB
+    }
     static let all = [
         OutputLanguage(id: "fr", name: "French", native: "Français", flag: "🇫🇷", available: true, sizeMB: 127),
         OutputLanguage(id: "wo", name: "Wolof", native: "Wolof", flag: "🇸🇳", available: wolofSupported, sizeMB: 634),
@@ -120,8 +138,8 @@ struct OutputLanguage: Identifiable, Equatable {
         OutputLanguage(id: "lv", name: "Latvian", native: "Latviešu", flag: "🇱🇻", available: true, sizeMB: 64),
     ]
     static let english = OutputLanguage(id: "en", name: "English", native: "English", flag: "🇺🇸", available: true, sizeMB: 127)
-    /// What people may speak at the microphone: Whisper has no Wolof.
-    static let speakers = all.filter { $0.id != "wo" }
+    /// What people may speak at the microphone: every language (Wolof with its own speech recognition).
+    static let speakers = all
     static func name(_ code: String) -> String { all.first { $0.id == code }?.name ?? code.uppercased() }
     static func native(_ code: String) -> String { all.first { $0.id == code }?.native ?? code.uppercased() }
 }

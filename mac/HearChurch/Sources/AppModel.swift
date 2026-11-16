@@ -154,7 +154,7 @@ final class AppModel: ObservableObject {
 
     /// The engine runs from the first launch, so voices can download while the operator is still in setup.
     func launch() {
-        engine.packageLanguages = OutputLanguage.all.map(\.id)
+        engine.packageLanguages = OutputLanguage.all.map(\.id) + [wolofSpeechPackage]
         engine.start(environment: engineEnvironment())
         Task { await checkKey() }
         Task { await refreshBilling() }
@@ -259,6 +259,8 @@ final class AppModel: ObservableObject {
 
     /// Downloaded and ready to use in a meeting.
     func isReady(_ code: String) -> Bool { package(code)?.state == "ready" }
+    /// Ready in that role: a Wolof speaker needs Wolof speech recognition, a Wolof translation the Wolof voice.
+    func isReady(_ code: String, _ role: LanguageRole) -> Bool { isReady(OutputLanguage.packageID(code, role)) }
 
     /// A toggle in a language grid. The last language of a set can't be switched off. A language that isn't
     /// downloaded starts downloading; during a meeting it is switched on only once it is ready (a download must not
@@ -273,8 +275,9 @@ final class AppModel: ObservableObject {
             }
             list.removeAll { $0 == code }
         } else {
-            if running && !isReady(code) {
-                Task { await engine.download([code]) }
+            if running && !isReady(code, role) {
+                let pkg = OutputLanguage.packageID(code, role)
+                Task { await engine.download([pkg]) }
                 return "\(OutputLanguage.name(code)) is downloading. Switch it on when it's ready."
             }
             list.append(code)
@@ -368,23 +371,39 @@ final class AppModel: ObservableObject {
         openSettings?()
     }
 
-    /// Delete a language's voice; nil if it worked, or why it couldn't.
+    /// Delete a language's voice; nil if it worked, or why it couldn't. A Wolof speaker keeps Wolof: it needs
+    /// Wolof speech recognition (removeWolofSpeech), not the voice.
     func removeLanguage(_ code: String) async -> String? {
-        if profile.speakers == [code] || profile.targets == [code] {
-            return "\(OutputLanguage.name(code)) is the meeting's only \(profile.speakers == [code] ? "speaker" : "translation") language: choose another one first."
+        let spoken = OutputLanguage.packageID(code, .speaker) == code   // the voice package also serves a speaker
+        if (spoken && profile.speakers == [code]) || profile.targets == [code] {
+            return "\(OutputLanguage.name(code)) is the meeting's only \(spoken && profile.speakers == [code] ? "speaker" : "translation") language: choose another one first."
         }
         let r = await engine.post("api/packages/remove", ["language": code])
         guard r.ok else { return r.message.isEmpty ? "Could not remove it." : r.message }
-        if isOn(code, .speaker) || isOn(code, .target) {
-            setMeeting(speakers: profile.speakers.filter { $0 != code }, targets: profile.targets.filter { $0 != code })
+        if (spoken && isOn(code, .speaker)) || isOn(code, .target) {
+            setMeeting(speakers: spoken ? profile.speakers.filter { $0 != code } : profile.speakers,
+                       targets: profile.targets.filter { $0 != code })
         }
         await engine.refreshPackages()
         return nil
     }
 
+    /// Delete Wolof speech recognition; nil if it worked, or why it couldn't. Wolof stops being a speaker language.
+    func removeWolofSpeech() async -> String? {
+        if profile.speakers == ["wo"] {
+            return "Wolof is the meeting's only speaker language: choose another one first."
+        }
+        let r = await engine.post("api/packages/remove", ["language": wolofSpeechPackage])
+        guard r.ok else { return r.message.isEmpty ? "Could not remove it." : r.message }
+        if isOn("wo", .speaker) { setMeeting(speakers: profile.speakers.filter { $0 != "wo" }, targets: profile.targets) }
+        await engine.refreshPackages()
+        return nil
+    }
+
     /// Every language heard or spoken in the meeting is downloaded (speech recognition comes with any of them).
+    /// A Wolof speaker needs Wolof speech recognition; a Wolof translation the Wolof voice.
     var neededDownloads: [String] {
-        var out = profile.speakers
+        var out = profile.speakers.map { OutputLanguage.packageID($0, .speaker) }
         for t in profile.targets where !out.contains(t) { out.append(t) }
         return out
     }

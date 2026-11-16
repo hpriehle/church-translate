@@ -59,6 +59,14 @@ Downloaded at setup (not included):
 - Chinese pronunciation: g2pW model and lookup tables (`app/tts/g2pw_data`) — Apache License 2.0, see the LICENCE file
   there; `bert-base-chinese` tokenizer files — Apache License 2.0.
 - Wolof voice `bilalfaye/speecht5_tts-wolof` — MIT License; vocoder `microsoft/speecht5_hifigan` — MIT.
+- Wolof speech recognition, Apple Silicon: Kiriku-Wolof-ASR by AI Hub Senegal (`AIHubSN/Kiriku-Wolof-ASR`,
+  https://huggingface.co/AIHubSN/Kiriku-Wolof-ASR) — Apache License 2.0 (`licenses/Apache-2.0.txt`), converted to
+  mlx for Hear Church and downloaded from hearchurch.com. A fine-tune of Whisper large-v2 (OpenAI, MIT License),
+  trained on `galsenai/wolof-audio-data` (Apache-2.0), which includes the Kallaama speech corpus
+  (https://github.com/gauthelo/kallaama-speech-dataset, CC BY 4.0) and Google FLEURS (CC BY 4.0).
+- Wolof speech recognition, Intel Macs: Meta Omnilingual ASR CTC 300M v2 (`omniASR_CTC_300M_v2`,
+  https://github.com/facebookresearch/omnilingual-asr), Copyright (c) Meta Platforms, Inc. and affiliates — Apache
+  License 2.0, exported to ONNX for Hear Church and downloaded from hearchurch.com.
 - Wolof voice "MMS" `rnjema-unima/mms-tts-wol-baseline` (Meta's Massively Multilingual Speech) —
   CC BY-NC 4.0: non-commercial use only, so development on Linux only and never in the paid Mac app.
 - Ollama model `mistral-small3.2:24b` (optional fallback) — Apache 2.0.

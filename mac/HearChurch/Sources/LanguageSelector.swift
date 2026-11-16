@@ -38,9 +38,12 @@ struct LanguageSelector: View {
     }
 
     /// Downloaded languages, and the ones this meeting already has (still downloading, or failed: so they can be seen
-    /// and switched off). In setup, every language.
+    /// and switched off). In setup, every language. Wolof is always offered as a speaker language: picking it
+    /// downloads its speech recognition (Whisper has no Wolof).
     private func shown(_ languages: [OutputLanguage], _ role: AppModel.LanguageRole) -> [OutputLanguage] {
-        everyLanguage ? languages : languages.filter { model.isReady($0.id) || model.isOn($0.id, role) }
+        everyLanguage ? languages : languages.filter {
+            model.isReady($0.id, role) || model.isOn($0.id, role) || (role == .speaker && $0.id == "wo")
+        }
     }
 
     private func section(_ title: String, _ languages: [OutputLanguage], _ role: AppModel.LanguageRole) -> some View {
@@ -52,7 +55,7 @@ struct LanguageSelector: View {
             }
             CenteredGrid(minWidth: compact ? 92 : 128, spacing: compact ? 6 : 8) {
                 ForEach(languages) { l in
-                    LanguageCell(language: l, on: model.isOn(l.id, role), compact: compact) { note = model.toggle(l.id, role) }
+                    LanguageCell(language: l, role: role, on: model.isOn(l.id, role), compact: compact) { note = model.toggle(l.id, role) }
                 }
             }
         }
@@ -78,12 +81,14 @@ struct LanguageSelector: View {
 private struct LanguageCell: View {
     @EnvironmentObject var model: AppModel
     let language: OutputLanguage
+    let role: AppModel.LanguageRole
     let on: Bool
     let compact: Bool
     let action: () -> Void
 
     var body: some View {
-        let pkg = model.package(language.id)
+        let pkg = model.package(OutputLanguage.packageID(language.id, role))
+        let available = language.available(as: role)
         let state = pkg?.state ?? (model.engine.packages.isEmpty ? "unknown" : "missing")
         Button(action: action) {
             VStack(spacing: 2) {
@@ -100,7 +105,7 @@ private struct LanguageCell: View {
                             ProgressView(value: min(1, (pkg?.done_mb ?? 0) / max(1, pkg?.size_mb ?? 1))).controlSize(.mini)
                         case "failed": Label("Download failed", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                         case "unknown": Text(language.name).foregroundStyle(.secondary)
-                        default: Label("Download \(Format.size(pkg?.size_mb ?? language.sizeMB))", systemImage: "arrow.down.circle")
+                        default: Label("Download \(Format.size(pkg?.size_mb ?? language.sizeMB(as: role)))", systemImage: "arrow.down.circle")
                             .foregroundStyle(on ? Color.white.opacity(0.85) : .secondary)
                         }
                     }
@@ -118,18 +123,19 @@ private struct LanguageCell: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .disabled(!language.available)
-        .opacity(language.available ? 1 : 0.45)
+        .disabled(!available)
+        .opacity(available ? 1 : 0.45)
         .help(help(state))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func help(_ state: String) -> String {
-        if let why = language.unavailableReason { return why }
+        if let why = language.unavailableReason(as: role) { return why }
+        let what = OutputLanguage.packageID(language.id, role) == wolofSpeechPackage ? "Wolof speech recognition" : language.name
         switch state {
         case "ready": return on ? "Click to switch \(language.name) off" : "Click to switch \(language.name) on"
-        case "downloading": return "\(language.name) is downloading"
-        default: return "\(language.name) needs to be downloaded: click to download it"
+        case "downloading": return "\(what) is downloading"
+        default: return "\(what) needs to be downloaded: click to download it"
         }
     }
 }

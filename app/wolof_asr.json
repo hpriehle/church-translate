@@ -1,0 +1,5 @@
+{
+ "_doc": "Wolof speech models the app downloads from hearchurch.com/download (docs/wolof-speaker.md). Written by scripts/models/package_model.py; an entry without sha256 isn't published yet.",
+ "mlx": null,
+ "onnx": null
+}

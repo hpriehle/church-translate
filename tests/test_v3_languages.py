@@ -22,9 +22,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # ------------------------------------------------------------------ languages and settings
 
-def test_twelve_languages_eleven_speakable():
+def test_twelve_languages_all_speakable():
     assert set(LANGUAGES) == {"fr", "wo", "es", "ru", "pt", "uk", "fa", "ne", "vi", "zh", "en", "lv"}
-    assert set(SPEAKER_LANGUAGES) == set(LANGUAGES) - {"wo"}    # Whisper has no Wolof
+    assert set(SPEAKER_LANGUAGES) == set(LANGUAGES)    # Wolof too: its own recogniser (wolof_asr.py)
     assert list(LANGUAGES)[-1] == "lv"   # the hub link numbers languages in this order: new ones go last
 
 
@@ -39,8 +39,8 @@ def test_older_settings_become_a_meeting():
 def test_an_explicit_meeting_wins_and_keeps_the_legacy_views_in_sync():
     s = Settings(languages=["fr"], meeting={"speakers": ["ru", "lv", "wo", "xx"], "targets": ["en", "lv", "xx"],
                                             "auto_en": False})
-    assert s.meeting.speakers == ["ru", "lv"] and s.meeting.targets == ["en", "lv"]   # unknown / Wolof dropped
-    assert s.stt.language == "ru" and s.stt.languages == ["ru", "lv"] and s.languages == ["en", "lv"]
+    assert s.meeting.speakers == ["ru", "lv", "wo"] and s.meeting.targets == ["en", "lv"]   # unknown dropped
+    assert s.stt.language == "ru" and s.stt.languages == ["ru", "lv", "wo"] and s.languages == ["en", "lv"]
     # English stays a target with an English speaker once the meeting is explicit (pass-through for it)
     assert Settings(meeting={"speakers": ["en"], "targets": ["en", "fr"], "auto_en": False}).meeting.targets == ["en", "fr"]
 

@@ -302,7 +302,7 @@ def test_meeting_sets_several_speakers_and_targets(monkeypatch):
     assert main.legacy_speaker() == "ru"   # old hubs pause nobody who gets the Latvian original
     main.set_speaker("en")                 # auto_en is off: English stays a target with an English speaker
     assert main.S.settings.meeting.targets == ["en", "lv"]
-    for bad in ({"speakers": []}, {"targets": ["xx"]}, {"speakers": ["wo"]}):   # Whisper has no Wolof
+    for bad in ({"speakers": []}, {"targets": ["xx"]}, {"speakers": ["xx"]}):
         with pytest.raises(HTTPException):
             asyncio.run(main.api_settings(Req({"meeting": bad})))
     assert main.S.settings.meeting.targets == ["en", "lv"]

@@ -56,8 +56,9 @@ LANGUAGES: dict[str, Language] = {
 NAMES_EN = {"en": "English", "fr": "French", "es": "Spanish", "ru": "Russian", "pt": "Portuguese", "uk": "Ukrainian",
             "fa": "Persian", "ne": "Nepali", "vi": "Vietnamese", "zh": "Chinese", "wo": "Wolof", "lv": "Latvian"}
 
-# What people can speak at the microphone: speech recognition (Whisper) knows these. Not Wolof: Whisper doesn't.
-SPEAKER_LANGUAGES: dict[str, str] = {c: l.name for c, l in LANGUAGES.items() if c != "wo"}
+# What people can speak at the microphone: all of them. Whisper recognises every one but Wolof, which has its own
+# model (wolof_asr.py: Kiriku on Apple Silicon, Omnilingual ASR elsewhere), downloaded when Wolof is first picked.
+SPEAKER_LANGUAGES: dict[str, str] = {c: l.name for c, l in LANGUAGES.items()}
 
 # Legacy (settings without a "meeting" section, the 0.2 Mac app): English follows the speaker, on whenever some
 # speaker language isn't English. See config.MeetingCfg.auto_en.
