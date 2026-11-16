@@ -18,6 +18,8 @@ Wolof). To let a church *speak* Wolof, the app needs a Wolof speech-to-text mode
   about 3x slower.
 - **Fallback with the existing Whisper pipeline: `M9and2M/whisper-small-wolof` (MIT)**: drops straight into
   faster-whisper/mlx-whisper (prompt with `language=en`), 240 MB int8, but much worse (WER 62%, CER 29%).
+- **Not measured yet: `AIHubSN/Kiriku-Wolof-ASR`** (Whisper large-v2 fine-tune, Apache-2.0). The download is
+  gated behind a Hugging Face login, which is waiting on Harrison. See "Kiriku" below.
 - Not usable: **MMS-1B-all** and **MMS-1B** (CC-BY-NC-4.0, non-commercial), and anything fine-tuned from them.
   Google Chirp is hosted and billed per use (Harrison doesn't want per-use cost); mentioned only.
 
@@ -34,8 +36,8 @@ Checked on huggingface.co (API tags and model cards) and the Omnilingual ASR Git
 | Meta Omnilingual ASR `omniASR_CTC_300M_v2` | CTC (wav2vec2-style), 300M, 1.3 GB | Apache-2.0 (code + models, README "License") | Meta's own corpus; released part `facebook/omnilingual-asr-corpus` is CC-BY-4.0. Wolof: 50.4 h | (7B LLM-ASR row: CER 11.1 for `wol_Latn`) | **Yes** (keep Apache notice) |
 | Meta Omnilingual ASR `omniASR_CTC_1B_v2` | CTC, 1B, 3.9 GB | Apache-2.0 | same | same | **Yes** |
 | Meta Omnilingual ASR LLM 300M–7B (incl. "Unlimited" long-audio variants) | encoder + LLM decoder | Apache-2.0 | same | 7B: CER 11.1 | Yes, but bigger/slower; not benchmarked |
-| `CAYTU/whosper-large-v2` | LoRA adapter on Whisper large-v2 (1.55B) | Apache-2.0 (Whisper itself MIT) | ALFFA, FLEURS, Bus Urbain, Anta Women TTS, Kallaama | WER 23.5%, CER 11.0% (own test set) | Probably; datasets' licences not all stated (Kallaama's not verified) |
-| `AIHubSN/Kiriku-Wolof-ASR` | Whisper large-v2 full fine-tune | Apache-2.0 | `galsenai/wolof-audio-data` (Apache-2.0), 88 h, "agriculture, banking, urban" | WER 20.7% (own test) | Yes. Not benchmarked: full large-v2, ~6 GB fp32 download (> 5 GB limit) |
+| `CAYTU/whosper-large-v2` | LoRA adapter on Whisper large-v2 (1.55B) | Apache-2.0 (Whisper itself MIT) | ALFFA, FLEURS, Bus Urbain, Anta Women TTS, Kallaama | WER 23.5%, CER 11.0% (own test set) | Probably; Kallaama is CC-BY-4.0 (GitHub `gauthelo/kallaama-speech-dataset`, checked 2026-11-16), Anta Women TTS not verified |
+| `AIHubSN/Kiriku-Wolof-ASR` | Whisper large-v2 full fine-tune, extra Wolof tokens in the tokenizer | Apache-2.0 (card + API tag). **Gated**: "agree to share your Hugging Face information" (auto-approved) | `galsenai/wolof-audio-data` (Apache-2.0), 88 h; that set is ALFFA + **FLEURS** + Urban Bus + Kallaama (CC-BY-4.0) | "Best WER 20.70%" (no test set named) | Yes (keep Apache notice; credit Kallaama CC-BY). Not measured yet: see "Kiriku" below |
 | `M9and2M/whisper-small-wolof` | Whisper small (244M) | MIT | `M9and2M/Wolof_ASR_dataset` (MIT), 57 h, clips < 6 s | WER 17% (own test) | **Yes** |
 | `malinali-app/whisper-small-wolof-ggml` | same weights, whisper.cpp q8_0 | MIT | (as above) | — | Yes |
 | `dofbi/wolof-asr` | Whisper small | MIT | `galsenai/wolof_tts` (CC-BY-4.0, TTS speech) | "WER 12%" (no test set named) | Yes (credit galsenai) |
@@ -70,7 +72,7 @@ upper bound and as a *relative* ranking.
 Whosper (the adapter merged into large-v2, converted to CTranslate2 int8) was stopped after 22 of 40
 utterances: on the loaded box it took 36–150 s per utterance (a 1.55B autoregressive model is the slowest
 option by far). Its text looked close to Omnilingual 1B's, but it
-wasn't a top pick anyway: training-data licences (Kallaama) aren't clear and FLEURS is in its training data.
+wasn't a top pick anyway: FLEURS is in its training data (Kallaama turned out to be CC-BY-4.0, so that's fine).
 
 Why WER looks high: FLEURS references write numbers as digits (`1990`) while every model spells them out in
 Wolof, and Wolof spelling varies (French loanwords: `pyramid`/`piramit`, `lumiyeer`/`limier`). CER is the
@@ -93,6 +95,55 @@ to MLX/Core ML) expect roughly RTF 0.02–0.05, i.e. well inside real time with 
 The 1B model should be ~3x that, still real time. Shipping it means adding PyTorch + fairseq2 (heavy, and
 fairseq2 has no Windows wheels) or exporting the encoder (ONNX / Core ML / MLX); the CTC head and the
 SentencePiece tokenizer are simple to reimplement. That port is the real engineering cost of this pick.
+
+## Kiriku-Wolof-ASR (Whisper large-v2 fine-tune): not measured yet, gated
+
+Status 2026-11-16: **blocked on a Hugging Face token.** The repo is gated ("You need to agree to share your
+Hugging Face information to access this model", auto-approved), and this box has no HF token, so the weights
+can't be downloaded. Accepting the gate shares Harrison's HF account details with AIHubSN, so it's his step:
+log in on huggingface.co, click "Agree and access" on `AIHubSN/Kiriku-Wolof-ASR`, then `hf auth login` (or save
+a read token to `~/.cache/huggingface/token`). The bench is then rerun as below.
+
+Verified so far (model card + HF API, 2026-11-16):
+
+- Licence: **Apache-2.0** (card metadata and API tag). The gate adds no extra terms visible without logging in.
+- Training data: `galsenai/wolof-audio-data`, **Apache-2.0**, not gated. Its card lists its sources: ALFFA,
+  **FLEURS**, Urban Bus, Kallaama. Kallaama is CC-BY-4.0 (`gauthelo/kallaama-speech-dataset` on GitHub).
+  So shipping it needs the Apache notice plus a Kallaama credit. **FLEURS is in the training data**, so a
+  FLEURS score will be flattering (same caveat as Whosper). The sermon clip is the fairer test.
+- Card claims "Best WER 20.70%" with no test set named and no CER.
+- Calling it: the card says it's trained to run **without a forced language token** (quick start passes no
+  `language=`), so run it with `--lang` unset (auto-detect), and also with `language=en` as a check.
+- Tokenizer: the card says Wolof characters (`ñ ë ŋ ɗ ɓ ƴ`) were **added to the tokenizer** as new tokens
+  (`added_tokens.json`). faster-whisper reads the HF tokenizer, so CTranslate2 should handle it once
+  `ct2-transformers-converter` copies the tokenizer files. **mlx-whisper is a risk:** it uses OpenAI's
+  built-in tiktoken vocabulary, not the HF tokenizer, so the added token ids would decode wrongly unless the
+  app maps them itself. `mlx_whisper`'s convert script converts the weights; the tokenizer side needs a check
+  on the Mac before relying on it.
+
+Speed on Apple Silicon (estimate, not measured): large-v2 has 32 decoder layers vs 4 in large-v3-turbo
+(1.55B vs 0.81B parameters). Decoding dominates, so expect it to be roughly 3–6x slower than the turbo model the
+app already runs. That's still likely real time on an M1 Pro or better at fp16 (~3 GB of weights), and tight
+on a base M1 with 8 GB once the translator also runs. On this shared Linux CPU, a large-v2 model
+(Whosper) took 36–150 s per FLEURS utterance, so CPU-only Windows/Intel machines won't run it in real time.
+
+Baseline to compare against (same normalisation, the first 30 FLEURS utterances, from the stored
+per-utterance results): Omnilingual CTC 300M v2 **WER 46.7%, CER 15.6%** (n=40: 45.7 / 14.5).
+
+Rerun once the token exists (paths from the earlier runs):
+
+```
+hf download AIHubSN/Kiriku-Wolof-ASR --local-dir /tmp/wo-bench/kiriku-hf
+ct2-transformers-converter --model /tmp/wo-bench/kiriku-hf --output_dir /tmp/wo-bench/kiriku-ct2 \
+  --quantization int8 --copy_files tokenizer_config.json preprocessor_config.json added_tokens.json
+python scripts/bench/wolof_asr.py ct2 --model /tmp/wo-bench/kiriku-ct2 --fleurs /tmp/wo-data/fleurs --n 30 --out kiriku-n30.json
+python scripts/bench/wolof_asr.py ct2 --model /tmp/wo-bench/kiriku-ct2 --clip /tmp/wo-data/clips/sermon3m.wav --out kiriku-sermon.json
+```
+
+Provisional pick until it's measured: **stay with Omnilingual CTC 300M v2.** Kiriku would win only if it is
+clearly better on the sermon clip (FLEURS can't settle it, because it trained on FLEURS). Its upside is that it
+fits the existing Whisper pipeline; its costs are a 3 GB model, no real time on CPU-only machines, and the
+tokenizer question on mlx-whisper.
 
 ## Sermon clip (judged by eye)
 
