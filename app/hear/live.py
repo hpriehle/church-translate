@@ -229,6 +229,8 @@ class Live:
 
     def _start(self, link: Link, m: dict[str, Any]) -> None:
         def refuse(why: str) -> None:
+            # Logged: a refused Mac carries on locally and its translation stops, invisible to the hub otherwise
+            log.info("meeting refused for device %s (%s): %s", link.device["id"], link.name, why)
             link.send({"type": "session_refused", "message": why})
 
         if not link.compatible:

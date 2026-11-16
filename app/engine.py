@@ -654,9 +654,14 @@ class PublishClient(EngineClient):
             self._tap(taps, self._speech)
 
     def _speech(self, seq: int, seconds: float, langs: list[str]) -> None:
-        """A chunk of speech went out in `langs`: keep it for the hub's meter if someone hears it in this session."""
-        heard = sorted(c for c in langs if c in self.heard)
-        if not (self.running and self.session_code and seconds > 0 and heard):
+        """A chunk of speech went out in `langs`: keep it for the hub's meter if someone hears it in this session.
+        Someone = a phone on the hub, or (online meetings too) a listener on this Mac itself: its own listening
+        page or stream, translated through the hub's proxy like the rest (docs/riga-metering-2026-11-15.md)."""
+        if not (self.running and self.session_code and seconds > 0):
+            return
+        pool = self.heard if self.private else self.heard | self._local_heard()
+        heard = sorted(c for c in langs if c in pool)
+        if not heard:
             return
         self.meter.setdefault(self.session_code, {})[seq] = {"seq": seq, "s": round(float(seconds), 2), "langs": heard}
         extra = sum(len(v) for v in self.meter.values()) - self.METER_KEEP
@@ -688,8 +693,11 @@ class PublishClient(EngineClient):
         self._meter_changed()
 
     def _local_heard(self) -> set[str]:
-        """Languages with a phone on this Mac (stream or captions): what a Wi-Fi-only meeting bills."""
-        return {c for c, ch in _m().S.pipeline.channels.items() if ch.hub.count or ch.broadcaster.listeners}
+        """Languages with a listener on this Mac (stream or captions): what a Wi-Fi-only meeting bills, and what an
+        online one bills on top of the hub's phones."""
+        chans = getattr(getattr(_m().S, "pipeline", None), "channels", None) or {}
+        return {c for c, ch in chans.items()
+                if getattr(ch.hub, "count", 0) or getattr(ch.broadcaster, "listeners", 0)}
 
     async def _publish_watch(self) -> None:
         """Announce a meeting started on this computer, follow its languages, and stop it when it is over."""

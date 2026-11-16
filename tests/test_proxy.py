@@ -119,6 +119,20 @@ def test_who_may_translate(client, hear, claude):
     assert len(claude.calls) == 1
 
 
+def test_every_translate_answer_is_logged_with_its_congregation(client, hear, claude, caplog):
+    """Riga, Nov 15 (docs/riga-metering-2026-11-15.md): refusals left no trace and calls weren't attributed."""
+    cong, token = make_cong(hear)
+    caplog.set_level(logging.INFO, logger="hear")
+    client.post("/api/hc/translate", json=turn(), headers=auth(token))
+    go_live(hear, cong, token)
+    client.post("/api/hc/translate", json=turn(), headers=auth(token))
+    lines = [r.getMessage() for r in caplog.records if r.name == "hear" and "translate for" in r.getMessage()]
+    assert len(lines) == 2
+    assert cong["slug"] in lines[0] and "409 not_live" in lines[0]
+    assert cong["slug"] in lines[1] and "claude-opus-5-5" in lines[1]
+    assert not any(SPEECH in l or FRENCH in l for l in lines)   # never the words
+
+
 def test_the_last_sentences_after_a_meeting_ended_still_translate(client, hear, claude):
     cong, token = make_cong(hear)
     did = hear.db.device_by_token(token)["id"]

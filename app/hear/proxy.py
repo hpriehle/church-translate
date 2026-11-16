@@ -22,6 +22,7 @@ Limits per congregation: REQUESTS_PER_MIN, at most IN_FLIGHT at once, bodies up 
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -97,6 +98,19 @@ def may_translate(device: dict[str, Any], cong: dict[str, Any]) -> JSONResponse 
 @router.post("/api/hc/translate")
 async def translate(request: Request):
     device, cong = hear_api.device_and_congregation(request)
+    resp = await _translate(request, device, cong)
+    if resp.status_code != 200:
+        # Every refusal is logged (status and code only): a Mac whose translation silently stopped must show up
+        # in the hub's log (docs/riga-metering-2026-11-15.md).
+        try:
+            code = json.loads(resp.body).get("error", "")
+        except (ValueError, AttributeError):
+            code = ""
+        log.info("translate for %s (device %s): %d %s", cong["slug"], device["id"], resp.status_code, code)
+    return resp
+
+
+async def _translate(request: Request, device: dict[str, Any], cong: dict[str, Any]) -> JSONResponse:
     cid = cong["id"]
     if not limiter.allow(f"cong{cid}"):
         return _no(429, "rate_limited", "Too many translation requests: slow down.")
@@ -142,7 +156,7 @@ async def translate(request: Request):
         if not in_flight[cid]:
             del in_flight[cid]
     u = resp.usage
-    log.debug("translate for %s: %s, %d bytes in, %s+%s tokens, %.1fs", cong["slug"], turn.model, len(body),
+    log.info("translate for %s: %s, %d bytes in, %s+%s tokens, %.1fs", cong["slug"], turn.model, len(body),
               u.input_tokens, u.output_tokens, time.monotonic() - t0)
     return JSONResponse(resp.model_dump(mode="json", exclude_none=True, warnings=False))
 
@@ -166,6 +180,6 @@ async def _translate_internal(device: dict[str, Any], cong: dict[str, Any], turn
         in_flight[cid] -= 1
         if not in_flight[cid]:
             del in_flight[cid]
-    log.debug("internal translate for %s: %s, %d bytes in, %.1fs", cong["slug"], turn.model, size,
+    log.info("internal translate for %s: %s, %d bytes in, %.1fs", cong["slug"], turn.model, size,
               time.monotonic() - t0)
     return JSONResponse(reply)

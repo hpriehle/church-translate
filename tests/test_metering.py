@@ -229,6 +229,25 @@ def test_the_mac_meters_only_heard_languages_and_only_while_live():
     assert 5 not in c.meter["s1"]
 
 
+def test_an_online_meeting_also_meters_listeners_on_this_mac(monkeypatch):
+    """Riga, Nov 15 (docs/riga-metering-2026-11-15.md): an online meeting heard only on the Mac itself (its own
+    listening page or stream) was translated through the hub's proxy but never metered: only the hub's phones counted."""
+    chans = {"en": NS(hub=NS(count=1), broadcaster=NS(listeners=0)),     # captions open on this Mac
+             "fr": NS(hub=NS(count=0), broadcaster=NS(listeners=1)),     # the voice played on this Mac
+             "es": NS(hub=NS(count=0), broadcaster=NS(listeners=0))}
+    monkeypatch.setattr(main.S, "pipeline", NS(channels=chans), raising=False)
+    c, _ = mac_client()
+    c.heard = set()                                                  # no phone on the hub
+    c._speech(1, 4.0, ["en", "fr", "es"])
+    c.heard = {"es"}                                                 # a phone on the hub too
+    c._speech(2, 3.0, ["en", "es"])
+    assert c.meter == {"s1": {1: {"seq": 1, "s": 4.0, "langs": ["en", "fr"]},
+                              2: {"seq": 2, "s": 3.0, "langs": ["en", "es"]}}}
+    c.running = False                                                # not live on the hub: nothing to bill
+    c._speech(3, 5.0, ["en"])
+    assert 3 not in c.meter["s1"]
+
+
 def test_the_mac_resends_until_acknowledged_and_bounds_its_backlog(monkeypatch):
     c, sent = mac_client()
     c.heard = {"fr"}
