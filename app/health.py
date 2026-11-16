@@ -107,6 +107,8 @@ class HealthCollector:
             self.vad_s = 0.0
             self.segments, self.asr_s, self.asr_empty, self.asr_failed, self.asr_behind = 0, 0.0, 0, 0, 0
             self.lag_max: float | None = None
+            self.langs: dict[str, dict[str, int]] = {}   # detected language → what the chunks were recognised as
+            self.outside = 0                             # chunks detected in a language that wasn't a speaker one
             self.tr: dict[str, dict[str, Any]] = {}
             self.voice: dict[str, dict[str, Any]] = {}
             self.errors, self.last_error = 0, ""
@@ -134,6 +136,14 @@ class HealthCollector:
         else:
             self.asr_empty += 1
         self.lag(lag_s)
+
+    def language(self, detected: str, recognised: str, speakers: list[str]) -> None:
+        """A chunk with words: the language detector's pick vs what it was recognised as, and whether the detected
+        language was one of the meeting's speaker languages at the time."""
+        d = self.langs.setdefault(detected or "?", {})
+        d[recognised or "?"] = d.get(recognised or "?", 0) + 1
+        if detected and detected not in speakers:
+            self.outside += 1
 
     def stt_failed(self) -> None:
         self.asr_failed += 1   # the error itself comes through the log (ErrorHandler)
@@ -185,6 +195,9 @@ class HealthCollector:
                "asr": {"segments": self.segments, "seconds": _r(self.asr_s), "empty": self.asr_empty,
                        "failed": self.asr_failed, "skipped_behind": self.asr_behind},
                "lag_max": _r(self.lag_max), "tr": self.tr, "voice": self.voice, "errors": self.errors}
+        if self.langs:
+            out["asr"]["langs"] = self.langs           # {"ru": {"ru": 12}, "en": {"en": 30}}: detected → recognised
+            out["asr"]["outside_set"] = self.outside
         if self.last_error:
             out["last_error"] = self.last_error
         self.reset()

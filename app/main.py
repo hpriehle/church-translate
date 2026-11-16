@@ -35,7 +35,7 @@ from .hear import web as hear_web
 from .config import (HOME, ROOT, SAMPLES_DIR, WEB_DIR, Settings, VoiceCfg, claude_access, load_glossary, load_settings,
                      save_glossary, save_override, save_secrets, tts_for, validate_glossary)
 from .config import apply_auto_en
-from .languages import LANGUAGES, SPEAKER_LANGUAGES
+from .languages import LANGUAGES, NAMES_EN, SPEAKER_LANGUAGES
 from .pipeline import Pipeline
 from .stt import Transcriber
 from .talk import TalkCfg, TalkRun, TalkSession, TalkTranslator
@@ -150,6 +150,10 @@ def set_speakers(codes: list[str]) -> None:
     interpreters learn the new sources, English follows in legacy mode, phones are told."""
     m = S.settings.meeting
     m.speakers = [c for c in dict.fromkeys(codes) if c in SPEAKER_LANGUAGES] or m.speakers
+    auto = getattr(S.pipeline, "autolang", None)
+    for c in list(auto.added if auto else []):   # added automatically, taken out by the operator: not added again
+        if c not in m.speakers:
+            auto.removed(c)
     _save_meeting()
     S.pipeline.apply_settings(S.settings, S.glossaries)
     if S.settings.meeting.auto_en:
@@ -162,6 +166,19 @@ def set_speakers(codes: list[str]) -> None:
     S.engine_hub.set_languages(list(S.pipeline.on_channels))
     S.operator.publish(full_status())
     log.info("speaker languages: %s", ", ".join(SPEAKER_LANGUAGES.get(c, c) for c in S.settings.meeting.speakers))
+
+
+def auto_add_speaker(code: str) -> None:
+    """Speech recognition heard a language that isn't a speaker language, for sure (pipeline.AutoLanguage): it
+    becomes one, so it is recognised and translated (paid) instead of passed through as Whisper's own rough
+    translation. The operator is told and can take it out again (then it isn't added again this meeting)."""
+    if code in S.settings.meeting.speakers or code not in SPEAKER_LANGUAGES:
+        return
+    name = NAMES_EN.get(code, SPEAKER_LANGUAGES[code])
+    log.warning("%s detected: added to the speaker languages", name)
+    set_speakers(S.settings.meeting.speakers + [code])
+    S.operator.publish({"type": "log", "level": "warning", "text": f"{name} detected: added to speaker languages"})
+    S.operator.publish({"type": "speaker_added", "code": code, "name": name})
 
 
 def set_speaker(code: str) -> None:
@@ -248,6 +265,9 @@ def full_status() -> dict[str, Any]:
         "speaker": S.pipeline.speaker,
         "meeting": S.settings.meeting.model_dump(),     # docs/v3-languages.md
         "source": S.pipeline.source or None,            # the language of the last recognised chunk
+        # speaker languages added in this meeting because they were heard (the operator can take them out)
+        "auto_speakers": [c for c in getattr(getattr(S.pipeline, "autolang", None), "added", [])
+                          if c in S.settings.meeting.speakers],
         "church": S.settings.church,
         "listeners": {"stream": sum(ch.broadcaster.listeners for ch in S.pipeline.channels.values()),
                       "captions": sum(ch.hub.count for ch in S.pipeline.channels.values())},
@@ -353,6 +373,7 @@ async def lifespan(app: FastAPI):
     S.glossaries = {lang.code: load_glossary(lang.glossary_file) for lang in langs}
     S.operator = Hub("operator", queue_size=2000)
     S.pipeline = Pipeline(st, S.glossaries, S.operator, Transcriber(st.stt))
+    S.pipeline.on_new_speaker = auto_add_speaker
     sr = st.stream.sample_rate
     for lang in langs:
         # One translator, voice, mixer, MP3 stream and caption feed per language.

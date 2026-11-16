@@ -316,10 +316,28 @@ private struct GainSlider: View {
 /// During a meeting: the same speaker / translation toggles as before it, small; changes apply live.
 private struct LanguagesSection: View {
     @EnvironmentObject var model: AppModel
+    @State private var seen: Set<String> = []   // notices the operator closed (the language stays)
+
+    /// Languages the engine added to the speaker languages because they were heard in this meeting.
+    private var heardLanguages: [String] {
+        (model.engine.status?.auto_speakers ?? []).filter { model.speakers.contains($0) && !seen.contains($0) }
+    }
 
     var body: some View {
         SectionCard(title: "Languages") {
             LanguageSelector(compact: true, showTitle: false)
+            ForEach(heardLanguages, id: \.self) { code in
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform").foregroundStyle(.orange)
+                    Text("\(OutputLanguage.name(code)) detected: added to speaker languages")
+                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    Button("Undo") { if let why = model.toggle(code, .speaker) { model.message = why } }
+                        .buttonStyle(.link).font(.caption)
+                    Button { seen.insert(code) } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless).font(.caption).help("Keep it")
+                }
+            }
             if let src = model.engine.status?.source, model.speakers.count > 1 {
                 Text("Speaking now: \(OutputLanguage.name(src))").font(.caption).foregroundStyle(.secondary)
             }

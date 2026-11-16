@@ -24,7 +24,8 @@ from .channel import Channel
 from .chunker import Chunk, Chunker, SileroVad
 from .config import HOME, LOG_DIR, Settings, tts_for
 from .metrics import ChunkRecord, LangResult, MetricsLog, live_stats
-from .stt import Transcriber, build_prompt, resolve_engine
+from .languages import SPEAKER_LANGUAGES
+from .stt import AutoLanguage, Transcriber, build_prompt, resolve_engine
 from .translate.prompts import whisper_hints
 
 log = logging.getLogger("pipeline")
@@ -79,6 +80,11 @@ class Pipeline:
         self.stt_skipped = 0            # chunks skipped because CPU speech recognition fell behind
         self._behind_logged = -1e9
         self._stepped_announced = ""
+        # Each chunk's language is detected among all languages; one spoken that isn't a speaker language is
+        # recognised as itself (never forced into one: that would be Whisper's free translation) and, once it is
+        # heard for sure, added to the meeting's speaker languages by `on_new_speaker` (main.auto_add_speaker).
+        self.autolang = AutoLanguage(set(SPEAKER_LANGUAGES))
+        self.on_new_speaker: Callable[[str], None] | None = None
 
     def add_channel(self, ch: Channel) -> None:
         self.channels[ch.code] = ch
@@ -137,10 +143,14 @@ class Pipeline:
         return glossary_for(code, self.speakers, self.glossaries, self.settings.church)
 
     def _recognise(self, audio, prev_src: str):
-        """Speech-recognition thread: the chunk's language among the speaker languages, then its words."""
-        lang = self.stt.detect(audio, self.speakers, prev_src)
+        """Speech-recognition thread: the chunk's language (the speaker languages are a prior, see AutoLanguage),
+        then its words."""
+        d = self.autolang.decide(self.stt.language_probs(audio), self.speakers, prev_src)
+        lang = d.language
         prompt = build_prompt(self.hints, self.prev_en if self.prev_lang == lang else "", lang)
-        return self.stt.transcribe(audio, prompt, lang)
+        res = self.stt.transcribe(audio, prompt, lang)
+        res.detected, res.add = d.detected, d.add
+        return res
 
     def _hints(self) -> list[str]:
         hints: list[str] = []
@@ -201,6 +211,8 @@ class Pipeline:
         self.source = ""
         self.stt_skipped = 0
         self.stt.events.clear()
+        if hasattr(self, "autolang"):   # test doubles built without __init__ have none
+            self.autolang.reset()
         chunker = Chunker(self.settings.vad, self.vad)
         if self.metrics:
             self.metrics.close()
@@ -360,6 +372,12 @@ class Pipeline:
                 self._finalize(rec)
                 continue
             src = res.language or self.speaker
+            self._health("language", getattr(res, "detected", ""), src, self.speakers)
+            if getattr(res, "add", "") and self.on_new_speaker:
+                try:
+                    self.on_new_speaker(res.add)
+                except Exception:  # pragma: no cover - never stops a meeting
+                    log.exception("couldn't add the speaker language %s", res.add)
             if src != self.source:
                 if self.source:
                     log.info("#%d: now %s", rec.seq, src)

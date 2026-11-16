@@ -32,7 +32,9 @@ class SttResult:
     no_speech_prob: float = 0.0
     avg_logprob: float = 0.0
     dropped_reason: str = ""
-    language: str = ""          # what the chunk was recognised as (one of the meeting's speaker languages)
+    language: str = ""          # what the chunk was recognised as (normally one of the meeting's speaker languages)
+    detected: str = ""          # the language detector's most likely language for it
+    add: str = ""               # a language heard that isn't a speaker language yet, to be added (AutoLanguage)
 
 
 # Several speaker languages: a chunk keeps the previous chunk's language unless another one of the meeting's
@@ -47,6 +49,66 @@ def pick_language(probs: dict[str, float], choices: list[str], prev: str = "") -
     if prev in scored and scored[best] - scored[prev] < STICKY:
         return prev
     return best
+
+
+# Recognition is never forced into a speaker language the speech isn't in: told "English" while people speak
+# Russian, Whisper writes its own rough English, which listeners would get as a free pass-through. So each chunk's
+# language is detected among all of Whisper's languages; the speaker set is only a prior.
+OUTSIDE_MARGIN = 0.2     # a language outside the set is recognised as itself when this much more likely than any in it
+ADD_CONFIDENT = 0.5      # ... and added to the meeting's speaker languages once this likely
+ADD_AFTER = 2            # ... in this many chunks in a row (one odd chunk never changes the set)
+
+
+@dataclass
+class LangDecision:
+    language: str            # what the chunk is recognised as
+    detected: str = ""       # the detector's most likely language ("" when there is no detector)
+    add: str = ""            # a language confirmed outside the speaker set, to be added to it now
+
+
+class AutoLanguage:
+    """Picks each chunk's recognition language from the detector's probabilities and the meeting's speaker
+    languages, and notices a language spoken that isn't among them (docs/v3-languages.md)."""
+
+    def __init__(self, addable: set[str] | None = None):
+        self.addable = addable      # languages that can become speaker languages (None: any)
+        self.reset()
+
+    def reset(self) -> None:
+        """A new meeting."""
+        self.added: list[str] = []      # added automatically in this meeting (and not removed since)
+        self.dismissed: set[str] = set()   # added, then removed by the operator: not added again this meeting
+        self._streak_lang, self._streak = "", 0
+
+    def removed(self, code: str) -> None:
+        """The operator took an automatically added language out of the speaker set."""
+        if code in self.added:
+            self.added.remove(code)
+            self.dismissed.add(code)
+
+    def decide(self, probs: dict[str, float], speakers: list[str], prev: str = "") -> LangDecision:
+        in_set = pick_language(probs, speakers, prev)
+        if not probs:
+            return LangDecision(in_set)
+        top = max(probs, key=lambda c: probs[c])
+        p = float(probs[top])
+        best_set = max(float(probs.get(c, 0.0)) for c in speakers)
+        margin = 0.0 if top == prev else OUTSIDE_MARGIN   # still speaking the language of the chunk before
+        if top in speakers or p - best_set < margin:
+            self._streak_lang, self._streak = "", 0
+            return LangDecision(in_set, top)
+        if p >= ADD_CONFIDENT:
+            self._streak = self._streak + 1 if top == self._streak_lang else 1
+            self._streak_lang = top
+        else:
+            self._streak_lang, self._streak = "", 0
+        add = ""
+        if (self._streak >= ADD_AFTER and top not in self.dismissed
+                and (self.addable is None or top in self.addable)):
+            add = top
+            self.added.append(top)
+            self._streak_lang, self._streak = "", 0
+        return LangDecision(top, top, add)
 
 
 def _clean(text: str) -> str:
@@ -207,10 +269,9 @@ class Transcriber:
         else:
             self._fw_name = self._fw_wanted()
 
-    def detect(self, audio: np.ndarray, choices: list[str], prev: str = "") -> str:
-        """Which of the meeting's speaker languages `audio` is in (one choice: that one, nothing is run)."""
-        if len(choices) <= 1:
-            return choices[0] if choices else self.cfg.language
+    def language_probs(self, audio: np.ndarray) -> dict[str, float]:
+        """The detector's probability for each of Whisper's ~100 languages, from the first 30 s of `audio`.
+        {} with an English-only model (dev boxes' "small.en"): it can't tell languages apart."""
         if self.engine == "mlx":
             import mlx.core as mx
             from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
@@ -219,11 +280,20 @@ class Transcriber:
             model = ModelHolder.get_model(self.cfg.model, mx.float16)   # the one transcribe() uses (fp16)
             mel = log_mel_spectrogram(audio, n_mels=model.dims.n_mels, padding=N_SAMPLES)
             _, probs = model.detect_language(pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16))
+            probs = probs[0] if isinstance(probs, list) else probs
         else:
             self._fw_sync()
+            if self._fw_name.endswith(".en"):
+                return {}
             _lang, _p, all_probs = self._fw_model.detect_language(audio)
             probs = dict(all_probs)
-        return pick_language(probs, choices, prev)
+        return {str(c): float(p) for c, p in probs.items()}
+
+    def detect(self, audio: np.ndarray, choices: list[str], prev: str = "") -> str:
+        """Which of `choices` `audio` is in (one choice: that one, nothing is run)."""
+        if len(choices) <= 1:
+            return choices[0] if choices else self.cfg.language
+        return pick_language(self.language_probs(audio), choices, prev)
 
     def _transcribe_raw(self, audio: np.ndarray, prompt: str | None,
                         language: str | None = None) -> tuple[str, float, float, float]:
@@ -266,19 +336,7 @@ class Transcriber:
 
     def detect_language(self, audio: np.ndarray, choices: list[str]) -> dict[str, float]:
         """Probability of each language in `choices` (renormalized among them), from the first 30 s (/talk)."""
-        if self.engine == "mlx":
-            import mlx.core as mx
-            from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
-            from mlx_whisper.transcribe import ModelHolder
-
-            model = ModelHolder.get_model(self.cfg.model, mx.float16)
-            mel = log_mel_spectrogram(audio, n_mels=model.dims.n_mels, padding=N_SAMPLES)
-            _, probs = model.detect_language(pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16))
-            probs = probs[0] if isinstance(probs, list) else probs
-        else:
-            self._fw_sync()
-            _lang, _p, all_probs = self._fw_model.detect_language(audio)
-            probs = dict(all_probs)
+        probs = self.language_probs(audio)
         picked = {c: float(probs.get(c, 0.0)) for c in choices}
         total = sum(picked.values()) or 1.0
         return {c: p / total for c, p in picked.items()}

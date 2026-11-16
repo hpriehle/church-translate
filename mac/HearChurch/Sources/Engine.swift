@@ -497,6 +497,7 @@ struct EngineStatus: Decodable, Equatable {
     let speaker: String?
     let meeting: Meeting?      // engines before V3.1 don't send it
     let source: String?        // the language of the last recognised chunk
+    let auto_speakers: [String]?   // speaker languages added in this meeting because they were heard
     let mic_warning: String?   // the engine's sentence when the microphone has gone quiet or away
     let mic_name: String?      // the input the meeting is using
 }

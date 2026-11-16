@@ -867,6 +867,12 @@ def health_line(slug: str, r: dict[str, Any]) -> str:
         a += " (stepped down)"
     if _num(asr.get("skipped_behind")):
         a += f" {asr['skipped_behind']} skipped behind"
+    langs = asr.get("langs") if isinstance(asr.get("langs"), dict) else {}
+    if langs:   # detected language: chunks (the meeting's speaker languages are in the start report)
+        a += " heard " + ",".join(f"{str(c)[:5]}:{sum(_num(n) or 0 for n in v.values()):.0f}"
+                                  for c, v in list(langs.items())[:6] if isinstance(v, dict))
+    if _num(asr.get("outside_set")):
+        a += f" ({asr['outside_set']} outside the speaker languages)"
     parts.append(a)
     lag_now, lag_max = _num(r.get("lag_now")), _num(r.get("lag_max"))
     if lag_now is not None or lag_max is not None:

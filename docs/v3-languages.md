@@ -21,6 +21,24 @@ several, Whisper's language detector runs on the chunk and the most likely langu
 languages only** wins; when the previous chunk's language is close behind (within 0.15 probability) it is kept, so
 a short or unclear chunk doesn't flip languages. The chunk's language is its **source** (`ChunkRecord.src`).
 
+**A language outside the speaker set (Nov 16 2026, `stt.AutoLanguage`).** Detection runs on every chunk, also
+with one speaker language, over all of Whisper's languages; the speaker set is only a prior. Told "English" while
+someone speaks Russian, Whisper writes its own rough English, which went out as a free pass-through (Riga, Nov 15:
+docs/riga-metering-2026-11-15.md). Now:
+
+- a language outside the set that is ≥ 0.2 more likely than every speaker language (any margin when the chunk
+  before was in it) is recognised **as itself** for that chunk, so it is translated and metered like any other;
+- once it was ≥ 0.5 likely in **2 chunks in a row** and Hear Church offers it, it is **added to the speaker
+  languages** (saved, like a change in the app). One odd chunk never changes the set;
+- the operator is told ("Russian detected: added to speaker languages", log line + `speaker_added`), the app shows
+  it with **Undo** (`status.auto_speakers`); taken out, it isn't added again in that meeting (still recognised as
+  itself, so still translated);
+- a language Hear Church doesn't offer (e.g. German) is recognised as itself and translated, never added;
+- English-only faster-whisper models (`small.en`, dev boxes only) can't detect: no change there.
+
+Health reports count, per window, detected language → recognised language (`asr.langs`) and chunks detected
+outside the speaker languages (`asr.outside_set`).
+
 Every target gets every chunk:
 
 - target ≠ source: translated (Claude) and voiced as before;
@@ -109,6 +127,8 @@ Listener WebSocket `init` (local pages, and relayed status on the hub) adds `spe
 The meter tap gets, per chunk, the targets that **translated** it (pass-through excluded) and bills those that
 someone listens to, exactly as before: seconds of speech × languages heard. A Latvian listener isn't billed for the
 Latvian speaker, only for what was translated into Latvian.
+Pass-through is free only when the chunk was recognised in the listener's language, and since Nov 16 2026 a chunk
+is only recognised in a language the detector didn't clearly reject (see above).
 
 ## Glossaries by church
 
