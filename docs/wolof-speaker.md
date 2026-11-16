@@ -105,10 +105,29 @@ rclone copyto mac/models-out/<id>.tar.gz r2:<bucket>/<id>.tar.gz
 curl -fsSI https://hearchurch.com/download/<id>.tar.gz | grep -i content-length
 ```
 
-## Measured on the Linux box (2026-11-16, CPU, load average 3–6 on 4 cores)
+## Measured on the Linux box (2026-11-16, CPU only, 4 cores, other jobs running: load average 3–14)
 
-See the report in the commit message / task log for the numbers; summary kept here:
+Omnilingual CTC 300M v2, ONNX (`export_omnilingual_onnx.py --int8 --check`):
 
-- Omnilingual ONNX fp32: **identical CTC output to the torch model** on a 20 s sermon window; 9.4 s of work for
-  20 s of audio (torch: 28 s). int8: 6.0 s, slightly different text (CER on FLEURS below).
-- Kiriku 8-bit mlx (CPU): see "Kiriku check" below.
+| | FLEURS wo_sn test, first 40 (CER) | RTF on this box |
+|---|---|---|
+| torch (research doc) | 14.5% | 0.85 |
+| ONNX fp32 | 14.4%; **identical CTC ids to torch** on a 20 s sermon window | 1.0 (load ~12) / 0.47 on the 20 s window |
+| **ONNX int8 (shipped)** | 16.1% | 0.47 (load ~12) / 0.30 |
+
+int8 costs 1.7 CER points for half the work and a quarter of the download (244 MB archive). Intel Macs are the
+slowest machines a church will use, so int8 is the pick; fp32 is one `package_model.py` run away if quality
+complaints come in. End to end through the app's code (hash check, unpack, `WolofRecogniser`): load 2 s, a 12 s
+FLEURS utterance in 5.7 s, CER 21% on that utterance.
+
+Packaged (not uploaded): `wolof-asr-omni300m-onnx-int8-e42e3ebb0c34.tar.gz`, 243,635,948 bytes, sha256
+`bbb54ca87f30fd2bf014cb3a4de99124549840822c19b9f3ef5dc5c87ccc4c92` (deterministic: re-running the export and
+`package_model.py` on the same weights gives the same file). The entry goes into `app/wolof_asr.json` under
+`"onnx"` once it's uploaded.
+
+Kiriku 8-bit mlx (`convert_kiriku_mlx.py`, run here with `mlx[cpu]`): converts in ~2 minutes to 1.64 GB, and
+finds the added letters `{51865: ŋ, 51866: ɗ, 51867: ɓ, 51868: ƴ}`. Tokenizer check against Kiriku's own Hugging
+Face tokenizer: with mlx-whisper's default 103 languages `<|transcribe|>`, `<|notimestamps|>` and every
+timestamp are off by one; with 99 all special ids match. Stock mlx decode turns `impresiyoŋ … guŋŋewoon` into
+`impresiyo … guewoon`; `decode_tokens` round-trips the sentence exactly. **Speed and quality of Kiriku on mlx
+must be measured on the Mac** (the CPU build of mlx is far too slow for a meaningful number here).
