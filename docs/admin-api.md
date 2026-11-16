@@ -451,6 +451,60 @@ What the report fields mean:
 | `settings` (start) | Input device setting, input channel and gain, sharing (online / local), translation backend, speech recognition setting, voice engine per language. |
 | `error` (error) | `{type, message}` of the error. |
 
+Error messages in reports are scrubbed like the diagnostic logs below (technical words stay, other words become
+`‹N chars›`).
+
+## Diagnostic logs (support can read a church's logs without asking)
+
+The Mac's engine writes a scrubbed copy of its log (`app/sharelog.py`): every record's message template (the code's
+own words) is kept, and every value put into it is checked. Numbers, language codes and names, model and voice names,
+versions, paths (home folder as `~`) and short status words stay; any other text (a caption, a transcript, a
+translation, a glossary hit, a quoted part of a message) becomes its length, `‹42 chars›`. In an exception message,
+only a small set of technical words (`error`, `connection`, `refused`, `timeout`, `http`, …) and tokens with a digit
+or a path character survive; tracebacks keep the type and the last 4 places (`file.py:123 in func`). DEBUG lines and
+the hub's own loggers are left out. Nothing that was said, recognised, translated or spoken is in it
+(`tests/test_sharelog.py` feeds real-looking captions through every way text reaches a log and checks no word of them
+comes out).
+
+On the Mac: `~/Library/Application Support/Hear Church/logs/shared.log` (+ `.1`–`.3`, about 1 MB each), JSON lines
+`{"t", "lvl", "src", "msg"}`, written whatever the setting.
+
+**Sharing** is the "Share diagnostic logs with Hear Church support" checkbox: on the microphone step of setup (ticked)
+and in Settings → General (off any time; the engine follows at once). The app passes it to the engine as
+`HEARCHURCH_SHARE_LOGS=1|0` (`[support] share_logs`; off by default outside the Mac app). With it on, the engine sends
+new lines with its device token, `POST /api/hc/logs {"kind": "stream", "lines": [...]}`, at most once a minute (at
+once after an ERROR line), ≤ 300 lines / 48 KB a batch; offline batches are dropped. **"Send logs to support…"** in
+Settings → General sends the last 7 days once (newest ≤ 4,000 lines / 900 KB, plus one line with the app version,
+macOS and engine state) with the operator's optional note, `{"kind": "manual", "lines": [...], "note": "…"}`, sharing
+on or off. The answer's `ref` is shown: "Sent. Reference #1234".
+
+Hub limits: a stream batch ≤ 64 KB, a manual one ≤ 1 MB (413 above), the last 5,000 lines, each `msg` cut to 1,000
+characters, the note to 1,000; 240 requests per device per hour, 6 manual sends per device per hour (429). 403
+without a valid device token. Batches are kept **30 days**, and at most 20 MB per congregation (the oldest stream
+batches go first; manual sends stay their 30 days). The hub logs one line per manual send (`riga-2 sent logs to
+support: ref #12, 340 lines, note 41 chars`), never the note itself.
+
+### GET /api/admin/congregations/{id}/logs?since=&kind=&device=&limit=
+
+`since`: Unix time, batches received after it (default: the last 7 days). `kind`: `stream` or `manual`. `device`: one
+device id. `limit` (1–2000, default 200): the newest that many. Oldest first. 404 for an unknown congregation.
+
+```json
+{"congregation": {"id": 7, "slug": "riga-2", "name": "Riga"},
+ "since": 1794045200.0,
+ "batches": [
+  {"id": 1234, "device_id": 3, "device": "Crystal's MacBook Pro", "kind": "manual",
+   "note": "No sound in the chapel at the start", "received_at": 1794650000.4, "n_lines": 2,
+   "lines": [
+    {"t": 1794649000.1, "lvl": "WARNING", "src": "channel", "msg": "[lv] tts stage failed on #12 (continuing): RuntimeError: ‹31 chars›"},
+    {"t": 1794650000.2, "lvl": "INFO", "src": "app", "msg": "Hear Church 0.3.0 (22), macOS Version 14.6 (Build 23G80), engine running"}]}]}
+```
+
+### GET /api/admin/logs/{ref}
+
+One batch by the reference the church was shown, with its congregation: `{"congregation": {...}, "batch": {…,
+"congregation_id": 7}}`. 404 when there is no such reference (or it is older than 30 days).
+
 ## Older admin routes (unchanged)
 
 `GET /api/admin/congregations` (the list, with balance), `POST /api/admin/congregations/{id}/credits

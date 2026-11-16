@@ -343,6 +343,13 @@ private struct MicrophoneStep: View {
                 Button("Open System Settings → Microphone") { MicMonitor.openPrivacySettings() }
                 Text("Turn Hear Church on there, then come back.").font(.callout).foregroundStyle(.secondary)
             }
+            Divider().padding(.vertical, 4)
+            Toggle(isOn: Binding(get: { model.profile.shareLogs }, set: { model.setShareLogs($0) })) {
+                Text("Share diagnostic logs with Hear Church support")
+                Text(DiagnosticLogText.detail + " You can turn this off in Settings.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .toggleStyle(.checkbox)
         }
         .onAppear { model.meterAppeared() }
         .onDisappear { model.meterDisappeared() }

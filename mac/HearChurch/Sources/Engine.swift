@@ -576,3 +576,22 @@ struct LogLine: Identifiable {
     let level: String
     let text: String
 }
+
+/// The scrubbed diagnostic log the engine writes for support (app/sharelog.py: logs/shared.log and up to three older
+/// files beside it, one JSON object a line: t, lvl, src, msg). Technical only: nothing that was said is in it.
+enum DiagnosticLog {
+    static func lastDays(_ days: Double) -> [[String: Any]] {
+        let since = Date().timeIntervalSince1970 - days * 86400
+        let names = ["shared.log.3", "shared.log.2", "shared.log.1", "shared.log"]
+        var out: [[String: Any]] = []
+        for name in names {
+            guard let text = try? String(contentsOf: AppPaths.logs.appendingPathComponent(name), encoding: .utf8) else { continue }
+            for line in text.split(separator: "\n") {
+                guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                      let t = obj["t"] as? Double, t > since, obj["msg"] is String else { continue }
+                out.append(obj)
+            }
+        }
+        return out
+    }
+}

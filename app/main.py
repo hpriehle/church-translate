@@ -53,6 +53,7 @@ EDITABLE = {
     "server": {"lan_ip", "use_public_url", "sharing"},
     "engine": {"use"},
     "stt": {"language"},
+    "support": {"share_logs"},
 }
 
 

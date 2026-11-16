@@ -13,6 +13,8 @@ docs/admin-api.md:
   GET  /api/admin/congregations/{id}/account   its e-mails (main first) and devices (revoked ones too)
   POST /api/admin/devices/{id}/revoke          the device's token stops working; its meeting ends
   GET  /api/admin/congregations/{id}/health?since=&session=&limit=   the Macs' meeting health reports (30 days)
+  GET  /api/admin/congregations/{id}/logs?since=&kind=&device=&limit=   the Macs' diagnostic logs (30 days)
+  GET  /api/admin/logs/{ref}   one batch by the reference a church was shown after "Send logs to support"
 
 The ledger has no table of its own: top-ups and manual credits are `credits` rows, refunds are `refunds` rows (one per
 change of a top-up's refunded total), and usage is the metered speech of each meeting. Each calendar month (UTC) a
@@ -431,6 +433,37 @@ async def admin_health(request: Request, cid: int, since: float | None = Query(d
     names = {d["id"]: d["name"] for d in h.db.devices(cid, revoked=True)}
     reports = [{**r, "device": names.get(r["device_id"])} for r in h.db.health(cid, since, limit, session)]
     return {"congregation": _who(c, cid), "since": since, "reports": reports}
+
+
+@router.get("/api/admin/congregations/{cid}/logs")
+async def admin_logs(request: Request, cid: int, since: float | None = Query(default=None, ge=0),
+                     kind: str = Query(default="", pattern="^(|stream|manual)$"),
+                     device: int | None = Query(default=None), limit: int = Query(default=200, ge=1, le=2000)):
+    """The diagnostic log batches its Macs sent (app/sharelog.py), received after `since` (unix time; default the
+    last 7 days), oldest first; `kind` "manual" keeps the "Send logs to support" ones (their id is the reference the
+    church was shown). Kept 30 days."""
+    h = _operator(request)
+    c = h.db.congregation(cid)
+    if c is None:
+        raise HTTPException(404, "No such congregation.")
+    since = time.time() - 7 * DAY if since is None else since
+    names = {d["id"]: d["name"] for d in h.db.devices(cid, revoked=True)}
+    batches = [{**b, "device": names.get(b["device_id"])} for b in h.db.logs(cid, since, limit, kind, device)]
+    return {"congregation": _who(c, cid), "since": since, "batches": batches}
+
+
+@router.get("/api/admin/logs/{ref}")
+async def admin_log_batch(request: Request, ref: int):
+    """One diagnostic log batch by its reference ("Sent. Reference #1234" on the church's Mac), with its
+    congregation."""
+    h = _operator(request)
+    b = h.db.log_batch(ref)
+    if b is None:
+        raise HTTPException(404, "No such reference (logs are kept 30 days).")
+    cid = b["congregation_id"]
+    c = h.db.congregation(cid)
+    names = {d["id"]: d["name"] for d in h.db.devices(cid, revoked=True)}
+    return {"congregation": _who(c, cid), "batch": {**b, "device": names.get(b["device_id"])}}
 
 
 # ------------------------------------------------------------------ e-mails and devices

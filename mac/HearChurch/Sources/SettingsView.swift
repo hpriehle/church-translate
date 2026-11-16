@@ -302,7 +302,9 @@ private struct LanguageDetail: View {
 
 /// This Mac and help. The key is in the AI tab (own-key congregations only); languages are in Languages.
 private struct GeneralSettings: View {
+    @EnvironmentObject var model: AppModel
     @State private var atLogin = LoginItem.enabled
+    @State private var sending = false
 
     var body: some View {
         Form {
@@ -311,6 +313,13 @@ private struct GeneralSettings: View {
                     .onChange(of: atLogin) { _, on in LoginItem.set(on) }
             }
             Section("About and help") {
+                Toggle(isOn: Binding(get: { model.profile.shareLogs }, set: { model.setShareLogs($0) })) {
+                    Text("Share diagnostic logs with Hear Church support")
+                    Text(DiagnosticLogText.detail)
+                }
+                Button("Send logs to support…") { sending = true }
+                    .disabled(!model.profile.setupDone)
+                    .help("Send the last 7 days of diagnostic logs now, with a note on what went wrong")
                 HelpLinks()
                 if Updater.devUpdates {
                     Label("Dev updates on", systemImage: "hammer").foregroundStyle(.secondary)
@@ -319,6 +328,60 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $sending) { SendLogsSheet() }
+    }
+}
+
+enum DiagnosticLogText {
+    static let detail = "Technical details only: errors, timings, microphone level, languages, delays and versions. "
+        + "Never anything that was said, recognised, translated or spoken. Kept 30 days."
+}
+
+/// "Send logs to support": the last 7 days of diagnostic logs, with an optional note, once.
+private struct SendLogsSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var note = ""
+    @State private var busy = false
+    @State private var reference: Int?
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Send logs to support").font(.headline)
+            if let reference {
+                Label("Sent. Reference #\(reference)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    .textSelection(.enabled)
+                Text("Give this number to Hear Church support so they can find your logs.")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+            } else {
+                Text("Sends the last 7 days of diagnostic logs from this Mac. " + DiagnosticLogText.detail)
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                TextField("What went wrong? (optional)", text: $note, axis: .vertical)
+                    .lineLimit(3...6)
+                if let error { Text(error).foregroundStyle(.red).font(.callout) }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button(busy ? "Sending…" : "Send") { Task { await send() } }
+                        .keyboardShortcut(.defaultAction).disabled(busy)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+    }
+
+    private func send() async {
+        busy = true
+        defer { busy = false }
+        do {
+            reference = try await model.sendLogsToSupport(note: note.trimmingCharacters(in: .whitespacesAndNewlines))
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 

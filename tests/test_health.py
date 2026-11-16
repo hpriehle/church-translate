@@ -215,7 +215,8 @@ async def test_errors_are_reported_at_once_but_not_too_often():
     await settle()
     errs = [r for r in hub.reports if r["kind"] == "error"]
     assert len(errs) == 1 and errs[0]["error"]["type"] == "RuntimeError"
-    assert errs[0]["error"]["message"].startswith("stt failed: model file missing")
+    # scrubbed like the shared log (app/sharelog.py): technical words stay, any other words become their length
+    assert errs[0]["error"]["message"].startswith("stt failed: ‹5 chars› file ‹")
     assert len(errs[0]["error"]["message"]) <= H.ERROR_CHARS
     clock.t += 30
     rep.tick(p)

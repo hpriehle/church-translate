@@ -10,6 +10,8 @@ Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
   GET  /api/hc/verify?token=…   (the link in the e-mail) marks the e-mail verified; the congregation is live-capable
   POST /api/hc/claim        {claim} → 202 {pending} until the link was clicked, then once {device_token, slug}
   POST /api/hc/health       (device token) {reports: [...]} → the Mac's meeting health reports (app/health.py)
+  POST /api/hc/logs         (device token) {kind: stream|manual, lines: [...], note?} → {ok, ref}: the Mac's scrubbed
+                            diagnostic log (app/sharelog.py), kept 30 days
   POST /api/hc/location     (device token) {lat, lng, [address]} or {address} (geocoded) → moves the building's pin
   POST /api/hc/device-link  {email, [slug, device_name]} → e-mails a magic link to add another Mac; the new Mac
                             then polls /api/hc/claim with the returned {claim} exactly like above
@@ -105,7 +107,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import HOME, LOG_DIR, WEB_DIR
-from .db import (BUNDLES, DEVICE_CODE_TTL_S, FREE_SECONDS, HEALTH_KINDS, LEGACY_CENTS_PER_LANGUAGE_HOUR,
+from .db import (BUNDLES, DEVICE_CODE_TTL_S, FREE_SECONDS, HEALTH_KINDS, LOG_KINDS, LEGACY_CENTS_PER_LANGUAGE_HOUR,
                  RESERVED_SLUGS, Database, bundle)
 from .geo import Geocoder, bounding_box, hide_coordinates_in_access_log, in_box
 from .live import Live
@@ -145,7 +147,8 @@ class Hear:
                        "email_code": RateLimiter(10, 3600), "email_code_addr": RateLimiter(3, 3600),
                        "pair_code": RateLimiter(30, 3600), "emails": RateLimiter(60, 3600),
                        "slug": RateLimiter(20, 3600), "web_link": RateLimiter(30, 3600),
-                       "health": RateLimiter(900, 3600)}
+                       "health": RateLimiter(900, 3600), "logs": RateLimiter(240, 3600),
+                       "logs_manual": RateLimiter(6, 3600)}
 
 
 class FailureLimiter:
@@ -838,6 +841,61 @@ async def health(request: Request):
     for r in good:
         log.info("%s", health_line(cong["slug"], r))
     return {"ok": True, "stored": stored}
+
+
+LOGS_MAX_BODY = 64 * 1024          # a stream batch (the Mac sends ≤ 48 KB)
+LOGS_MAX_BODY_MANUAL = 1024 * 1024  # "Send logs to support": up to 7 days at once
+LOGS_MAX_LINES = 5000
+LOGS_LINE_CHARS = 1000
+LOGS_NOTE_CHARS = 1000
+LOG_LEVELS = ("INFO", "WARNING", "ERROR", "CRITICAL")
+
+
+@router.post("/api/hc/logs")
+async def device_logs(request: Request):
+    """(device token) The Mac's diagnostic log (app/sharelog.py: technical only, never what was said):
+    {"kind": "stream" | "manual", "lines": [{t, lvl, src, msg}], "note": "…"}. "stream": a small batch sent while
+    "Share diagnostic logs" is on; "manual": "Send logs to support" (the last 7 days, and the operator's note on what
+    went wrong). Lines that aren't objects with a string msg are skipped; fields are cut to size. Kept 30 days
+    (GET /api/admin/congregations/{id}/logs). Answers {ok, ref, stored}: ref is the reference the Mac shows."""
+    device, cong = device_and_congregation(request)
+    _limit(request, "logs", f"device:{device['id']}")
+    cap = LOGS_MAX_BODY_MANUAL
+    if int(request.headers.get("content-length") or 0) > cap:
+        raise HTTPException(413, "Too large.")
+    body = await request.body()
+    if len(body) > cap:
+        raise HTTPException(413, "Too large.")
+    try:
+        data = json.loads(body)
+    except ValueError:
+        raise HTTPException(400, "Not JSON.")
+    if not isinstance(data, dict) or data.get("kind", "stream") not in LOG_KINDS:
+        raise HTTPException(400, "Bad kind.")
+    kind = data.get("kind", "stream")
+    if kind == "stream" and len(body) > LOGS_MAX_BODY:
+        raise HTTPException(413, "Too large.")
+    if kind == "manual":
+        _limit(request, "logs_manual", f"device:{device['id']}")
+    lines = data.get("lines")
+    if not isinstance(lines, list):
+        raise HTTPException(400, "No lines.")
+    good = []
+    for ln in lines[-LOGS_MAX_LINES:]:
+        if not isinstance(ln, dict) or not isinstance(ln.get("msg"), str):
+            continue
+        t = _num(ln.get("t"))
+        lvl = ln.get("lvl") if ln.get("lvl") in LOG_LEVELS else "INFO"
+        good.append({"t": t if t is not None else 0.0, "lvl": lvl, "src": str(ln.get("src") or "")[:40],
+                     "msg": ln["msg"][:LOGS_LINE_CHARS]})
+    note = data.get("note") if kind == "manual" and isinstance(data.get("note"), str) else ""
+    note = note.strip()[:LOGS_NOTE_CHARS]
+    if not good and kind == "stream":
+        return {"ok": True, "ref": None, "stored": 0}
+    ref = _hear().db.record_logs(cong["id"], device["id"], kind, good, note)
+    if kind == "manual":   # the note is the operator's own words: only its length goes in the hub's log
+        log.info("%s sent logs to support: ref #%d, %d lines, note %d chars", cong["slug"], ref, len(good), len(note))
+    return {"ok": True, "ref": ref, "stored": len(good)}
 
 
 def _num(x: Any) -> float | None:

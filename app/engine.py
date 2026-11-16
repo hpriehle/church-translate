@@ -464,7 +464,9 @@ class PublishClient(EngineClient):
         self._meter_dirty, self._meter_saved = False, 0.0
         self._load_meter()
         from .health import HealthReporter
+        from .sharelog import LogShipper
         self.health = HealthReporter(self._post_health)
+        self.logs = LogShipper(self._post_logs)   # Settings → Share diagnostic logs (sharelog.py)
 
     # Metering (credits): seconds of speech per chunk, in the languages someone listens to, are kept here and sent
     # every METER_EVERY_S until the hub acknowledges them (so a dropped link only delays them; the hub stores each
@@ -555,16 +557,30 @@ class PublishClient(EngineClient):
     async def _post_health(self, body: dict[str, Any]) -> int:
         return (await self.hub_api("POST", "/api/hc/health", body))[0]
 
+    async def _post_logs(self, body: dict[str, Any]) -> int:
+        return (await self.hub_api("POST", "/api/hc/logs", body))[0]
+
     async def _health_loop(self) -> None:
         """Meeting health reports for the hub (health.py), over HTTP: also while the link is down (they are dropped
         then). Engine errors in a meeting are reported as they happen."""
+        from . import sharelog
         from .health import ErrorHandler
 
         handler = ErrorHandler(self.health)
         logging.getLogger().addHandler(handler)
+        sharelog.attach(self.logs)
+
+        def ship() -> None:   # diagnostic logs: also between meetings, and while the link is down (dropped then)
+            try:
+                self.logs.set_enabled(bool(_m().S.settings.support.share_logs))
+                self.logs.tick()
+            except Exception as e:  # pragma: no cover
+                log.debug("log shipping: %s", e)
+        ship()
         try:
             while True:
                 await asyncio.sleep(1.0)
+                ship()
                 try:
                     p = getattr(_m().S, "pipeline", None)
                     if p is None:
@@ -575,6 +591,7 @@ class PublishClient(EngineClient):
                     log.debug("health tick: %s", e)
         finally:
             logging.getLogger().removeHandler(handler)
+            sharelog.attach(None)
 
     async def _session(self, ws) -> None:
         M = _m()

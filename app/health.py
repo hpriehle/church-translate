@@ -381,11 +381,12 @@ class ErrorHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         if record.name.split(".")[0] in self.SKIP:
             return
-        try:
+        try:   # scrubbed like the shared log (sharelog.py): no text of what was said, even inside an error
+            from .sharelog import scrub_error, scrub_message
             exc = record.exc_info[1] if record.exc_info else None
             if exc is not None:
-                self.reporter.error(type(exc).__name__, f"{record.getMessage()}: {exc}")
+                self.reporter.error(type(exc).__name__, f"{scrub_message(record)}: {scrub_error(str(exc))}")
             else:
-                self.reporter.error(record.name, record.getMessage())
+                self.reporter.error(record.name, scrub_message(record))
         except Exception:
             pass

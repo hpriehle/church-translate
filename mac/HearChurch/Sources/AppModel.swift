@@ -213,7 +213,37 @@ final class AppModel: ObservableObject {
             env["HEARCHURCH_DEVICE_TOKEN"] = token
         }
         if let url = listenerURL { env["HEARCHURCH_LISTENER_URL"] = url.absoluteString }
+        env["HEARCHURCH_SHARE_LOGS"] = profile.shareLogs ? "1" : "0"
         return env
+    }
+
+    // MARK: diagnostic logs for support (app/sharelog.py)
+
+    /// Settings → General and the setup's microphone step: the engine follows at once (no restart).
+    func setShareLogs(_ on: Bool) {
+        guard profile.shareLogs != on else { return }
+        profile.shareLogs = on
+        profile.save()
+        Task { await engine.set(["support": ["share_logs": on]]) }
+    }
+
+    /// "Send logs to support": the last 7 days of the scrubbed log, with the operator's note. Returns the reference.
+    func sendLogsToSupport(note: String) async throws -> Int {
+        guard let token = Keychain.get(.deviceToken), !token.isEmpty else {
+            throw HubClient.Failure(message: "Sign in to your congregation first.")
+        }
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        var facts = "Hear Church \(version) (\(build)), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
+        switch engine.state {
+        case .running: facts += ", engine running"
+        case .starting: facts += ", engine starting"
+        case .stopped: facts += ", engine stopped"
+        case .failed: facts += ", engine failed to start"
+        }
+        if running { facts += ", meeting running" }
+        return try await HubClient.sendLogs(DiagnosticLog.lastDays(7), facts: facts, note: note, token: token)
     }
 
     // MARK: the meeting's languages and downloads

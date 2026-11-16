@@ -31,6 +31,9 @@ struct Profile: Codable {
     var claim: String = ""                  // while waiting for the e-mail link to be clicked
     var languagesPicked = false             // the operator chose languages, so their downloads may start
     var setupDone = false
+    /// Send the scrubbed diagnostic log to Hear Church support (app/sharelog.py: technical only, never what was
+    /// said). Asked on the microphone step of setup, ticked; Settings → General can turn it off.
+    var shareLogs = true
 
     init() {}
 
@@ -45,12 +48,12 @@ struct Profile: Codable {
         speakers = v(.speakers, ["en"]); targets = v(.targets, languages.isEmpty ? ["fr"] : languages)
         meetingPicked = v(.meetingPicked, false); extraEmails = v(.extraEmails, [])
         slug = v(.slug, ""); claim = v(.claim, ""); languagesPicked = v(.languagesPicked, false)
-        setupDone = v(.setupDone, false)
+        setupDone = v(.setupDone, false); shareLogs = v(.shareLogs, true)
     }
 
     private enum CodingKeys: String, CodingKey {
         case church, unitType, name, stake, address, lat, lng, meetingTimes, timezone, languages, email, approved,
-             slug, claim, languagesPicked, setupDone, speakers, targets, meetingPicked, extraEmails
+             slug, claim, languagesPicked, setupDone, speakers, targets, meetingPicked, extraEmails, shareLogs
     }
 
     static var url: URL { AppPaths.home.appendingPathComponent("profile.json") }

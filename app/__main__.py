@@ -37,6 +37,8 @@ def main() -> None:
         datefmt="%H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(LOG_DIR / "server.log")],
     )
+    from .sharelog import install as share_log
+    share_log(LOG_DIR)   # the scrubbed copy for support (logs/shared.log; sent only with sharing on)
     for noisy in ("httpx", "httpcore", "uvicorn.access"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 

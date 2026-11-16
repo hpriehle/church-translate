@@ -204,6 +204,12 @@ def apply_auto_en(targets: list[str], speakers: list[str]) -> list[str]:
     return out + ["en"] if any(s != "en" for s in speakers) else out
 
 
+class SupportCfg(BaseModel):
+    """Diagnostic logs for Hear Church support (app/sharelog.py). The Mac app sets share_logs (Settings → About & help,
+    on unless the operator turned it off); elsewhere it is off."""
+    share_logs: bool = False   # send the scrubbed log (technical only, never what was said) to the hub
+
+
 class Settings(BaseModel):
     # Legacy view of meeting.targets (without English while meeting.auto_en): the older pages' language switches.
     languages: list[str] = ["fr", "wo"]
@@ -221,6 +227,7 @@ class Settings(BaseModel):
     engine: EngineCfg = EngineCfg()
     hearchurch: HearCfg = HearCfg()
     scripture: ScriptureCfg = ScriptureCfg()
+    support: SupportCfg = SupportCfg()
 
     @model_validator(mode="after")
     def _meeting_views(self) -> "Settings":
@@ -324,6 +331,7 @@ ENV_OVERRIDES = {
     "HEARCHURCH_DEVICE_TOKEN": ("engine", "device_token"),
     "HEARCHURCH_DEVICE_NAME": ("engine", "name"),
     "HEARCHURCH_LISTENER_URL": ("server", "public_url"),   # the congregation's hearchurch.com/<slug> page
+    "HEARCHURCH_SHARE_LOGS": ("support", "share_logs"),    # "1" / "0": Settings → Share diagnostic logs
 }
 
 

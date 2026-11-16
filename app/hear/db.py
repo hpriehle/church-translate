@@ -222,6 +222,19 @@ CREATE TABLE IF NOT EXISTS health (
 );
 CREATE INDEX IF NOT EXISTS health_cong ON health(congregation_id, received_at);
 CREATE INDEX IF NOT EXISTS health_received ON health(received_at);
+CREATE TABLE IF NOT EXISTS device_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+    device_id INTEGER,
+    kind TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    received_at REAL NOT NULL,
+    n_lines INTEGER NOT NULL,
+    bytes INTEGER NOT NULL,
+    lines TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS device_logs_cong ON device_logs(congregation_id, received_at);
+CREATE INDEX IF NOT EXISTS device_logs_received ON device_logs(received_at);
 CREATE INDEX IF NOT EXISTS web_codes_email ON web_codes(email, purpose);
 CREATE INDEX IF NOT EXISTS web_codes_hash ON web_codes(code_hash);
 CREATE INDEX IF NOT EXISTS web_sessions_email ON web_sessions(email);
@@ -272,6 +285,9 @@ MAX_CHUNK_S = 60.0     # one reported chunk of speech is never longer than this 
 MAX_LANGS = 20
 HEALTH_KEEP_S = 30 * 86400   # meeting health reports are kept 30 days
 HEALTH_KINDS = ("start", "periodic", "end", "error")
+LOGS_KEEP_S = 30 * 86400     # diagnostic logs (app/sharelog.py) are kept 30 days
+LOGS_KEEP_BYTES = 20 * 2 ** 20   # and at most this much per congregation (the oldest stream batches go first)
+LOG_KINDS = ("stream", "manual")
 
 CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", "city", "lat", "lng", "meeting_times",
                "timezone", "email", "email_verified", "created_at", "hidden", "billing")
@@ -1181,6 +1197,53 @@ class Database:
         rows = self._q(f"SELECT * FROM ({sql} ORDER BY id DESC LIMIT ?) ORDER BY id", args + (limit,))
         return [{**{k: r[k] for k in ("id", "device_id", "session_id", "code", "meeting", "kind", "at", "received_at")},
                  "report": json.loads(r["report"])} for r in rows]
+
+    # ------------------------------------------------------------ diagnostic logs (app/sharelog.py)
+    def record_logs(self, cid: int, device_id: int | None, kind: str, lines: list[dict[str, Any]], note: str = "",
+                    now: float | None = None) -> int:
+        """Store one batch of a Mac's scrubbed log lines (already checked by the API). Batches older than LOGS_KEEP_S
+        are deleted, and a congregation's oldest "stream" batches once it holds more than LOGS_KEEP_BYTES. Returns
+        the batch id (the "Reference #" the Mac shows after "Send logs to support")."""
+        now = time.time() if now is None else now
+        text = json.dumps(lines, separators=(",", ":"), ensure_ascii=False)
+        with self._lock:
+            cur = self._db.execute("INSERT INTO device_logs (congregation_id, device_id, kind, note, received_at,"
+                                   " n_lines, bytes, lines) VALUES (?,?,?,?,?,?,?,?)",
+                                   (cid, device_id, kind, note, now, len(lines), len(text.encode()), text))
+            rid = int(cur.lastrowid)
+            self._db.execute("DELETE FROM device_logs WHERE received_at < ?", (now - LOGS_KEEP_S,))
+            total = self._db.execute("SELECT COALESCE(SUM(bytes), 0) FROM device_logs WHERE congregation_id = ?",
+                                     (cid,)).fetchone()[0]
+            if total > LOGS_KEEP_BYTES:
+                for r in self._db.execute("SELECT id, bytes FROM device_logs WHERE congregation_id = ? AND"
+                                          " kind = 'stream' AND id != ? ORDER BY id", (cid, rid)).fetchall():
+                    if total <= LOGS_KEEP_BYTES:
+                        break
+                    self._db.execute("DELETE FROM device_logs WHERE id = ?", (r[0],))
+                    total -= r[1]
+        return rid
+
+    def logs(self, cid: int, since: float = 0.0, limit: int = 200, kind: str = "",
+             device_id: int | None = None) -> list[dict[str, Any]]:
+        """A congregation's log batches received after `since` (unix time), oldest first, at most `limit` (the
+        newest of them)."""
+        sql = "SELECT * FROM device_logs WHERE congregation_id = ? AND received_at > ?"
+        args: tuple = (cid, since)
+        if kind:
+            sql, args = sql + " AND kind = ?", args + (kind,)
+        if device_id is not None:
+            sql, args = sql + " AND device_id = ?", args + (device_id,)
+        rows = self._q(f"SELECT * FROM ({sql} ORDER BY id DESC LIMIT ?) ORDER BY id", args + (limit,))
+        return [{**{k: r[k] for k in ("id", "device_id", "kind", "note", "received_at", "n_lines")},
+                 "lines": json.loads(r["lines"])} for r in rows]
+
+    def log_batch(self, ref: int) -> dict[str, Any] | None:
+        rows = self._q("SELECT * FROM device_logs WHERE id = ?", (ref,))
+        if not rows:
+            return None
+        r = rows[0]
+        return {**{k: r[k] for k in ("id", "congregation_id", "device_id", "kind", "note", "received_at", "n_lines")},
+                "lines": json.loads(r["lines"])}
 
     def speech_by_language(self, cid: int) -> dict[str, float]:
         """Seconds of heard speech per language, over all of a congregation's sessions."""

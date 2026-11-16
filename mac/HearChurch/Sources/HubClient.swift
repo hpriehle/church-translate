@@ -309,6 +309,25 @@ enum HubClient {
         return json["slug"] as? String ?? slug
     }
 
+    /// POST /api/hc/logs (kind "manual"): "Send logs to support". `lines` come from the scrubbed diagnostic log the
+    /// engine writes (DiagnosticLog: technical only), newest kept when there are too many; `facts` is one more line
+    /// about the app. Returns the reference the hub gives it.
+    static func sendLogs(_ lines: [[String: Any]], facts: String, note: String, token: String) async throws -> Int {
+        var kept: [[String: Any]] = [["t": Date().timeIntervalSince1970, "lvl": "INFO", "src": "app", "msg": facts]]
+        var size = 0
+        for line in lines.reversed() {   // newest first, up to ~900 KB (the hub takes 1 MB) and 4,000 lines
+            let n = ((try? JSONSerialization.data(withJSONObject: line))?.count ?? 0) + 1
+            if size + n > 900_000 || kept.count >= 4000 { break }
+            size += n
+            kept.append(line)
+        }
+        let body: [String: Any] = ["kind": "manual", "lines": Array(kept.reversed()), "note": String(note.prefix(1000))]
+        let (json, status) = try await send("/api/hc/logs", body, token: token)
+        try check(json, status)
+        guard let ref = json["ref"] as? Int else { throw Failure(message: "The logs were not stored. Try again later.") }
+        return ref
+    }
+
     /// Throws for anything but a 2xx: NotAvailable (older hub), SignedOut (403), or the hub's message.
     private static func check(_ json: [String: Any], _ status: Int) throws {
         if (200..<300).contains(status) { return }
