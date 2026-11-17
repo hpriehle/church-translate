@@ -5,6 +5,8 @@
 //   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
 //   /download/HearChurch-Intel.dmg, /appcast-intel.xml   the same for Intel Macs (separate build and feed)
+//   /download/HearChurch-Setup.exe  always the newest public Windows installer (R2 windows/public/); counted like the DMG
+//   /download/windows/<channel>/<file>  the Windows app's Velopack feeds, packages and installers
 //   /privacy, /terms, /credits  the legal pages
 //   /source, /source/<file>    the source code of the app's GPL/LGPL parts, per version (R2 source/*, from mac/release.sh)
 //   /download/icon.png, *.woff2  the site's icon and fonts
@@ -112,6 +114,13 @@ const site = {
       if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, latest.version));
       return response;
     }
+    // The link to share for Windows: the public channel's installer (docs/windows-release.md).
+    if (path === "/download/HearChurch-Setup.exe") {
+      const response = await file(request, env, "windows/public/HearChurchApp-public-Setup.exe", "application/octet-stream",
+        "no-store", "HearChurch-Setup.exe");
+      if (isNewDownload(request, response)) ctx.waitUntil(windowsVersion(env).then((v) => countDownload(env, `${v}-windows`)));
+      return response;
+    }
     // The written offer in THIRD_PARTY_NOTICES.md points here: every version's source archive stays available.
     if (path === "/source") return sourceList(env);
     if (path.startsWith("/source/")) {
@@ -204,6 +213,31 @@ function escapeHtml(s) {
 async function latestRelease(env, key = "latest.json") {
   const obj = await env.FILES.get(key);
   return obj ? obj.json() : null;
+}
+
+// The public Windows release's version, for the download count: windows/public/latest.json ({"version": "0.4.0"}),
+// written when a release is published, else the newest full package in Velopack's feed. "unknown" if neither says.
+async function windowsVersion(env) {
+  try {
+    const latest = await latestRelease(env, "windows/public/latest.json");
+    if (latest?.version) return latest.version;
+    const feed = await latestRelease(env, "windows/public/releases.public.json");
+    const versions = (feed?.Assets ?? []).filter((a) => a.Type === "Full" && a.Version).map((a) => a.Version);
+    versions.sort((a, b) => compareSemver(b, a));
+    if (versions[0]) return versions[0];
+  } catch (e) {
+    console.error("windows version failed:", e.message);
+  }
+  return "unknown";
+}
+
+// SemVer order, enough for Velopack's versions: 0.4.0-dev.57 < 0.4.0 < 0.4.1.
+function compareSemver(a, b) {
+  const [ca, pa] = a.split(/-(.*)/s), [cb, pb] = b.split(/-(.*)/s);
+  const byCore = ca.localeCompare(cb, "en", { numeric: true });
+  if (byCore) return byCore;
+  if (!pa !== !pb) return pa ? -1 : 1;
+  return (pa ?? "").localeCompare(pb ?? "", "en", { numeric: true });
 }
 
 // An R2 object, with Range support so big downloads can resume.
