@@ -22,7 +22,10 @@ public static class HubClient
     /// <summary>"Connect by code": a code from "Add device" on another computer, or from the e-mail (POST /api/hc/pair).</summary>
     public static async Task<Joined> Pair(string code, string deviceName)
     {
-        var (json, status) = await Send("/api/hc/pair", new JsonObject { ["code"] = code, ["device_name"] = deviceName });
+        var (json, status) = await Send("/api/hc/pair", new JsonObject
+        {
+            ["code"] = code, ["device_name"] = deviceName, ["platform"] = AppModel.Platform,
+        });
         if (status is >= 200 and < 300)
         {
             var cong = json["congregation"] as JsonObject ?? new JsonObject();

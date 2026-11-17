@@ -48,20 +48,19 @@ For testing, `"UpdateURL"` in `app-settings.json` points a copy at another feed 
 A PC moves from dev to public by installing the public `Setup.exe` over it (same package id: settings, data and sign-in
 stay); updates then follow the public feed.
 
-### The download Worker needs (not done here)
+### What the download Worker serves
 
-`download/src/index.js` serves `/download/<file>` only for flat names matching `[\w. -]+\.(dmg|delta|tar\.gz)`: a request
-for `/download/windows/dev/releases.dev.json` is a 404 today. The route (`hearchurch.com/download*` in `wrangler.toml`)
-already reaches the Worker; it needs one more branch, before the generic one:
+`download/src/index.js` (tests: `node --test download/test/worker.test.mjs`):
 
-- `/download/windows/(dev|public)/<name>` with `<name>` matching `[\w.-]+\.(json|nupkg|exe)` (plus `RELEASES-<channel>`,
-  which older Velopack clients read) → R2 key `windows/<channel>/<name>`, via the existing `file()` (Range support for
-  the big packages).
-- Cache: `releases.*.json`, `assets.*.json` and `RELEASES-*` `max-age=300` (as `appcast.xml`); `*.nupkg`
-  `public, max-age=31536000, immutable` (a version's package never changes); `*-Setup.exe` `no-store` (same name for
-  every version), content type `application/octet-stream`, `content-disposition: attachment`.
-- For the site (W6): a stable `/download/HearChurch-Setup.exe` → `windows/public/HearChurchApp-public-Setup.exe`,
-  counted like the DMG (`countDownload(env, "<version>-windows")`).
+- `/download/windows/(dev|public)/<name>` → R2 `windows/<channel>/<name>`: `releases.*.json`, `assets.*.json` and
+  `RELEASES-*` with `max-age=300` (as `appcast.xml`); `*.nupkg` `public, max-age=31536000, immutable` (a version's
+  package never changes); `*-Setup.exe` `no-store` (same name for every version) as an attachment, counted as
+  `windows-<channel>`. Anything else there is a 404.
+- **`/download/HearChurch-Setup.exe`**, the link to share and the site's Windows button: always
+  `windows/public/HearChurchApp-public-Setup.exe`, saved as `HearChurch-Setup.exe`, counted in D1 like the DMG as
+  `<version>-windows`. The version comes from `windows/public/latest.json` (`{"version": "0.4.0"}`, step 4 below),
+  else from the newest full package in `releases.public.json`, else `unknown`. A 404 ("Not found") until the first
+  public release is uploaded.
 
 ## Versions and build numbers
 
@@ -108,8 +107,34 @@ Mac or Linux machine with `gh` and `rclone`.
    To give dev PCs a public release too (as the Mac's dev Macs get public builds), run step 1 a second time with
    `channel=dev` at the same version and publish that to `windows/dev/`.
 
-4. **Keep the folder.** Velopack only needs the latest full package to make the next delta (step 1 downloads it), so
+4. **Public only: latest.json**, last, after the feed (it only names the version the download counter records):
+
+       echo '{"version": "0.4.0"}' > windows-release/public/latest.json
+       rclone copyto windows-release/public/latest.json r2:hearchurch-downloads/windows/public/latest.json
+
+   (Step 3's second `rclone copy` would also pick it up if it is in the folder by then; uploading it separately
+   keeps it last.) Then check the stable link answers with the new installer:
+
+       curl -sI https://hearchurch.com/download/HearChurch-Setup.exe | grep -iE '^(HTTP|content-length|content-disposition)'
+
+5. **The site's link.** hearchurch.com/download offers Windows next to the two Macs (`site/src/pages/download.astro`:
+   a Windows PC gets "Download for Windows" first, with the system requirements and the SmartScreen note; a Mac gets a
+   "Using a Windows PC?" line with the requirements), and the home page's buttons say "Download for Mac or Windows".
+   All of them point at `/download/HearChurch-Setup.exe`, so the site needs no change per release. **First public
+   release only:** deploy the Worker (it has the route) and the site *after* step 3, so the Windows button never leads
+   to a 404. The public installer is to be signed before any other church gets it, so the site's Windows offer waits
+   for the signed build too.
+
+6. **Keep the folder.** Velopack only needs the latest full package to make the next delta (step 1 downloads it), so
    nothing has to be kept locally.
+
+### Devices on the hub
+
+Each device records what it runs on (`devices.platform`: `mac-arm`, `mac-intel` or `windows`). The Windows app sends
+`"platform": "windows"` with `/api/hc/pair` and as `HEARCHURCH_PLATFORM` to its engine, which puts it in its `hello`;
+the Mac's engine works it out itself (the Apple silicon or Intel build). The admin congregation endpoints
+(`devices[].platform`, additive) and the /account device list ("· Windows") show it; a device that hasn't connected
+since the hub learned this has none (`null`).
 
 ## Testing in CI
 

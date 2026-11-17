@@ -5,7 +5,7 @@ per language. Sessions are also recorded in the database (sessions table).
 
 An engine (the congregation's Mac) connects to /ws/engine with "Authorization: Bearer <device token>"
 (the legacy engine token path in app/engine.py is separate and unchanged) and then:
-  engine → hub   {"type": "hello", name, languages, stream, busy, app_version}   (languages = every language it can
+  engine → hub   {"type": "hello", name, languages, stream, busy, app_version, platform}   (languages = every language it can
                      produce; the binary frames index into this list; stream must match this server's)
                  {"type": "session_start", languages, targets?, speakers?, speaker?, passthrough?, trial?, resume?,
                      private?}   targets (V3, else languages) = the ones offered = the listen pills, in that order;
@@ -206,8 +206,10 @@ class Live:
             theirs, mine = m.get("stream") or {}, self.stream
             link.name = str(m.get("name") or link.device["name"])[:60]
             link.languages = [c for c in (m.get("languages") or []) if isinstance(c, str)][:20]
-            if isinstance(m.get("app_version"), str):   # the Mac app's version (admin stats: installs)
-                self.db.touch_device(link.device["id"], m["app_version"])
+            version, platform = m.get("app_version"), m.get("platform")
+            if isinstance(version, str) or isinstance(platform, str):   # admin stats: installs; the device lists
+                self.db.touch_device(link.device["id"], version if isinstance(version, str) else None,
+                                     platform if isinstance(platform, str) else None)
             link.compatible = (theirs.get("sample_rate") == mine.sample_rate
                                and theirs.get("bitrate_kbps") == mine.bitrate_kbps)
             if not link.compatible:

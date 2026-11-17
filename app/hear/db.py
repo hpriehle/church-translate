@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS devices (
     created_at REAL NOT NULL,
     last_seen REAL,
     app_version TEXT,
-    revoked_at REAL
+    revoked_at REAL,
+    platform TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -279,6 +280,15 @@ def next_month_start(t: float) -> float:
     y, m = (y + 1, 1) if m == 12 else (y, m + 1)
     return float(calendar.timegm((y, m, 1, 0, 0, 0)))
 
+PLATFORMS = ("mac-arm", "mac-intel", "windows")   # what a device runs on (devices.platform)
+
+
+def device_platform(value: Any) -> str | None:
+    """One of PLATFORMS, or None for anything else (older apps send nothing)."""
+    v = value.strip().lower() if isinstance(value, str) else ""
+    return v if v in PLATFORMS else None
+
+
 BILLING_TYPES = ("credits", "own_key", "internal")
 NO_CREDIT_NEEDED = ("own_key", "internal")   # metered, but never refused for balance or debited
 MAX_CHUNK_S = 60.0     # one reported chunk of speech is never longer than this (the chunker cuts far sooner)
@@ -459,6 +469,8 @@ class Database:
                 self._db.execute("ALTER TABLE devices ADD COLUMN app_version TEXT")
             if "revoked_at" not in dcols:    # databases made before a device could be revoked
                 self._db.execute("ALTER TABLE devices ADD COLUMN revoked_at REAL")
+            if "platform" not in dcols:      # databases made before the Windows app (mac-arm, mac-intel, windows)
+                self._db.execute("ALTER TABLE devices ADD COLUMN platform TEXT")
             kcols = {r[1] for r in self._db.execute("PRAGMA table_info(own_key_codes)")}
             if "voided_at" not in kcols:   # databases made before codes could be voided
                 self._db.execute("ALTER TABLE own_key_codes ADD COLUMN voided_at REAL")
@@ -732,7 +744,8 @@ class Database:
                 raise
         return f"{c[:4]}-{c[4:]}", now + ttl_s
 
-    def redeem_device_code(self, code: str, device_name: str) -> tuple[dict[str, Any], str] | None:
+    def redeem_device_code(self, code: str, device_name: str,
+                           platform: str | None = None) -> tuple[dict[str, Any], str] | None:
         """Use a pairing or e-mailed code: a new device for its congregation. Returns (congregation, device token),
         or None for a code that is unknown, used, expired, or whose congregation is hidden. Single use, atomically."""
         c = re.sub(r"[\s-]", "", code or "").upper()
@@ -746,7 +759,7 @@ class Database:
             if row is None or self._db.execute("UPDATE device_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
                                                (now, row["id"])).rowcount == 0:
                 return None
-        token, did = self._add_device(row["congregation_id"], device_name)
+        token, did = self._add_device(row["congregation_id"], device_name, platform)
         self._x("UPDATE device_codes SET device_id = ? WHERE id = ?", (did, row["id"]))
         return self.congregation(row["congregation_id"]), token
 
@@ -1013,14 +1026,14 @@ class Database:
         return self.congregation(rows[0]["congregation_id"]) if rows else None
 
     # ------------------------------------------------------------ devices
-    def add_device(self, cid: int, name: str) -> str:
+    def add_device(self, cid: int, name: str, platform: str | None = None) -> str:
         """Create a device and return its token (the only time it exists in clear)."""
-        return self._add_device(cid, name)[0]
+        return self._add_device(cid, name, platform)[0]
 
-    def _add_device(self, cid: int, name: str) -> tuple[str, int]:
+    def _add_device(self, cid: int, name: str, platform: str | None = None) -> tuple[str, int]:
         token = new_token("hcd")
-        cur = self._x("INSERT INTO devices (congregation_id, name, token_hash, created_at) VALUES (?,?,?,?)",
-                      (cid, (name or "")[:60] or "Mac", hash_token(token), time.time()))
+        cur = self._x("INSERT INTO devices (congregation_id, name, token_hash, created_at, platform) VALUES (?,?,?,?,?)",
+                      (cid, (name or "")[:60] or "Mac", hash_token(token), time.time(), device_platform(platform)))
         return token, cur.lastrowid
 
     def device_by_token(self, token: str) -> dict[str, Any] | None:
@@ -1030,7 +1043,8 @@ class Database:
         return dict(rows[0]) if rows else None
 
     def device(self, did: int) -> dict[str, Any] | None:
-        rows = self._q("SELECT id, congregation_id, name, created_at, last_seen, app_version, revoked_at FROM devices"
+        rows = self._q("SELECT id, congregation_id, name, created_at, last_seen, app_version, revoked_at, platform"
+                       " FROM devices"
                        " WHERE id = ?", (did,))
         return dict(rows[0]) if rows else None
 
@@ -1040,21 +1054,22 @@ class Database:
         self._x("UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", (time.time(), did))
         return self.device(did) is not None
 
-    def touch_device(self, did: int, app_version: str | None = None) -> None:
-        """The Mac connected (or said hello): last seen now, and its app version when it told us one."""
+    def touch_device(self, did: int, app_version: str | None = None, platform: str | None = None) -> None:
+        """The device connected (or said hello): last seen now, and its app version and platform when it told us."""
         v = (app_version or "").strip()[:40] or None
-        self._x("UPDATE devices SET last_seen = ?, app_version = COALESCE(?, app_version) WHERE id = ?",
-                (time.time(), v, did))
+        self._x("UPDATE devices SET last_seen = ?, app_version = COALESCE(?, app_version),"
+                " platform = COALESCE(?, platform) WHERE id = ?", (time.time(), v, device_platform(platform), did))
 
     def devices(self, cid: int, revoked: bool = False) -> list[dict[str, Any]]:
         """The congregation's devices; revoked ones (with revoked_at) only when asked."""
-        return [dict(r) for r in self._q("SELECT id, name, created_at, last_seen, app_version, revoked_at FROM devices"
+        return [dict(r) for r in self._q("SELECT id, name, created_at, last_seen, app_version, revoked_at, platform"
+                                         " FROM devices"
                                          " WHERE congregation_id = ?" + ("" if revoked else " AND revoked_at IS NULL"),
                                          (cid,))]
 
     def all_devices(self) -> list[dict[str, Any]]:
-        return [dict(r) for r in self._q("SELECT id, congregation_id, name, created_at, last_seen, app_version"
-                                         " FROM devices ORDER BY id")]
+        return [dict(r) for r in self._q("SELECT id, congregation_id, name, created_at, last_seen, app_version,"
+                                         " platform FROM devices ORDER BY id")]
 
     # ------------------------------------------------------------ e-mail links
     def add_email_token(self, cid: int, purpose: str, device_name: str, ttl_s: float) -> tuple[str, str]:

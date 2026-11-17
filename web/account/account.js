@@ -323,12 +323,15 @@ $("email-form").onsubmit = async (ev) => {
 
 // ------------------------------------------------------------------ devices
 
+const PLATFORM = { "mac-arm": "Mac with Apple silicon", "mac-intel": "Intel Mac", windows: "Windows" };
+
 function renderDevices() {
   const ds = acct.devices || [];
   $("no-devices").hidden = !!ds.length;
   $("device-list").innerHTML = ds.map((d, i) =>
     `<li><span class="grow">${HC.esc(d.name)}<br><span class="quiet small">` +
     `${d.last_seen ? "Last seen " + HC.date(d.last_seen) : "Connected " + HC.date(d.created_at)}` +
+    `${PLATFORM[d.platform] ? " · " + PLATFORM[d.platform] : ""}` +
     `${d.app_version ? " · app " + HC.esc(d.app_version) : ""}</span></span>` +
     `<button type="button" class="danger" data-revoke="${i}">Revoke</button></li>`).join("");
   $("device-list").querySelectorAll("[data-revoke]").forEach((b) => b.onclick = async () => {

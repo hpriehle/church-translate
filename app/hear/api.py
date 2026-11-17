@@ -16,7 +16,7 @@ Sign-up flow (JSON, for the Mac app; sign-up is open, no manual approval):
   POST /api/hc/device-link  {email, [slug, device_name]} → e-mails a magic link to add another Mac; the new Mac
                             then polls /api/hc/claim with the returned {claim} exactly like above
   POST /api/hc/connect-code (device token) → {connect_code}: a new 6-digit code for the congregation (old one dies)
-  POST /api/hc/connect      {slug, code, device_name} → like claim's answer; 404 not_found, 403 bad_code,
+  POST /api/hc/connect      {slug, code, device_name, [platform]} → like claim's answer; 404 not_found, 403 bad_code,
                             429 {error: locked, retry_after}. Signup (verify_email off) also returns connect_code.
                             The answer carries the congregation's billing ("credits", "own_key" or "internal"; see
                             "Billing types" below for what an app that doesn't know "internal" gets).
@@ -29,7 +29,7 @@ Accounts (V3.2, docs/v3-languages.md "Accounts"): several e-mails per congregati
   POST /api/hc/pairing-code (device token) → {code: "7KQM-X2PA", expires_at, expires_in}: "Add device", 15 min, once
   POST /api/hc/email-code   {email} → always {ok, message}: a code to every address of the congregation that has it
                             (Resend; 503 not_configured without RESEND_API_KEY; 429 per IP and per address)
-  POST /api/hc/pair         {code, device_name} → {device_token, slug, congregation, billing}; 403 bad_code,
+  POST /api/hc/pair         {code, device_name, [platform]} → {device_token, slug, congregation, billing}; 403 bad_code,
                             429 locked. Takes both kinds of code.
   POST /api/hc/congregation (device token) {name?, stake?, meeting_times?, timezone?} → {ok, congregation}
   GET /api/hc/account also carries {url, aliases} (the listener link and its old slugs).
@@ -518,6 +518,7 @@ class Connect(BaseModel):
     slug: str = Field(max_length=80)
     code: str = Field(max_length=20)
     device_name: str = Field(default="Mac", max_length=60)
+    platform: str = Field(default="", max_length=20)   # mac-arm, mac-intel or windows (db.PLATFORMS); optional
 
 
 def _locked(seconds: int) -> JSONResponse:
@@ -541,7 +542,7 @@ async def connect(request: Request, body: Connect):
         h.connect_ip.fail(ip)
         h.connect_cong.fail(cong["slug"])
         return JSONResponse({"error": "bad_code"}, status_code=403)
-    return {"ok": True, "device_token": h.db.add_device(cong["id"], body.device_name or "Mac"), "slug": cong["slug"],
+    return {"ok": True, "device_token": h.db.add_device(cong["id"], body.device_name or "Mac", body.platform), "slug": cong["slug"],
             "congregation": _public(cong), "billing": billing_for(request, cong["billing"])}
 
 
@@ -660,6 +661,7 @@ class Pair(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     code: str = Field(max_length=40)
     device_name: str = Field(default="Mac", max_length=60)
+    platform: str = Field(default="", max_length=20)   # mac-arm, mac-intel or windows (db.PLATFORMS); optional
 
 
 class SlugChange(BaseModel):
@@ -712,7 +714,7 @@ async def pair(request: Request, body: Pair):
     ip = _ip(request)
     if wait := h.pair_ip.locked(ip):
         return _locked(wait)
-    got = h.db.redeem_device_code(body.code, body.device_name or "Mac")
+    got = h.db.redeem_device_code(body.code, body.device_name or "Mac", body.platform)
     if got is None:
         h.pair_ip.fail(ip)
         return JSONResponse({"error": "bad_code", "message": "That code is wrong or has expired: ask for a new one."},

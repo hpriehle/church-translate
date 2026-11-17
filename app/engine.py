@@ -421,6 +421,19 @@ class EngineClient:
 
 
 
+def device_platform() -> str:
+    """What this computer is, for the hub's device lists: the app says it (HEARCHURCH_PLATFORM: mac-arm, mac-intel,
+    windows), else we look. An Intel build running under Rosetta reports mac-intel, which is the build it is."""
+    if p := os.environ.get("HEARCHURCH_PLATFORM", "").strip():
+        return p
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        import platform
+        return "mac-arm" if platform.machine() == "arm64" else "mac-intel"
+    return ""
+
+
 def _activity():
     """What the hub meters as a meeting: the pipeline's run, or else an open /talk conversation (app/talk.py
     TalkRun: always a private session, both languages heard). Both have running, started_at, on_channels and
@@ -606,7 +619,7 @@ class PublishClient(EngineClient):
         langs += [c for c in TALK_LANGS if c not in langs]
         self._send({"type": "hello", "name": self.name, "languages": langs,
                     "stream": {"sample_rate": st.sample_rate, "bitrate_kbps": st.bitrate_kbps}, "busy": False,
-                    "app_version": os.environ.get("HEARCHURCH_APP_VERSION", "")})
+                    "app_version": os.environ.get("HEARCHURCH_APP_VERSION", ""), "platform": device_platform()})
         self._attach()
         watcher = asyncio.create_task(self._publish_watch())
         billing = asyncio.create_task(self._learn_billing())

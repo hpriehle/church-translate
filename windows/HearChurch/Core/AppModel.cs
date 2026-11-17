@@ -80,6 +80,8 @@ public sealed class AppModel
 
     public bool Running => Engine.Status?.Pipeline.Running ?? false;
     public static string DeviceName => Environment.MachineName;
+    /// <summary>What the hub's device lists show this PC as (sign-in and the engine's hello).</summary>
+    public const string Platform = "windows";
 
     public string? MicWarning => Running && Engine.Status?.MicWarning is { Length: > 0 } w ? w : null;
     public string? MicName => Running && Engine.Status?.MicName is { Length: > 0 } n ? n : null;
@@ -259,7 +261,10 @@ public sealed class AppModel
 
     private Dictionary<string, string> EngineEnvironment()
     {
-        var env = new Dictionary<string, string> { ["HEARCHURCH_DEVICE_NAME"] = DeviceName };
+        var env = new Dictionary<string, string>
+        {
+            ["HEARCHURCH_DEVICE_NAME"] = DeviceName, ["HEARCHURCH_PLATFORM"] = Platform,
+        };
         var v = typeof(AppModel).Assembly.GetName().Version;
         if (v != null)
         {
