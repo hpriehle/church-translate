@@ -47,9 +47,11 @@ Billing (prepaid credits, or the congregation's own Anthropic key through a one-
   GET  /api/hc/billing      (device token) → {billing, balance: {left_min, free_left_min, free_resets_at, balance_min,
                             balance_usd, can_start, …}, balance_usd, language_hours_left, free_hours_left,
                             paid_hours_left, out_of_credit, can_buy, bundles: [{usd, hours, usd_per_hour}], buy_usd
-                            (the bundle prices, for 0.3.0 apps), message}
+                            (the bundle prices, for 0.3.0 apps), free_trial, message}. free_trial (while a new
+                            congregation's free trial runs, else null): {days_left, hours_left, ends_at (null until the
+                            first meeting), text: "Free trial: 14 days and 20 hours left"}; message is that text then.
   GET  /api/hc/usage        (device token) → {billing, meetings: [{started_at, ended_at, languages, language_minutes,
-                            language_hours, free_minutes, paid_minutes, cost_usd, billing}], charges: [{kind, at,
+                            language_hours, trial_minutes, free_minutes, paid_minutes, cost_usd, billing}], charges: [{kind, at,
                             amount_usd, receipt_url (top-ups: /api/hc/receipts/<id>, web only)}]}: the Billing tab's history, newest first (?meetings=, ?charges= limits).
   POST /api/hc/checkout     (device token) {usd, save_card?} → {url} (less a pending % off code: percent_off,
                             charged_usd; save_card keeps the card for 1-click): a Stripe Checkout page for the bundle at that price ($20,
@@ -95,6 +97,7 @@ import html
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -971,6 +974,7 @@ async def usage_history(request: Request, meetings: int = Query(default=50, ge=1
         out.append({"started_at": m["started_at"], "ended_at": m["ended_at"], "billing": billing_for(request, m["billing"]),
                     "languages": m["languages"], "language_minutes": u.get("language_minutes", {}),
                     "language_hours": round(mins / 60, 2), "minutes": mins,
+                    "trial_minutes": u.get("trial_minutes", 0),
                     "free_minutes": u.get("free_minutes", 0), "paid_minutes": u.get("paid_minutes", 0),
                     "cost_usd": u.get("cost_usd", 0)})
     paid = [{"kind": r["kind"], "at": r["at"], "amount_usd": r["amount_usd"],
@@ -1003,6 +1007,15 @@ def _hours(h: float) -> str:
     return f"{h:.1f}".removesuffix(".0")
 
 
+def trial_text(t: dict[str, Any]) -> str:
+    """What the app and the account page say while the free trial runs: "Free trial: 14 days and 20 hours left".
+    Days are counted up (the last day still says 1), hours down to a tenth (never more than is left)."""
+    days = max(1, math.ceil(t["days_left"] - 1e-9))
+    hours = math.floor(t["hours_left"] * 10 + 1e-9) / 10
+    return (f"Free trial: {days} day{'' if days == 1 else 's'} and {_hours(hours)} hour{'' if hours == 1 else 's'}"
+            " left")
+
+
 def billing_info(cong: dict[str, Any], request: Request | None = None) -> dict[str, Any]:
     """What the operator page and the app show: this month's free hour, the paid hours left (and what they are worth),
     whether the next meeting can start, the bundles, and whether credit can be bought here (Stripe set up on this
@@ -1015,10 +1028,15 @@ def billing_info(cong: dict[str, Any], request: Request | None = None) -> dict[s
     hours = round(b["left_min"] / 60, 2)
     free_h, paid_h = round(b["free_left_min"] / 60, 2), round(b["balance_min"] / 60, 2)
     owed = f"-${-b['balance_usd']:.2f}" if b["balance_usd"] < 0 else f"${b['balance_usd']:.2f}"
+    t = b.get("trial")
+    trial = ({"days_left": t["days_left"], "hours_left": t["hours_left"], "ends_at": t["ends_at"],
+              "text": trial_text(t)} if credits and t and t["active"] else None)
     if cong["billing"] == "internal":
         message = INCLUDED_MESSAGE
     elif not credits:
         message = "Translation is paid with your own API key."
+    elif trial:
+        message = trial["text"]
     elif not b["can_start"]:
         message = (f"Out of credit (balance {owed}). This month's free hour is used up: buy credit to start the next "
                    "meeting, or wait for next month's free hour.")
@@ -1029,7 +1047,7 @@ def billing_info(cong: dict[str, Any], request: Request | None = None) -> dict[s
             "language_hours_left": hours if credits else None,
             "free_hours_left": free_h if credits else None, "paid_hours_left": paid_h if credits else None,
             "free_hours_per_month": FREE_SECONDS / 3600, "free_resets_at": b["free_resets_at"],
-            "out_of_credit": credits and not b["can_start"],
+            "out_of_credit": credits and not b["can_start"], "free_trial": trial,
             "bundles": [bundle_json(x) for x in BUNDLES],
             # 0.3.0 apps make their buy buttons from buy_usd and label them usd / usd_per_language_hour: the
             # bundle prices, and the old $5 rate (so they show fewer hours than the bundle gives; Checkout says it right)
@@ -1479,6 +1497,7 @@ async def admin_page(request: Request):
 @router.get("/api/admin/congregations")
 async def admin_list(request: Request):
     from .. import main
+    from . import admin
 
     main.require_operator(request)
     h = _hear()
@@ -1494,7 +1513,8 @@ async def admin_list(request: Request):
                     "wifi_only": bool(s and s.private),
                     "listeners": s.listeners() if s else 0,
                     "last_session": (h.db.sessions(c["id"]) or [{}])[-1].get("started_at"),
-                    "balance": h.db.balance(c["id"]),
+                    "balance": (b := h.db.balance(c["id"])),
+                    "free_trial": admin.trial_status(b.get("trial")),
                     "aliases": [a["slug"] for a in aliases.get(c["id"], [])]})
     return {"congregations": out}
 

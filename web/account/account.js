@@ -73,7 +73,8 @@ function renderOverview(usage) {
   if (credits) {
     $("ov-free").textContent = HC.hours(bill.free_hours_left);
     $("ov-paid").textContent = HC.hours(Math.max(0, bill.paid_hours_left));
-    $("ov-message").textContent = bill.out_of_credit ? bill.message : "Every month starts with a free hour.";
+    $("ov-message").textContent = bill.free_trial ? bill.free_trial.text   // a new congregation's free trial
+      : bill.out_of_credit ? bill.message : "Every month starts with a free hour.";
   }
   const rows = (usage.meetings || []).slice(0, 5);
   $("meetings").hidden = !rows.length;

@@ -3,7 +3,9 @@
 // Every number here must match the billing code (app/hear/db.py BUNDLES, FREE_SECONDS) and download/src/terms.html
 // ("Credits and refunds"): 1 free language-hour per calendar month (UTC), no carry-over, unlimited listeners;
 // bundles $20 = 4 h, $50 = 11 h, $100 = 25 h, $250 = 70 h; hours never expire; unused hours refundable anytime,
-// pro rata at the bundle's price; sold by Automaddie LLC. Deploying site/ publishes it.
+// pro rata at the bundle's price; sold by Automaddie LLC. Free trial (decided 2026-11-16; db.py TRIAL_DAYS,
+// TRIAL_SECONDS): every new church gets 14 days free from its first meeting, up to 20 language-hours, whichever ends
+// first; the monthly free hour starts after it; own-key congregations get none. Deploying site/ publishes it.
 import Base from "../layouts/Base.astro";
 
 const BUNDLES = [ // [US dollars, language-hours]
@@ -16,15 +18,17 @@ const perHour = (usd, hours) => "$" + (usd / hours).toFixed(2);
 
 const faq = [
   ["What does a typical meeting cost?",
-   "A 70-minute meeting usually has about 50 minutes of speaking. Heard in two languages, that is 100 language-minutes, about 1.7 language-hours: between $6 and $8.33 depending on the bundle. In one language, half that. Your free hour each month covers the first hour."],
+   "A 70-minute meeting usually has about 50 minutes of speaking. Heard in two languages, that is 100 language-minutes, about 1.7 language-hours: between $6 and $8.33 depending on the bundle. In one language, half that. After your free trial, your free hour each month covers the first hour."],
+  ["Is there a free trial?",
+   "Every new church starts with 14 days free, up to 20 language-hours. After that, one free language-hour each month, then prepaid hours from $5 per language-hour. The 14 days start with your first translated meeting, and the trial ends after 14 days or 20 language-hours, whichever comes first. No card is needed."],
   ["What is a language-hour?",
    "One hour of speech translated into one language that someone is listening to. An hour heard in two languages is two language-hours. A language nobody is following that day costs nothing."],
   ["How does the free hour work?",
-   "Every congregation gets one free language-hour each calendar month. It is used first, before any hours you bought, and it renews on the 1st. Free time you don't use doesn't carry over to the next month."],
+   "Every congregation gets one free language-hour each calendar month, starting once its free trial has ended. It is used first, before any hours you bought, and it renews on the 1st. Free time you don't use doesn't carry over to the next month."],
   ["Do listeners pay anything?",
    "No. Listeners open your congregation's link or scan its QR code. They have nothing to install, no account and nothing to pay, and there is no limit on how many can listen."],
   ["Is there a monthly plan or contract?",
-   "No. Beyond the free hour you buy a bundle of hours in advance and use it as you go. Hours you bought never expire, so you only pay for meetings you translate."],
+   "No. Beyond the free trial and the free hour you buy a bundle of hours in advance and use it as you go. Hours you bought never expire, so you only pay for meetings you translate."],
   ["What if we run out during a meeting?",
    "Translation carries on to the end, so your balance can dip below zero. The next bundle pays for that time first, and a new meeting starts once there are hours left again, or when next month's free hour arrives."],
   ["Can we get our money back?",
@@ -44,16 +48,17 @@ const schema = {
   <article class="wrap">
     <header class="head">
       <h1>Church translation pricing</h1>
-      <p class="lede">Pay only for the time someone is speaking, in each language your members are listening to. Every month, the first hour is free.</p>
+      <p class="lede">Pay only for the time someone is speaking, in each language your members are listening to. Every new church starts with 14 days free, up to 20 language-hours. After that, one free language-hour each month, then prepaid hours from $5 per language-hour.</p>
     </header>
 
     <section class="plans" aria-label="Plans">
       <div class="plan">
         <h2>Free</h2>
         <p class="price"><span class="amount">$0</span></p>
-        <p class="unit">1 hour every month, unlimited listeners</p>
-        <p class="sum">Every congregation gets one free language-hour each calendar month. Try it on a real Sunday before you buy anything.</p>
+        <p class="unit">14 days to start, then 1 hour every month, unlimited listeners</p>
+        <p class="sum">Every new church starts with 14 days free, up to 20 language-hours. After that, every congregation gets one free language-hour each calendar month. Try it on a real Sunday before you buy anything.</p>
         <ul>
+          <li>14 days free to start, up to 20 language-hours, no card</li>
           <li>Live captions and spoken translation</li>
           <li>Unlimited listeners, who never pay</li>
           <li>Renews on the 1st of every month</li>
@@ -80,7 +85,7 @@ const schema = {
           <li>No monthly plan, no contract</li>
           <li>A meeting is never cut off</li>
         </ul>
-        <a class="btn get" href="/start">Start with a free hour</a>
+        <a class="btn get" href="/start">Start with 14 days free</a>
       </div>
     </section>
 

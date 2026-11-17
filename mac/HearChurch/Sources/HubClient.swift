@@ -154,6 +154,7 @@ enum HubClient {
         var autoTopUp = AutoTopUp()
         var discountPercent: Int? = nil   // a % off code waiting for the next bundle
         var canSaveCard = false        // a hub that knows saved cards (and has Stripe)
+        var trialText: String? = nil   // a new congregation's free trial while it runs: "Free trial: 14 days and 20 hours left"
         var ownKey: Bool { mode == "own_key" }
         var included: Bool { mode == "internal" }
     }
@@ -187,6 +188,7 @@ enum HubClient {
         }
         out.discountPercent = (json["discount"] as? [String: Any])?["percent"] as? Int
         out.canSaveCard = json["can_save_card"] as? Bool ?? false
+        out.trialText = (json["free_trial"] as? [String: Any])?["text"] as? String
         return out
     }
 
@@ -194,6 +196,7 @@ enum HubClient {
         let startedAt: Date; let endedAt: Date?; let languages: [String]; let languageHours: Double
         let freeMinutes: Double; let paidMinutes: Double; let costUSD: Double; let ownKey: Bool
         var included = false
+        var trialMinutes: Double = 0   // what the free trial covered
         var id: Date { startedAt }
     }
     struct Charge: Identifiable, Hashable {
@@ -212,7 +215,8 @@ enum HubClient {
                     endedAt: (m["ended_at"] as? Double).map { Date(timeIntervalSince1970: $0) },
                     languages: m["languages"] as? [String] ?? [], languageHours: num(m["language_hours"]),
                     freeMinutes: num(m["free_minutes"]), paidMinutes: num(m["paid_minutes"]), costUSD: num(m["cost_usd"]),
-                    ownKey: m["billing"] as? String == "own_key", included: m["billing"] as? String == "internal")
+                    ownKey: m["billing"] as? String == "own_key", included: m["billing"] as? String == "internal",
+                    trialMinutes: num(m["trial_minutes"]))
         }
         let charges = (json["charges"] as? [[String: Any]] ?? []).map { c in
             Charge(kind: c["kind"] as? String ?? "", at: Date(timeIntervalSince1970: num(c["at"])), amountUSD: num(c["amount_usd"]),

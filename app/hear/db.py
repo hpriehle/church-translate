@@ -19,6 +19,12 @@ counts in the month it started; unused free time does not carry over). What a mo
 taken from the credit, oldest top-up first (`_walk`). Each session keeps
 the billing mode it started under, so own-key meetings are metered but never debited, also after a switch to
 credits. The balance may go negative (a meeting is never cut off); `can_start` then refuses the next one.
+
+Free trial (decided Nov 16): a congregation made from then on (`free_trial` = 1; every older row has 0) gets
+TRIAL_DAYS free from the start of its first metered credit-billed meeting, up to TRIAL_SECONDS (20 language-hours),
+whichever ends first. Trial use is metered but costs nothing and doesn't touch the month's free hour or the credit;
+a meeting that starts in the trial and runs past the hours cap goes on, and its overflow is billed as usual (free
+hour, then credit). Own key and internal congregations never get one (switching to them ends the eligibility).
 """
 from __future__ import annotations
 
@@ -55,7 +61,8 @@ CREATE TABLE IF NOT EXISTS congregations (
     city TEXT NOT NULL DEFAULT '',
     connect_code_hash TEXT,
     connect_code_at REAL,
-    billing TEXT NOT NULL DEFAULT 'credits'
+    billing TEXT NOT NULL DEFAULT 'credits',
+    free_trial INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,6 +259,10 @@ CREATE INDEX IF NOT EXISTS refunds_credit ON refunds(credit_id);
 # cheaper per hour as they grow: (price in cents, language-hours). Unlimited listeners.
 BUNDLES = ((2000, 4), (5000, 11), (10000, 25), (25000, 70))
 FREE_SECONDS = 3600            # per calendar month
+# The free trial of a new congregation (Nov 16): 14 days from its first metered meeting, up to 20 language-hours.
+TRIAL_DAYS = 14
+TRIAL_SECONDS = 20 * 3600
+NEW_CONGREGATIONS_GET_TRIAL = True   # every new congregation does (the test suite turns this off outside its trial tests)
 # Before the bundles (Nov 8): $5 per language-hour. Top-ups bought then keep their minutes at this rate; a top-up of
 # an amount that is no bundle (by hand) is credited at it; and an overdrawn balance is valued at it in dollars.
 LEGACY_CENTS_PER_LANGUAGE_HOUR = 500
@@ -290,7 +301,7 @@ LOGS_KEEP_BYTES = 20 * 2 ** 20   # and at most this much per congregation (the o
 LOG_KINDS = ("stream", "manual")
 
 CONG_FIELDS = ("id", "slug", "church", "name", "unit_type", "stake", "address", "city", "lat", "lng", "meeting_times",
-               "timezone", "email", "email_verified", "created_at", "hidden", "billing")
+               "timezone", "email", "email_verified", "created_at", "hidden", "billing", "free_trial")
 
 # hearchurch.com paths served by the download Worker and the marketing site, not by this app
 # (docs/seo-site-structure.md). Add a new top-level page here before it goes live, after checking that no
@@ -406,7 +417,8 @@ def _cong(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     d = {k: row[k] for k in CONG_FIELDS}
     d["meeting_times"] = json.loads(d["meeting_times"] or "[]")
-    d["email_verified"], d["hidden"] = bool(d["email_verified"]), bool(d["hidden"])
+    d["email_verified"], d["hidden"], d["free_trial"] = (bool(d["email_verified"]), bool(d["hidden"]),
+                                                         bool(d["free_trial"]))
     return d
 
 
@@ -442,6 +454,8 @@ class Database:
             if "billing" not in cols:   # databases made before credits: every congregation there brought its own key
                 self._db.execute("ALTER TABLE congregations ADD COLUMN billing TEXT NOT NULL DEFAULT 'credits'")
                 self._db.execute("UPDATE congregations SET billing = 'own_key'")
+            if "free_trial" not in cols:   # databases made before the free trial: no existing congregation gets one
+                self._db.execute("ALTER TABLE congregations ADD COLUMN free_trial INTEGER NOT NULL DEFAULT 0")
             scols = {r[1] for r in self._db.execute("PRAGMA table_info(sessions)")}
             if "code" not in scols:
                 self._db.execute("ALTER TABLE sessions ADD COLUMN code TEXT")
@@ -548,19 +562,30 @@ class Database:
         congregation."""
         if mode not in BILLING_TYPES:
             raise ValueError(mode)
+        if mode != "credits":   # own key and internal never get the free trial, also if switched back later
+            self._x("UPDATE congregations SET free_trial = 0 WHERE id = ?", (cid,))
         return self._x("UPDATE congregations SET billing = ? WHERE id = ?", (mode, cid)).rowcount > 0
+
+    def set_free_trial(self, cid: int, on: bool) -> bool:
+        """Give a congregation the free trial or take it away (the operator; tests). False for an unknown one."""
+        return self._x("UPDATE congregations SET free_trial = ? WHERE id = ?", (int(on), cid)).rowcount > 0
 
     def create_congregation(self, *, church: str, name: str, unit_type: str, email: str, stake: str | None = None,
                             address: str = "", lat: float | None = None, lng: float | None = None,
-                            meeting_times: list | None = None, timezone: str = "", city: str = "") -> dict[str, Any]:
+                            meeting_times: list | None = None, timezone: str = "", city: str = "",
+                            free_trial: bool | None = None) -> dict[str, Any]:
+        """A new congregation, billed with credits; free_trial: it gets the free trial (None: as
+        NEW_CONGREGATIONS_GET_TRIAL says, which is yes)."""
+        if free_trial is None:
+            free_trial = NEW_CONGREGATIONS_GET_TRIAL
         for _ in range(5):  # two sign-ups with the same name at once: retry with the next free slug
             slug = self.unique_slug(name)
             try:
                 cur = self._x(
                     "INSERT INTO congregations (slug, church, name, unit_type, stake, address, city, lat, lng,"
-                    " meeting_times, timezone, email, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " meeting_times, timezone, email, created_at, free_trial) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (slug, church, name, unit_type, stake or None, address, city or city_of(address), lat, lng,
-                     json.dumps(meeting_times or []), timezone, email.lower(), time.time()))
+                     json.dumps(meeting_times or []), timezone, email.lower(), time.time(), int(free_trial)))
                 if email.strip():
                     self.add_email(cur.lastrowid, email, main=True)
                 return self.congregation(cur.lastrowid)
@@ -820,7 +845,8 @@ class Database:
                                        (row["id"], cid)).fetchone()
                 if red is not None:
                     if row["type"] == "own_key":   # asked again (a retry): make sure the switch holds
-                        self._db.execute("UPDATE congregations SET billing = 'own_key' WHERE id = ?", (cid,))
+                        self._db.execute("UPDATE congregations SET billing = 'own_key', free_trial = 0 WHERE id = ?",
+                                         (cid,))
                     self._db.execute("COMMIT")
                     return {"code": self._code_dict(row), "redemption": dict(red), "already": True}
                 if not self._usable(row, cid, now):
@@ -834,7 +860,8 @@ class Database:
                                        " VALUES (?,?,?,?)", (row["id"], cid, now, status)).lastrowid
                 self._db.execute("UPDATE codes SET uses = uses + 1 WHERE id = ?", (row["id"],))
                 if row["type"] == "own_key":
-                    self._db.execute("UPDATE congregations SET billing = 'own_key' WHERE id = ?", (cid,))
+                    self._db.execute("UPDATE congregations SET billing = 'own_key', free_trial = 0 WHERE id = ?",
+                                     (cid,))
                 elif row["type"] == "free_hours":
                     self._db.execute("INSERT INTO credits (congregation_id, payment_id, cents, seconds, created_at)"
                                      " VALUES (?,?,0,?,?)", (cid, f"{CODE_CREDIT_PREFIX}{rid}", row["value"] * 3600, now))
@@ -1349,10 +1376,12 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
 
     def _walk(self, cid: int, now: float | None = None) -> dict[str, Any]:
         """The ledger of one congregation, worked out from its meetings and top-ups. Credit-billed meetings, in the
-        order they started, first use their month's free hour (FREE_SECONDS per UTC month, by the meeting's start);
-        the rest is taken from the top-ups, oldest first, each at its own rate; what no top-up covers is overdrawn.
-        Returns sessions {id: {secs, free, paid, cost_cents}} (all of its metered meetings; own-key and internal ones
-        cost nothing), unused {credit id: seconds}, overdrawn (seconds), used/metered seconds and this month's use."""
+        order they started, first use the free trial (a congregation with free_trial: meetings starting within
+        TRIAL_DAYS of the first one, until TRIAL_SECONDS are used), then their month's free hour (FREE_SECONDS per UTC
+        month, by the meeting's start); the rest is taken from the top-ups, oldest first, each at its own rate; what no
+        top-up covers is overdrawn. Returns sessions {id: {secs, trial, free, paid, cost_cents}} (all of its metered
+        meetings; own-key and internal ones cost nothing), unused {credit id: seconds}, overdrawn (seconds),
+        used/metered seconds, this month's use (trial use not counted) and trial {eligible, started_at, used}."""
         now = time.time() if now is None else now
         rows = self._q("SELECT s.id, s.started_at, s.billing, SUM(p.seconds) AS secs FROM sessions s"
                        " JOIN speech p ON p.session_id = s.id WHERE s.congregation_id = ?"
@@ -1363,16 +1392,27 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
         months: dict[str, float] = {}
         sessions: dict[int, dict[str, float]] = {}
         over = used = metered = 0.0
+        crow = self._q("SELECT free_trial FROM congregations WHERE id = ?", (cid,))
+        eligible = bool(crow and crow[0]["free_trial"])
+        trial_start: float | None = None
+        trial_used = 0.0
         for r in rows:
             secs = r["secs"] or 0.0
             metered += secs
-            free = paid = cost = 0.0
+            trial = free = paid = cost = 0.0
             if r["billing"] == "credits":
                 used += secs
+                if eligible:
+                    if trial_start is None:   # the clock starts with the first metered meeting
+                        trial_start = r["started_at"]
+                    if r["started_at"] < trial_start + TRIAL_DAYS * 86400 and trial_used < TRIAL_SECONDS:
+                        trial = min(secs, TRIAL_SECONDS - trial_used)   # past the cap: the rest is billed below
+                        trial_used += trial
+                rest = secs - trial
                 m = month_of(r["started_at"])
-                free = max(0.0, min(secs, FREE_SECONDS - months.get(m, 0.0)))
-                months[m] = months.get(m, 0.0) + secs
-                paid = need = secs - free
+                free = max(0.0, min(rest, FREE_SECONDS - months.get(m, 0.0)))
+                months[m] = months.get(m, 0.0) + rest
+                paid = need = rest - free
                 for c in credits:
                     if need <= 0:
                         break
@@ -1384,10 +1424,10 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
                 if need > 0:
                     over += need
                     cost += need * LEGACY_CENTS_PER_LANGUAGE_HOUR / 3600
-            sessions[r["id"]] = {"secs": secs, "free": free, "paid": paid, "cost_cents": cost}
+            sessions[r["id"]] = {"secs": secs, "trial": trial, "free": free, "paid": paid, "cost_cents": cost}
         return {"sessions": sessions, "unused": left, "rate": rate, "overdrawn": over, "used": used,
                 "metered": metered, "month": month_of(now), "month_used": months.get(month_of(now), 0.0),
-                "credits": credits}
+                "credits": credits, "trial": {"eligible": eligible, "started_at": trial_start, "used": trial_used}}
 
     def unused_cents(self, credit: dict[str, Any]) -> int:
         """What the unused part of a top-up is worth at its own rate: refunded on request (used hours are final)."""
@@ -1402,7 +1442,10 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
         balance_min  bought minutes not used yet (negative when overdrawn); balance_usd: what those are worth at the
                      rates they were bought at (an overdraft at $5 per hour)
         bought_min / bought_usd  all top-ups less refunds; left_min (free + balance), can_start (False only for
-        credits with nothing left)."""
+                     credits with nothing left and no free trial running)
+        trial        None for a congregation without the free trial (older ones, own key); otherwise {active, days,
+                     cap_hours, started_at (None until the first metered meeting), ends_at (started_at + days),
+                     used_min, days_left, hours_left (both 0 once it has ended)}."""
         now = time.time() if now is None else now
         w = self._walk(cid, now)
         unused = sum(v for v in w["unused"].values() if v > 0)
@@ -1413,17 +1456,29 @@ $25 of the $50 bundle takes 5.5 of its 11 hours). Idempotent and
         bought = sum(_not_refunded(c) for c in w["credits"])
         free_left = max(0.0, FREE_SECONDS - w["month_used"])
         cong = self.congregation(cid)
+        t = w["trial"]
+        trial = None
+        if t["eligible"] and (cong or {}).get("billing") == "credits":
+            ends = t["started_at"] + TRIAL_DAYS * 86400 if t["started_at"] is not None else None
+            secs_left = max(0.0, TRIAL_SECONDS - t["used"])
+            active = secs_left > 0 and (ends is None or now < ends)
+            trial = {"active": active, "days": TRIAL_DAYS, "cap_hours": TRIAL_SECONDS / 3600,
+                     "started_at": t["started_at"], "ends_at": ends, "used_min": round(t["used"] / 60, 2),
+                     "days_left": (TRIAL_DAYS if ends is None else round((ends - now) / 86400, 2)) if active else 0,
+                     "hours_left": round(secs_left / 3600, 2) if active else 0}
         return {"metered_min": round(w["metered"] / 60, 2), "used_min": round(w["used"] / 60, 2),
                 "month_used_min": round(w["month_used"] / 60, 2), "free_month": w["month"],
                 "free_min_per_month": FREE_SECONDS // 60, "free_left_min": round(free_left / 60, 2),
                 "free_resets_at": next_month_start(now),
                 "balance_min": round(bal / 60, 2), "balance_usd": round(usd, 2), "bought_min": round(bought / 60, 2),
                 "bought_usd": round(cents / 100, 2), "left_min": round((free_left + bal) / 60, 2),
-                "can_start": (cong or {}).get("billing") in NO_CREDIT_NEEDED or free_left + bal > 0}
+                "trial": trial,
+                "can_start": ((cong or {}).get("billing") in NO_CREDIT_NEEDED or free_left + bal > 0
+                              or bool(trial and trial["active"]))}
 
     def can_start(self, cong: dict[str, Any]) -> bool:
-        """May this congregation start a new meeting? Own key and internal: always. Credits: while this month's free hour or
-        the balance has something left. A meeting already running is never stopped; only the next one waits for a top-up."""
+        """May this congregation start a new meeting? Own key and internal: always. Credits: while its free trial runs,
+        or this month's free hour or the balance has something left. A meeting already running is never stopped; only the next one waits for a top-up."""
         return cong["billing"] in NO_CREDIT_NEEDED or self.balance(cong["id"])["can_start"]
 
     # ------------------------------------------------------------ congregation details (Mac Settings, /account)

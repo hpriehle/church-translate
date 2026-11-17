@@ -900,6 +900,9 @@ private struct BillingSettings: View {
     @ViewBuilder private var balance: some View {
         Section("Credit") {
             if let b = model.billing {
+                if let trial = b.trialText {   // a new congregation's free trial: shown while it runs
+                    Label(trial, systemImage: "sparkles").font(.title3)
+                }
                 HStack(alignment: .top, spacing: 24) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(Self.hours(b.freeLeftHours)).font(.system(size: 34, weight: .semibold)).monospacedDigit()
@@ -1083,7 +1086,7 @@ private struct BillingSettings: View {
     private func cost(_ m: HubClient.Meeting) -> String {
         if m.ownKey { return "own key" }
         if m.included { return "included" }
-        if m.costUSD > 0 { return Self.usd(m.costUSD) + (m.freeMinutes > 0 ? " (part free)" : "") }
+        if m.costUSD > 0 { return Self.usd(m.costUSD) + (m.freeMinutes + m.trialMinutes > 0 ? " (part free)" : "") }
         return m.languageHours > 0 ? "free" : "no speech"
     }
 

@@ -358,7 +358,8 @@ def after_meeting(cid: int) -> None:
 
 async def auto_topup(cid: int, now: float | None = None) -> str:
     """Charge the saved card off-session for the chosen bundle if the paid hours left are under 1 h. Returns what
-    happened ("skipped: …", "charged", "failed") for logs and tests. Never more than once per 24 h."""
+    happened ("skipped: …", "charged", "failed") for logs and tests. Never more than once per 24 h, never while the
+    congregation's free trial runs."""
     h = api._hear()
     cong = h.db.congregation(cid)
     if cong is None or cong["billing"] != "credits":
@@ -366,7 +367,10 @@ async def auto_topup(cid: int, now: float | None = None) -> str:
     p = h.db.payment_profile(cid)
     if not (p["auto_topup"] and p["payment_method_id"] and p["customer_id"]):
         return "skipped: off"
-    if h.db.balance(cid)["balance_min"] * 60 >= AUTO_TOPUP_BELOW_S:
+    b = h.db.balance(cid)
+    if (b.get("trial") or {}).get("active"):   # nobody is charged during the free trial; it starts once it ends
+        return "skipped: free trial"
+    if b["balance_min"] * 60 >= AUTO_TOPUP_BELOW_S:
         return "skipped: enough left"
     client = _stripe()
     if client is None:

@@ -58,6 +58,17 @@ def _who(c: dict[str, Any] | None, cid: int) -> dict[str, Any]:
     return {"id": c["id"], "slug": c["slug"], "name": api.display_name(c)}
 
 
+def trial_status(t: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The free trial as Siteboard shows it per congregation: None (it has none: made before the trial, or own key),
+    else {status: "not_started" (no metered meeting yet) | "running" | "ended", started_at, ends_at, used_hours,
+    days_left, hours_left}."""
+    if not t:
+        return None
+    status = "ended" if not t["active"] else "running" if t["started_at"] is not None else "not_started"
+    return {"status": status, "started_at": t["started_at"], "ends_at": t["ends_at"],
+            "used_hours": round(t["used_min"] / 60, 2), "days_left": t["days_left"], "hours_left": t["hours_left"]}
+
+
 def _usd(cents: float) -> float:
     return round(cents / 100, 2)
 
@@ -78,14 +89,15 @@ def usage(h: api.Hear) -> list[dict[str, Any]]:
         cid = s["congregation_id"]
         if cid not in walks:
             walks[cid] = h.db._walk(cid)
-        w = walks[cid]["sessions"].get(s["id"]) or {"secs": sum(langs.values()), "free": 0.0, "paid": 0.0,
-                                                     "cost_cents": 0.0}
+        w = walks[cid]["sessions"].get(s["id"]) or {"secs": sum(langs.values()), "trial": 0.0, "free": 0.0,
+                                                     "paid": 0.0, "cost_cents": 0.0}
         secs, free, paid, cost = w["secs"], w["free"], w["paid"], w["cost_cents"]
         out.append({"id": f"usage:{s['id']}", "kind": "usage", "at": s["started_at"], "congregation_id": cid,
                     "amount_cents": -round(cost), "session_id": s["id"], "code": s["code"], "billing": s["billing"],
                     "started_at": s["started_at"], "ended_at": s["ended_at"],
                     "language_minutes": {k: round(v / 60, 2) for k, v in sorted(langs.items())},
-                    "minutes": round(secs / 60, 2), "free_minutes": round(free / 60, 2),
+                    "minutes": round(secs / 60, 2), "trial_minutes": round(w["trial"] / 60, 2),
+                    "free_minutes": round(free / 60, 2),
                     "paid_minutes": round(paid / 60, 2), "cost_usd": _usd(cost), "_secs": (secs, free, paid, cost)})
     return out
 
@@ -395,12 +407,14 @@ async def admin_congregation(request: Request, cid: int, meetings: int = Query(d
         recent.append({"session_id": m["id"], "code": m["code"], "started_at": m["started_at"],
                        "ended_at": m["ended_at"], "billing": m["billing"], "languages": m["languages"],
                        "language_minutes": u["language_minutes"] if u else {},
-                       "minutes": u["minutes"] if u else 0, "free_minutes": u["free_minutes"] if u else 0,
+                       "minutes": u["minutes"] if u else 0, "trial_minutes": u["trial_minutes"] if u else 0,
+                       "free_minutes": u["free_minutes"] if u else 0,
                        "paid_minutes": u["paid_minutes"] if u else 0, "cost_usd": u["cost_usd"] if u else 0})
     return {
         "congregation": {**{k: c[k] for k in ("id", "slug", "church", "name", "unit_type", "stake", "address", "city",
                                               "email", "email_verified", "hidden", "created_at", "billing",
                                               "timezone", "meeting_times")},
+                         "free_trial": trial_status(h.db.balance(cid).get("trial")),
                          "title": api.display_name(c),
                          "aliases": [x["slug"] for x in h.db.aliases(cid)]},
         "billing": api.billing_info(c),
