@@ -26,7 +26,7 @@ dist/hearchurch-engine/hearchurch-engine.exe --self-check
 - `windows/hearchurch-engine.spec` bundles the engine code, `web/`, `config.toml`, the glossaries, the speech
   detector and Wolof speaker embeddings (`models/silero_vad.onnx`, `models/wolof/`), the licences, and the native
   libraries of faster-whisper/CTranslate2, onnxruntime, Piper, PortAudio (sounddevice), soxr, lameenc and PyAV.
-  torch, transformers and mlx are left out. About 600 MB unpacked.
+  torch, transformers and mlx are left out. 357 MB unpacked (CI build).
 - **No models are bundled.** As on the Mac, speech models and voices are downloaded on first use through the engine's
   own `/api/packages/download` (Hugging Face for Whisper and Piper, hearchurch.com/download for Wolof speech).
 - The exe runs with Python's UTF-8 mode on (built in), because the engine reads its JSON/TOML without naming an
@@ -71,7 +71,7 @@ Exactly what `mac/HearChurch/Sources/Engine.swift` and `AppModel.swift` do:
    - only for a church on its own key: `ANTHROPIC_API_KEY`. Without one, translation goes through the hub proxy on
      the congregation's credits (metered by the hub), as on the Mac.
 3. Poll `GET http://127.0.0.1:<port>/api/status` until it answers (the engine binds 127.0.0.1 unless local Wi-Fi
-   sharing is on, then 0.0.0.0 — Windows Firewall will ask once for that case; W2 should add the rule at install).
+   sharing is on, then 0.0.0.0 — Windows Firewall may then ask; W2 should add the rule at install).
 4. Then the same routes the Mac app uses: `/api/state`, `/api/settings`, `/api/packages` and
    `/api/packages/download` (first-run downloads with progress), `/api/start` / `/api/stop` (source `mic` with a
    device name: the hearing-assist receiver's line-in/USB input), `/api/billing`, `/api/glossary`, `/api/report`,
@@ -102,7 +102,29 @@ Device sign-in (email code / pairing code) is done by the shell against hearchur
 
 ### Numbers from the runner
 
-RESULTS_PLACEHOLDER
+Run [43998113198](https://github.com/hpriehle/hear-church/actions/runs/43998113198) (commit 2b57e94,
+2026-11-17), `windows-latest`, 4 vCPU, no GPU, the exe, 5 min of the sermon in real time, model `small` (CPU int8):
+
+| | p50 | p95 | max |
+|---|---|---|---|
+| speech → caption (end of a sentence to its translated caption) | 12.6 s | 19.0 s | 19.7 s |
+| speech → voice (end of a sentence to the French voice starting) | 19.5 s | 22.8 s | |
+| speech recognition per chunk | 3.1 s | 4.4 s | |
+
+- speech recognition real-time factor **0.57** (seconds of work per second of speech); 278 s of speech in 52
+  chunks: 49 recognised, translated through the hub proxy and captioned, 47 voiced by Piper (1.3 s per clip),
+  3 skipped by the catch-up rule; it stayed on `small` (the step-down starts above 0.8).
+- Wolof speaker (Omnilingual ONNX int8, onnxruntime CPU): 45 s, 9 of 9 chunks recognised, RTF 0.97, caption delay
+  p50 5.9 s. It runs on Windows; at RTF ~1 on 4 vCPU it is at its limit.
+- First-run downloads on the runner: speech (`small` + `base`) 634 MB and the French voice 127 MB in 73 s;
+  Wolof speech 244 MB in 12 s. The built sidecar folder is 357 MB.
+
+**Finding:** the delay comes from queueing, not from recognition itself: each chunk takes ~3 s, but at an RTF of
+0.57 with bursts of speech the queue builds and a chunk waits 6–15 s before its turn. This is what
+`docs/intel-latency.md` measured on the Intel Mac ("`small` is right at the edge … lag reaches 16–32 s").
+The step-down (RTF > 0.8) doesn't trigger here. For office PCs without a GPU, starting on `base`, or stepping down on
+queue wait instead of RTF, would likely bring captions to a few seconds; that changes the shared Intel/Windows logic,
+so it is left for a decision (see the report).
 
 Read them with care: the translation is the instant fake, so the caption delay here is speech recognition plus the
 engine's own chunking and queueing; a real Claude turn through the hub adds its own time (about a second or two).
