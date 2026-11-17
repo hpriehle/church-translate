@@ -59,7 +59,7 @@ Exactly what `mac/HearChurch/Sources/Engine.swift` and `AppModel.swift` do:
 
 1. Pick a free local port, then start
    `hearchurch-engine.exe --app --no-browser --port <port>` with working directory = the exe's folder,
-   **stdin, stdout and stderr redirected** (stdout/stderr appended to `%LOCALAPPDATA%\HearChurch\logs\engine.log`),
+   **stdin, stdout and stderr redirected** (stdout/stderr appended to `%LOCALAPPDATA%\HearChurch\logs\engine-output.log`, as on the Mac),
    no console window (`CREATE_NO_WINDOW`).
 2. Environment (start from the shell's own, minus any `HEARCHURCH_*`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`):
    - `HEARCHURCH_HOME=%LOCALAPPDATA%\HearChurch` — settings, logs, glossaries and every downloaded model live here
@@ -122,9 +122,8 @@ Run [43998113198](https://github.com/hpriehle/hear-church/actions/runs/439981131
 **Finding:** the delay comes from queueing, not from recognition itself: each chunk takes ~3 s, but at an RTF of
 0.57 with bursts of speech the queue builds and a chunk waits 6–15 s before its turn. This is what
 `docs/intel-latency.md` measured on the Intel Mac ("`small` is right at the edge … lag reaches 16–32 s").
-The step-down (RTF > 0.8) doesn't trigger here. For office PCs without a GPU, starting on `base`, or stepping down on
-queue wait instead of RTF, would likely bring captions to a few seconds; that changes the shared Intel/Windows logic,
-so it is left for a decision (see the report).
+The step-down (RTF > 0.8) didn't trigger here. Since W2 it also steps down when lines wait more than 4 s for their
+turn (median of the last 8), which this run would have triggered: docs/intel-latency.md, "1b".
 
 Read them with care: the translation is the instant fake, so the caption delay here is speech recognition plus the
 engine's own chunking and queueing; a real Claude turn through the hub adds its own time (about a second or two).
@@ -132,7 +131,7 @@ A GitHub runner (4 vCPU, shared) is also not the church office PC; the W4 test o
 
 ## Not done yet
 
-- **W2**: the WinUI 3 shell itself (nothing of it exists). Also an installer and updates (W3), signing.
+- **W2**: the WinUI 3 shell is in `windows/HearChurch` (docs/windows-app.md). Still to come: an installer and updates (W3), signing.
 - **Live microphone on Windows is untested**: the runner has no audio input (`input_devices: 0`). Capture uses the
   same PortAudio code as on the Mac, with the default host API (MME). Whether WASAPI should be preferred for the
   receiver's line-in, and how a USB receiver shows up, needs the office PC (W4).

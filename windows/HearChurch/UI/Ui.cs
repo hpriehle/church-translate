@@ -139,7 +139,7 @@ public static class Ui
 
 /// <summary>A place in a view rebuilt only when what it shows changes (its key): controls the operator is using are
 /// not rebuilt under them every second.</summary>
-public sealed class Slot : Border
+public sealed class Slot : ContentControl
 {
     private string? _key;
     private readonly Func<string> _keyOf;
@@ -149,6 +149,10 @@ public sealed class Slot : Border
     {
         _keyOf = key;
         _build = build;
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        VerticalContentAlignment = VerticalAlignment.Stretch;
+        HorizontalAlignment = HorizontalAlignment.Stretch;
+        IsTabStop = false;
     }
 
     public void Refresh()
@@ -156,7 +160,7 @@ public sealed class Slot : Border
         var k = _keyOf();
         if (k == _key) return;
         _key = k;
-        Child = _build();
+        Content = _build();
     }
 
     public void Invalidate() => _key = null;

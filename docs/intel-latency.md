@@ -152,6 +152,28 @@ fewer chunks are skipped. The run log has a "speech recognition 23s behind: skip
   ("base", "small") from the working directory if one exists. That broke the step-down in the first
   test run here.
 
+### 1b. Also step down when lines wait too long for their turn (W1 follow-up, Nov 2026)
+
+The Windows runner (4 vCPU, `small`) measured an RTF of 0.54–0.57, under the 0.8 limit, so the step-down never
+fired; yet captions were 10–13 s behind (p50), because bursts of speech queued and a line waited 6–15 s before
+recognition even started (docs/windows-engine.md). The Intel Mac numbers above show the same ("`small` is right at
+the edge").
+
+- The pipeline now tells speech recognition how long each chunk waited in the queue: from the moment it was cut
+  to the moment recognition starts on it (counted from when the model finished loading, so a slow first load at
+  the start of a meeting isn't held against the computer).
+- Over the same window of 8 measured chunks, if the **median wait is above 4 s** (`STEP_DOWN_WAIT_S`), it steps
+  down `small` → `base` exactly as for RTF > 0.8 (same ladder, same floor, same background fetch). A median, so one
+  long wait after a burst doesn't trigger it; a computer that keeps up waits 0–3 s.
+- The warning says why: "Speech recognition fell behind on this computer (lines waited 8s for their turn with
+  small): switching to the smaller base model"; the meeting report's event says "lines waited 8.0s for their turn,
+  at 0.57s per second of speech". `/api/status` has `stt_wait_s` (the current median) next to `stt_rtf`.
+- Shared by the Intel Mac and Windows (both faster-whisper). An Intel Mac that keeps up is unchanged; one that was
+  12–20 s behind at RTF 0.5–0.8 now steps down to `base` after about a minute instead of staying behind.
+  Apple Silicon (mlx) never measures, so never steps down.
+- Tests: `tests/test_units.py::test_lines_waiting_for_speech_recognition_step_down_even_below_the_rtf_limit` and
+  `::test_a_wait_is_used_for_one_chunk_only`.
+
 ### 2. Catch up when behind (`app/pipeline.py`, `app/backlog.py`)
 
 - Before recognising a chunk, if it ended more than `backlog.stt_behind_s` = 12 s ago **and** newer
