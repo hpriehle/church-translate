@@ -125,7 +125,7 @@ public partial class App : Application
         }
         items.Add(new Tray.Item("Open Hear Church", ShowMain));
         items.Add(new Tray.Item("Open Hear Church when this PC starts", () => LoginItem.Set(!LoginItem.Enabled), LoginItem.Enabled));
-        items.Add(new Tray.Item(Updates.Checking ? "Checking for Updates…" : "Check for Updates…", Updates.Checking ? null : CheckForUpdates));
+        items.Add(new Tray.Item(Updates.Checking ? "Checking for Updates…" : "Check for Updates…", Updates.Checking ? null : new Action(CheckForUpdates)));
         items.Add(null);
         items.Add(new Tray.Item("Quit Hear Church", () => _ = AskQuit()));
         return items;
