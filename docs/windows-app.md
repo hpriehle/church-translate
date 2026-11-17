@@ -8,8 +8,11 @@ Unsigned, no installer yet (W3).
 
 CI: the `app` job of `.github/workflows/windows.yml` builds it (`dotnet publish`), builds the sidecar and puts it in
 `engine\`, uploads the whole folder as the artifact **hearchurch-win-x64** (7 days), then walks the real app through
-its screens and uploads **windows-screenshots**. The pictures from the last green run are in
-`docs/windows-screenshots/`.
+its screens and uploads **windows-screenshots**. The pictures in `docs/windows-screenshots/` come from run
+[44006905518](https://github.com/hpriehle/hear-church/actions/runs/44006905518) (2026-11-17, `windows-latest`, its
+1024×768 screen): `1-sign-in`, `2-setup-languages`, `3-main-idle`, `4-main-meeting` (the sermon, 39 s in, French
+14 s behind at that moment: the runner's 4 shared vCPUs), `5-settings`, and `screens.json` (every step, timed). The
+whole walk-through takes about 90 s; the app folder (app + sidecar) is the `hearchurch-win-x64` artifact.
 
 To try it on a PC: download `hearchurch-win-x64` from a green run (Actions → windows → the run → Artifacts), unzip,
 run `HearChurch.exe`. SmartScreen warns (unsigned): More info → Run anyway.

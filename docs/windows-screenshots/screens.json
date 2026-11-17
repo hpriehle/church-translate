@@ -1,0 +1,80 @@
+[
+  {
+    "t": 5.2,
+    "step": "captured 1-sign-in.png",
+    "ok": true,
+    "detail": "1028\u00D7749"
+  },
+  {
+    "t": 6.3,
+    "step": "signed in with a pairing code",
+    "ok": true,
+    "detail": "ci-windows-452349"
+  },
+  {
+    "t": 8.4,
+    "step": "captured 2-setup-languages.png",
+    "ok": true,
+    "detail": "1028\u00D7749"
+  },
+  {
+    "t": 11.6,
+    "step": "setup finished",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "t": 17.6,
+    "step": "engine running, languages downloaded",
+    "ok": true,
+    "detail": "speech ready, fr ready, wo missing, es missing, ru missing, pt missing, uk missing, fa missing, ne missing, vi missing, zh missing, en ready, lv missing, speech-wo missing"
+  },
+  {
+    "t": 21.7,
+    "step": "captured 3-main-idle.png",
+    "ok": true,
+    "detail": "1028\u00D7749"
+  },
+  {
+    "t": 21.7,
+    "step": "checks before the meeting",
+    "ok": true,
+    "detail": "Ok: Microphone allowed \u00B7 Warn: No sound yet \u00B7 Ok: Plugged in \u00B7 Ok: Internet connected \u00B7 Ok: Translation on Hear Church credit \u00B7 Ok: Languages downloaded"
+  },
+  {
+    "t": 23.7,
+    "step": "meeting started",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "t": 60,
+    "step": "transcript with translations",
+    "ok": true,
+    "detail": "6 lines, behind: fr 14.0s"
+  },
+  {
+    "t": 62.1,
+    "step": "captured 4-main-meeting.png",
+    "ok": true,
+    "detail": "1028\u00D7749"
+  },
+  {
+    "t": 65.2,
+    "step": "captured 5-settings.png",
+    "ok": true,
+    "detail": "704\u00D7521"
+  },
+  {
+    "t": 88.4,
+    "step": "meeting stopped",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "t": 88.4,
+    "step": "done",
+    "ok": true,
+    "detail": ""
+  }
+]
