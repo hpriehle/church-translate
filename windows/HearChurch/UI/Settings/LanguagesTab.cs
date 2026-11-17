@@ -216,7 +216,7 @@ public sealed class LanguagesTab : SettingsTab
         return o;
     }
 
-    private string Selected(OutputLanguage l, List<VoiceOption> options)
+    private string Selected(OutputLanguage l, List<EngineSettings.VoiceOption> options)
     {
         var ids = options.Select(o => o.Key).ToList();
         if (Model.Engine.Settings?.Settings is not { } s) return ids.FirstOrDefault() ?? "";
@@ -225,14 +225,14 @@ public sealed class LanguagesTab : SettingsTab
         return current != null && ids.Contains(current) ? current : ids.FirstOrDefault() ?? "";
     }
 
-    private async Task Choose(OutputLanguage l, VoiceOption o)
+    private async Task Choose(OutputLanguage l, EngineSettings.VoiceOption o)
     {
         var v = new JsonObject { ["engine"] = o.Engine, ["voice"] = o.Voice };
         await Model.Engine.Set(l.Id == "fr" ? new JsonObject { ["tts"] = v } : new JsonObject { ["voices"] = new JsonObject { [l.Id] = v } });
     }
 
     /// <summary>A recording shipped with the app (the Mac's voice samples), so no download is needed. Plays on this PC only.</summary>
-    private void Listen(OutputLanguage l, VoiceOption o)
+    private void Listen(OutputLanguage l, EngineSettings.VoiceOption o)
     {
         var was = _playing == o.Key;
         StopPlaying();

@@ -6,7 +6,7 @@ namespace HearChurch.UI.Settings;
 
 /// <summary>One Settings tab: a title and sections, scrolling. Its parts are Slots, rebuilt only when what they show
 /// changes, so a field being typed in isn't rebuilt under the operator.</summary>
-public abstract class SettingsTab : ScrollViewer
+public abstract class SettingsTab : UserControl
 {
     protected readonly AppModel Model;
     protected readonly StackPanel Body;
@@ -17,8 +17,7 @@ public abstract class SettingsTab : ScrollViewer
         Model = model;
         Body = new StackPanel { Spacing = 22, Padding = new Thickness(32, 24, 32, 32), MaxWidth = 680, HorizontalAlignment = HorizontalAlignment.Stretch };
         Body.Children.Add(Ui.T(title, Ui.LargeTitle, bold: true));
-        Content = Body;
-        HorizontalScrollMode = ScrollMode.Disabled;
+        Content = new ScrollViewer { Content = Body, HorizontalScrollMode = ScrollMode.Disabled };
     }
 
     /// <summary>Adds a part that is rebuilt when key() changes.</summary>
