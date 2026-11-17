@@ -552,14 +552,14 @@ public sealed class MainView : Grid
             var top = new Grid();
             top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var name = Ui.Row(6, Ui.T(OutputLanguage.NameOf(code), Ui.Callout, semibold: true, wrap: false));
+            var nameRow = Ui.Row(6, Ui.T(OutputLanguage.NameOf(code), Ui.Callout, semibold: true, wrap: false));
             if (_model.ListenersOn(code) is { } n)
             {
                 var who = Ui.Label(n.ToString(), "", Ui.Secondary, Ui.Caption);   // Contact
                 Ui.Tip(who, $"Phones on {OutputLanguage.NameOf(code)} now");
-                name.Children.Add(who);
+                nameRow.Children.Add(who);
             }
-            top.Children.Add(name);
+            top.Children.Add(nameRow);
             if (p?.BehindS?.GetValueOrDefault(code) is { } b && p.BehindS.ContainsKey(code))
             {
                 var bt = Ui.T($"{Format.F(b, "0")} s behind", Ui.Caption, b > 15 ? Ui.Red : b > 8 ? Ui.Orange : Ui.Secondary, wrap: false);
