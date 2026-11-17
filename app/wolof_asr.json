@@ -1,5 +1,19 @@
 {
  "_doc": "Wolof speech models the app downloads from hearchurch.com/download (docs/wolof-speaker.md). Written by scripts/models/package_model.py; an entry without sha256 isn't published yet.",
- "mlx": null,
- "onnx": null
+ "mlx": {
+  "id": "wolof-asr-kiriku-mlx-q8-02725b0d5dc5",
+  "url": "https://hearchurch.com/download/wolof-asr-kiriku-mlx-q8-02725b0d5dc5.tar.gz",
+  "sha256": "e0514dfdf73706ebf61e3c53d235c52d4ebe4a90b116d2988fd4d30a54eb04d2",
+  "size": 1576176159,
+  "unpacked": 1644543039,
+  "name": "Kiriku-Wolof-ASR, 8-bit"
+ },
+ "onnx": {
+  "id": "wolof-asr-omni300m-onnx-int8-e42e3ebb0c34",
+  "url": "https://hearchurch.com/download/wolof-asr-omni300m-onnx-int8-e42e3ebb0c34.tar.gz",
+  "sha256": "bbb54ca87f30fd2bf014cb3a4de99124549840822c19b9f3ef5dc5c87ccc4c92",
+  "size": 243635948,
+  "unpacked": 327980343,
+  "name": "Omnilingual ASR CTC 300M v2, int8"
+ }
 }

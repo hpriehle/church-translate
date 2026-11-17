@@ -123,7 +123,7 @@ FLEURS utterance in 5.7 s, CER 21% on that utterance.
 Packaged (not uploaded): `wolof-asr-omni300m-onnx-int8-e42e3ebb0c34.tar.gz`, 243,635,948 bytes, sha256
 `bbb54ca87f30fd2bf014cb3a4de99124549840822c19b9f3ef5dc5c87ccc4c92` (deterministic: re-running the export and
 `package_model.py` on the same weights gives the same file). The entry goes into `app/wolof_asr.json` under
-`"onnx"` once it's uploaded.
+`"onnx"`.
 
 Kiriku 8-bit mlx (`convert_kiriku_mlx.py`, run here with `mlx[cpu]`): converts in ~2 minutes to 1.64 GB, and
 finds the added letters `{51865: ŋ, 51866: ɗ, 51867: ɓ, 51868: ƴ}`. Tokenizer check against Kiriku's own Hugging
@@ -131,3 +131,21 @@ Face tokenizer: with mlx-whisper's default 103 languages `<|transcribe|>`, `<|no
 timestamp are off by one; with 99 all special ids match. Stock mlx decode turns `impresiyoŋ … guŋŋewoon` into
 `impresiyo … guewoon`; `decode_tokens` round-trips the sentence exactly. **Speed and quality of Kiriku on mlx
 must be measured on the Mac** (the CPU build of mlx is far too slow for a meaningful number here).
+
+## Measured on the Mac (2026-11-17, Apple Silicon, mlx 0.32.4 on the GPU)
+
+Kiriku 8-bit mlx, converted on the Mac (14 s, 1.64 GB, same added letters):
+
+| | CER | RTF |
+|---|---|---|
+| FLEURS wo_sn test, first 40 (665 s of speech) | **12.1%** (Omnilingual int8: 16.1%) | 0.05 |
+| the 12 s FLEURS utterance above (`--check`) | 11.8% | 0.11 |
+| 3-minute sermon clip, 10 s pieces (`--check`) | no reference | 0.10 |
+
+Far inside real time, so 4-bit wasn't needed. End to end through the app's code (hash check, unpack,
+`WolofRecogniser("mlx")`): install 4 s, load 1.1 s, the 12 s utterance in 0.8 s, CER 9.1%.
+
+Packaged (not uploaded): `wolof-asr-kiriku-mlx-q8-02725b0d5dc5.tar.gz`, 1,576,176,159 bytes, sha256
+`e0514dfdf73706ebf61e3c53d235c52d4ebe4a90b116d2988fd4d30a54eb04d2`. Both entries are in `app/wolof_asr.json`;
+**upload both archives before a build with this manifest ships**: an entry with a sha256 counts as published, and
+the app would offer a download that 404s.
