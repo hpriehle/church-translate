@@ -11,9 +11,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 ROOT = Path(__file__).resolve().parent.parent
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    # The Windows sidecar (hearchurch-engine.exe, PyInstaller onedir): code and shipped files sit in _internal.
+    ROOT = Path(sys._MEIPASS)
+if getattr(sys, "frozen", False) and sys.platform == "win32" and not os.environ.get("HEARCHURCH_HOME"):
+    # Started without the Windows app (e.g. by hand): the same folder the app passes, never next to the exe.
+    os.environ["HEARCHURCH_HOME"] = str(Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+                                        / "HearChurch")
 # Where this computer's own files go (settings, logs, glossaries, downloaded voices). The project folder by
 # default; the Hear Church Mac app sets HEARCHURCH_HOME to ~/Library/Application Support/Hear Church because
-# the code itself sits read-only inside the signed app.
+# the code itself sits read-only inside the signed app (the Windows app: %LOCALAPPDATA%\HearChurch).
 HOME = Path(os.environ["HEARCHURCH_HOME"]).expanduser() if os.environ.get("HEARCHURCH_HOME") else ROOT
 if os.environ.get("HEARCHURCH_HOME"):
     # The Mac app: downloaded models (Whisper, Wolof) go to its data folder, never ~/.cache. Set before

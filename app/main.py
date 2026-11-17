@@ -468,17 +468,18 @@ async def _parent_watchdog() -> None:
     parent = os.getppid()
     while True:
         await asyncio.sleep(0.5)
-        if os.getppid() != parent:
+        if not _parent_alive(parent):
             log.warning("parent process %s is gone: shutting down", parent)
             _shutdown()
             return
 
 
 def _stt_repo(stt) -> str:
-    """The Hugging Face repo of the speech model this Mac will load (Intel Macs can't run the mlx one)."""
+    """The Hugging Face repo of the speech model this Mac will load (Intel Macs and Windows PCs can't run the mlx
+    one)."""
     from .stt import resolve_engine
 
-    if sys.platform == "darwin" and resolve_engine(stt.engine) == "faster-whisper":
+    if sys.platform in ("darwin", "win32") and resolve_engine(stt.engine) == "faster-whisper":
         return f"Systran/faster-whisper-{stt.faster_whisper_model}"
     return stt.model
 
@@ -507,10 +508,37 @@ def _package_ready() -> None:
     S.pipeline.sync_wolof()   # Wolof speech recognition just arrived
 
 
+def _parent_alive(parent: int) -> bool:
+    """macOS/Linux: an orphan is reparented, so the parent pid changes. Windows never reparents: there the parent
+    (the Windows app) is gone when its pid no longer runs, or runs a newer process (pid reused)."""
+    import os
+
+    if sys.platform != "win32":
+        return os.getppid() == parent
+    import psutil
+
+    global _PARENT_STARTED
+    try:
+        started = psutil.Process(parent).create_time()
+    except psutil.Error:
+        return False
+    if _PARENT_STARTED is None:
+        _PARENT_STARTED = started
+    return started == _PARENT_STARTED
+
+
+_PARENT_STARTED: float | None = None
+
+
 def _shutdown() -> None:
     import os
     import signal
 
+    if sys.platform == "win32":
+        # os.kill(SIGINT) would TerminateProcess this process on Windows (no clean stop, exit code 2):
+        # raise it in-process so uvicorn's handler shuts down as on the Mac.
+        signal.raise_signal(signal.SIGINT)
+        return
     os.kill(os.getpid(), signal.SIGINT)
 
 
@@ -1489,6 +1517,8 @@ async def _restart_in_place() -> None:
     log.info("restarting: %s -m app %s", sys.executable, " ".join(args))
     logging.shutdown()
     os.chdir(ROOT)
+    if getattr(sys, "frozen", False):   # the Windows sidecar exe is the engine itself (no "-m app")
+        os.execv(sys.executable, [sys.executable, *args])
     os.execv(sys.executable, [sys.executable, "-m", "app", *args])
 
 

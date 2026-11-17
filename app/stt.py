@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import re
 import sys
@@ -147,6 +148,25 @@ RTF_MIN_CHUNKS = 6       # chunks measured on a model before it can be judged to
 RTF_MIN_AUDIO_S = 2.0    # shorter chunks say little about speed
 
 
+_CUDA: bool | None = None   # faster-whisper on an NVIDIA GPU: None = not checked yet
+
+
+def _cuda_usable() -> bool:
+    """An NVIDIA GPU that CTranslate2 sees (Windows/Linux PCs; never a Mac). Optional: HEARCHURCH_STT_DEVICE=cpu
+    turns it off. Whether its CUDA libraries really load is only known at the first model (_fw_load)."""
+    global _CUDA
+    if _CUDA is None:
+        _CUDA = False
+        if os.environ.get("HEARCHURCH_STT_DEVICE", "").lower() != "cpu" and sys.platform != "darwin":
+            try:
+                import ctranslate2
+
+                _CUDA = ctranslate2.get_cuda_device_count() > 0
+            except Exception:
+                pass
+    return _CUDA
+
+
 class Transcriber:
     def __init__(self, cfg: SttCfg):
         self.cfg = cfg
@@ -225,7 +245,19 @@ class Transcriber:
         directory instead when one exists (a folder called "base" broke the step-down in a test)."""
         from faster_whisper import WhisperModel, download_model
 
-        return WhisperModel(download_model(name, local_files_only=local_only), device="cpu", compute_type="int8")
+        path = download_model(name, local_files_only=local_only)
+        if _cuda_usable():
+            try:
+                model = WhisperModel(path, device="cuda", compute_type="int8_float16")
+                # CUDA libraries (cuBLAS, cuDNN) are only loaded on the first transcription: try one now.
+                list(model.transcribe(np.zeros(16000, dtype=np.float32), language="en")[0])
+                log.info("speech recognition on the NVIDIA GPU (%s)", name)
+                return model
+            except Exception as e:
+                global _CUDA
+                _CUDA = False
+                log.warning("NVIDIA GPU found but not usable for speech recognition (%s): using the CPU", e)
+        return WhisperModel(path, device="cpu", compute_type="int8")
 
     @staticmethod
     def _on_disk(name: str) -> bool:

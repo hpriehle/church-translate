@@ -1,0 +1,100 @@
+# The Hear Church engine on Windows x64 (docs/windows-engine.md): test suite, sidecar exe, sermon smoke test.
+name: windows
+
+on:
+  push:
+    branches: [chat/hc-win]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"                 # the exe has UTF-8 mode built in; the tests get it here
+  UV_PYTHON_PREFERENCE: only-managed
+  # A public-domain sermon (LibriVox: C. H. Spurgeon, Talks to Farmers, ch. 7 "The Parable of the Sower").
+  SERMON_URL: https://archive.org/download/talkstofarmers_1910_librivox/talkstofarmers_07_spurgeon_64kb.mp3
+  SERMON_SHA1: b1b181465ebf9c80d4cacfacfadeb0f44377e9dd
+
+jobs:
+  engine:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version-file: .python-version
+          enable-cache: true
+
+      - name: Install (uv.lock, CPU speech recognition)
+        run: uv sync --frozen --extra linux
+
+      - name: Test suite
+        run: uv run --no-sync pytest -q -p no:cacheprovider
+
+      - name: Build hearchurch-engine.exe (PyInstaller onedir)
+        run: |
+          uv pip install "pyinstaller>=6.10,<7"
+          uv run --no-sync python windows/build.py
+          du -sh dist/hearchurch-engine
+
+      - name: Self-check the exe
+        run: dist/hearchurch-engine/hearchurch-engine.exe --self-check
+
+      - name: ffmpeg (test recordings only)
+        run: |
+          if ! command -v ffmpeg >/dev/null; then choco install ffmpeg -y --no-progress >/dev/null; fi
+          ffmpeg -version | head -1
+
+      - name: Cache the sermon recording
+        uses: actions/cache@v4
+        with:
+          path: samples/sermon.mp3
+          key: sermon-${{ env.SERMON_SHA1 }}
+
+      - name: Fetch the sermon recording
+        run: |
+          [ -f samples/sermon.mp3 ] || curl -sSfL --retry 3 -o samples/sermon.mp3 "$SERMON_URL"
+          echo "$SERMON_SHA1  samples/sermon.mp3" | sha1sum -c -
+
+      - name: Sermon end to end (exe → hub proxy with a fake Claude → Piper), lag numbers
+        run: |
+          export PATH="$PATH:/c/ProgramData/chocolatey/bin"
+          uv run --no-sync python scripts/windows_smoke.py \
+            --engine dist/hearchurch-engine/hearchurch-engine.exe --audio samples/sermon.mp3 \
+            --duration 300 --wolof 45 --out smoke.json --keep smoke-logs
+          {
+            echo '### Sermon on the Windows runner (exe)'
+            echo '```json'
+            cat smoke.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the sidecar
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hearchurch-engine-win-x64
+          path: dist/hearchurch-engine
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload the smoke-test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: |
+            smoke.json
+            smoke-logs
+          retention-days: 7
+          if-no-files-found: ignore
