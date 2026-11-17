@@ -119,7 +119,7 @@ The `installer` job of `.github/workflows/windows.yml` takes the app job's folde
 
 1. `Setup.exe --silent`: files in `%LOCALAPPDATA%\HearChurchApp`, the Apps entry ("Hear Church", version), both
    shortcuts;
-2. the app starts (Setup starts it) and its engine, the installed `engine\hearchurch-engine.exe`, answers on
+2. the app starts (a silent Setup doesn't start it, so the test does, as the shortcut would) and its engine, the installed `engine\hearchurch-engine.exe`, answers on
    `/api/status`;
 3. the update path: the job also packages a newer test version (`<next patch>-test.<build>`) of the same files into a
    local feed (with a delta package), and the data folder's `UpdateURL` points there. The app finds it at launch and
@@ -130,6 +130,13 @@ The `installer` job of `.github/workflows/windows.yml` takes the app job's folde
    `%LOCALAPPDATA%\HearChurchApp`, no shortcuts, no Apps entry, no `Run` entry, the data folder still there.
 
 `install.json` (each step, timed) goes to the job summary; it and the app's logs are the **install-test** artifact.
+
+First green run: [44010699583](https://github.com/hpriehle/hear-church/actions/runs/44010699583) (2026-11-17, at
+21fe91b): `HearChurchApp-dev-Setup.exe` 237 MB (the artifact, with the full package, 456 MB), installed in 10 s as
+0.1.0-dev.13; the installed engine answered; the app found 0.1.1-test.13 10 s after launch, downloaded it in 45 s,
+installed it on quit (13 s), and the new version's engine answered; uninstall left nothing in `HearChurchApp`, no
+shortcuts, Apps or Run entry, and kept the data folder. Whole test: 112 s. Settings → Apps shows the version without
+its `-dev.N` part (0.1.0).
 
 ## SmartScreen (unsigned installer)
 
@@ -147,6 +154,7 @@ Downloaded from the web, the unsigned `Setup.exe` gets two warnings. Expected; f
 
 → click **More info**, which adds "App: HearChurchApp-dev-Setup.exe, Publisher: Unknown publisher" → **Run anyway**.
 
-No admin password is asked. The installer then runs on its own (a short progress window) and starts Hear Church;
+No admin password is asked. The installer then runs on its own (a short progress window) and starts Hear Church (if it
+doesn't, the new desktop shortcut does);
 updates later install without any warning (they are not downloaded by a browser). If the PC's policy blocks unknown apps
 outright (no "Run anyway" button), it is managed by someone else (diocese or stake IT): it needs the signed installer.
