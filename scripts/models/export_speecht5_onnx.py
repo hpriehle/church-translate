@@ -199,7 +199,7 @@ def export(out: Path, int8: bool) -> None:
     for p, i in vocab.items():
         pieces[i] = p
     (out / "tokens.json").write_text(json.dumps({"pieces": pieces, "unk": proc.tokenizer.unk_token_id,
-                                                 "eos": proc.tokenizer.eos_token_id}, ensure_ascii=False))
+                                                 "eos": proc.tokenizer.eos_token_id}, ensure_ascii=False), encoding="utf-8")
     files = {"encoder": "encoder.onnx", "decoder": "decoder.onnx", "vocoder": "vocoder.onnx"}
     if int8:
         import onnx
@@ -215,9 +215,9 @@ def export(out: Path, int8: bool) -> None:
             "layers": L, "heads": NH, "head_dim": H, "mels": cfg.num_mel_bins,
             "prenet_units": cfg.speech_decoder_prenet_units, "prenet_dropout": cfg.speech_decoder_prenet_dropout,
             "reduction": cfg.reduction_factor, "max_positions": cfg.max_speech_positions, "sample_rate": 16000}
-    (out / "config.json").write_text(json.dumps(conf, indent=1))
-    (out / "NOTICE").write_text(NOTICE)
-    (out / "LICENSE").write_text(MIT)
+    (out / "config.json").write_text(json.dumps(conf, indent=1), encoding="utf-8")
+    (out / "NOTICE").write_text(NOTICE, encoding="utf-8")
+    (out / "LICENSE").write_text(MIT, encoding="utf-8")
     for p in sorted(out.iterdir()):
         print(f"{p.name:24} {p.stat().st_size / 1e6:8.1f} MB")
 

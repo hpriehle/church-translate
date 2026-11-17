@@ -144,6 +144,8 @@ def test_app_flag_is_parsed():
 async def test_packages_follow_the_languages(monkeypatch, tmp_path):
     from app import packages
 
+    monkeypatch.setattr("app.wolof_voice.onnx_voice", lambda: False)   # the Mac's torch voice, on any test machine
+
     monkeypatch.setattr(packages, "PIPER_DIR", tmp_path)
     monkeypatch.setattr(packages, "_hf_cached", lambda repo, only=(): repo != "bilalfaye/speecht5_tts-wolof")
     fetched = []

@@ -154,12 +154,14 @@ jobs:
           uv pip install -q --python .export "torch==2.14.1" --index-url https://download.pytorch.org/whl/cpu
           uv pip install -q --python .export "transformers==5.19.0" "sentencepiece==0.2.3" "onnx==1.23.2" \
             "onnxscript==0.7.2" "onnxruntime==1.31.0" "numpy==2.5.5" "soundfile==0.14.0"
-          .export/Scripts/python -I scripts/models/export_speecht5_onnx.py --out wolof-voice --int8 2>&1 | grep -E "MB$"
+          .export/Scripts/python -I -X utf8 scripts/models/export_speecht5_onnx.py --out wolof-voice --int8 \
+            > export.log 2>&1 || { tail -40 export.log; exit 1; }
+          grep -E "MB$" export.log
           # Informational: the same files as the archive app/wolof_voice.json names (the export is deterministic)?
-          .export/Scripts/python -I scripts/models/package_model.py wolof-voice --runtime voice --exclude "*.onnx" \
+          .export/Scripts/python -I -X utf8 scripts/models/package_model.py wolof-voice --runtime voice --exclude "*.onnx" \
             --include encoder.int8.onnx --include decoder.int8.onnx --include vocoder.onnx \
             --prefix wolof-voice-speecht5-onnx-int8 --name check --out wolof-voice-pkg --manifest wolof-voice-pkg.json \
-            | grep '"id"'
+            | grep '"id"' || true
           grep '"id"' app/wolof_voice.json
 
       - name: Speed of the Wolof voice on this runner (real-time factor)

@@ -10,6 +10,13 @@ import pytest
 
 from app import packages as pk
 
+
+@pytest.fixture(autouse=True)
+def torch_wolof_voice(monkeypatch):
+    """These are the Mac's torch Wolof voice (Hugging Face + the library pack), on any test machine; the Windows
+    ONNX voice is tests/test_wolof_voice.py."""
+    monkeypatch.setattr("app.wolof_voice.onnx_voice", lambda: False)
+
 REPO = Path(__file__).resolve().parent.parent
 
 

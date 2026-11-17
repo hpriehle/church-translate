@@ -57,14 +57,14 @@ class SpeechT5Onnx:
         """The decoder takes one small step at a time: one or two threads run it fastest (more only add overhead).
         The vocoder is heavy convolutions and gets the rest of the cores."""
         folder = Path(folder)
-        cfg = json.loads((folder / "config.json").read_text())
+        cfg = json.loads((folder / "config.json").read_text(encoding="utf-8"))
         cores = os.cpu_count() or 1
         decoder_threads = decoder_threads or (2 if cores >= 6 else 1)
         threads = threads or max(1, min(4, cores - decoder_threads))
         self.enc = _session(folder / cfg["encoder"], decoder_threads)
         self.dec = _session(folder / cfg["decoder"], decoder_threads)
         self.voc = _session(folder / cfg["vocoder"], threads)
-        tok = json.loads((folder / "tokens.json").read_text())
+        tok = json.loads((folder / "tokens.json").read_text(encoding="utf-8"))
         self.tokenize = Tokenizer(tok["pieces"], tok.get("unk", 0), tok.get("eos", 2))
         self.layers, self.heads, self.head_dim = cfg["layers"], cfg["heads"], cfg["head_dim"]
         self.mels, self.prenet_units, self.dropout = cfg["mels"], cfg["prenet_units"], cfg["prenet_dropout"]

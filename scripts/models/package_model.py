@@ -60,15 +60,15 @@ def main() -> None:
     if not any(p.name == "config.json" for p in files):
         raise SystemExit("the folder has no config.json: not a converted model")
     if a.runtime == "onnx":   # the app loads the file config.json names
-        cfg = json.loads((a.folder / "config.json").read_text())
+        cfg = json.loads((a.folder / "config.json").read_text(encoding="utf-8"))
         onnx = [p.name for p in files if p.suffix == ".onnx"]
         if len(onnx) != 1:
             raise SystemExit(f"package exactly one .onnx file (use --exclude): {onnx}")
         if cfg.get("file") != onnx[0]:
             cfg["file"] = onnx[0]
-            (a.folder / "config.json").write_text(json.dumps(cfg, indent=1))
+            (a.folder / "config.json").write_text(json.dumps(cfg, indent=1), encoding="utf-8")
     if a.runtime == "voice":   # the app loads the three graphs config.json names
-        cfg = json.loads((a.folder / "config.json").read_text())
+        cfg = json.loads((a.folder / "config.json").read_text(encoding="utf-8"))
         missing = [cfg.get(k) for k in ("encoder", "decoder", "vocoder") if cfg.get(k) not in {p.name for p in files}]
         if cfg.get("kind") != "speecht5-onnx" or missing or not any(p.name == "tokens.json" for p in files):
             raise SystemExit(f"not a packaged ONNX Wolof voice (missing: {missing or 'tokens.json / kind'})")
@@ -91,9 +91,9 @@ def main() -> None:
     part.replace(archive)
     entry = {"id": ident, "url": URL.format(id=ident), "sha256": sha256(archive), "size": archive.stat().st_size,
              "unpacked": sum(p.stat().st_size for p in files), "name": a.name}
-    data = json.loads(manifest.read_text()) if manifest.exists() else {}
+    data = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
     data["onnx" if a.runtime == "voice" else a.runtime] = entry
-    manifest.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+    manifest.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps(entry, indent=1))
     print(f"\nupload: rclone copyto {archive} r2:<bucket>/{archive.name}")
 
