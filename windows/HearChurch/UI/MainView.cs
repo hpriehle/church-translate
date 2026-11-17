@@ -61,7 +61,7 @@ public sealed class MainView : Grid
 
     private void Add(UIElement e, int row)
     {
-        SetRow(e, row);
+        SetRow((FrameworkElement)e, row);
         Children.Add(e);
     }
 

@@ -192,7 +192,7 @@ public sealed class TranscriptView : Grid
             var code = cols[i];
             var cell = HeaderCell(OutputLanguage.NameOf(code), OutputLanguage.NativeOf(code),
                                   behind.TryGetValue(code, out var b) ? $"{(int)Math.Round(b)} s behind" : null);
-            SetColumn(cell, i + 1);
+            SetColumn((FrameworkElement)cell, i + 1);
             _header.Children.Add(cell);
         }
     }
