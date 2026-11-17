@@ -26,6 +26,9 @@ const objects = {
   "source/hearchurch-oss-0.10.0.tar.gz": ARCHIVE,
   "source/hearchurch-oss-0.9.1.tar.gz": ARCHIVE,
   "source/notes.txt": ARCHIVE,
+  "windows/dev/releases.dev.json": ARCHIVE,
+  "windows/dev/HearChurchApp-0.1.0-dev.13-full.nupkg": ARCHIVE,
+  "windows/dev/HearChurchApp-dev-Setup.exe": ARCHIVE,
 };
 const r2Object = (key) => ({ key, size: objects[key].length * 5e6, httpEtag: `"${key}"` });
 const env = {
@@ -66,4 +69,19 @@ test("/source/<file> serves the archive; unknown names are 404", async () => {
 test("the Worker's own pages and the site pages still route", async () => {
   for (const path of ["/terms", "/privacy", "/credits", "/sitemap.xml"]) assert.equal((await get(path)).status, 200, path);
   for (const path of ["/", "/pricing", "/download"]) assert.equal(await (await get(path)).text(), `site ${path}`, path);
+});
+
+test("/download/windows/<channel>/ serves the Velopack feed, packages and installer", async () => {
+  const feed = await get("/download/windows/dev/releases.dev.json");
+  assert.equal(feed.status, 200);
+  assert.equal(feed.headers.get("cache-control"), "max-age=300");
+  const pkg = await get("/download/windows/dev/HearChurchApp-0.1.0-dev.13-full.nupkg");
+  assert.equal(pkg.headers.get("cache-control"), "public, max-age=31536000, immutable");
+  const setup = await get("/download/windows/dev/HearChurchApp-dev-Setup.exe");
+  assert.equal(setup.status, 200);
+  assert.equal(setup.headers.get("cache-control"), "no-store");
+  assert.match(setup.headers.get("content-disposition"), /attachment/);
+  assert.equal((await get("/download/windows/beta/releases.dev.json")).status, 404);
+  assert.equal((await get("/download/windows/dev/notes.txt")).status, 404);
+  assert.equal((await get("/download/windows/public/HearChurchApp-public-Setup.exe")).status, 404);
 });
