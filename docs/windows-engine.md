@@ -71,7 +71,7 @@ Exactly what `mac/HearChurch/Sources/Engine.swift` and `AppModel.swift` do:
    - only for a church on its own key: `ANTHROPIC_API_KEY`. Without one, translation goes through the hub proxy on
      the congregation's credits (metered by the hub), as on the Mac.
 3. Poll `GET http://127.0.0.1:<port>/api/status` until it answers (the engine binds 127.0.0.1 unless local Wi-Fi
-   sharing is on, then 0.0.0.0 — Windows Firewall may then ask; W2 should add the rule at install).
+   sharing is on, then 0.0.0.0 — the app adds a Windows Firewall rule for it the first time "This Wi-Fi only" is picked: docs/windows-app.md).
 4. Then the same routes the Mac app uses: `/api/state`, `/api/settings`, `/api/packages` and
    `/api/packages/download` (first-run downloads with progress), `/api/start` / `/api/stop` (source `mic` with a
    device name: the hearing-assist receiver's line-in/USB input), `/api/billing`, `/api/glossary`, `/api/report`,

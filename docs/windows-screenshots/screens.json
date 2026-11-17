@@ -1,78 +1,168 @@
 [
   {
-    "t": 5.2,
+    "t": 5.1,
     "step": "captured 1-sign-in.png",
     "ok": true,
     "detail": "1028\u00D7749"
   },
   {
-    "t": 6.3,
+    "t": 6.2,
     "step": "signed in with a pairing code",
     "ok": true,
-    "detail": "ci-windows-452349"
+    "detail": "ci-windows-acfdd8"
   },
   {
-    "t": 8.4,
+    "t": 8.3,
     "step": "captured 2-setup-languages.png",
     "ok": true,
     "detail": "1028\u00D7749"
   },
   {
-    "t": 11.6,
+    "t": 11.4,
     "step": "setup finished",
     "ok": true,
     "detail": ""
   },
   {
-    "t": 17.6,
+    "t": 17.4,
     "step": "engine running, languages downloaded",
     "ok": true,
     "detail": "speech ready, fr ready, wo missing, es missing, ru missing, pt missing, uk missing, fa missing, ne missing, vi missing, zh missing, en ready, lv missing, speech-wo missing"
   },
   {
-    "t": 21.7,
+    "t": 21.4,
     "step": "captured 3-main-idle.png",
     "ok": true,
     "detail": "1028\u00D7749"
   },
   {
-    "t": 21.7,
+    "t": 21.4,
     "step": "checks before the meeting",
     "ok": true,
     "detail": "Ok: Microphone allowed \u00B7 Warn: No sound yet \u00B7 Ok: Plugged in \u00B7 Ok: Internet connected \u00B7 Ok: Translation on Hear Church credit \u00B7 Ok: Languages downloaded"
   },
   {
-    "t": 23.7,
+    "t": 22.4,
     "step": "meeting started",
     "ok": true,
     "detail": ""
   },
   {
-    "t": 60,
+    "t": 48.6,
     "step": "transcript with translations",
     "ok": true,
-    "detail": "6 lines, behind: fr 14.0s"
+    "detail": "6 lines, behind: fr 3.5s"
   },
   {
-    "t": 62.1,
+    "t": 50.6,
     "step": "captured 4-main-meeting.png",
     "ok": true,
     "detail": "1028\u00D7749"
   },
   {
-    "t": 65.2,
-    "step": "captured 5-settings.png",
+    "t": 56.7,
+    "step": "captured 5-settings-1-general.png",
     "ok": true,
-    "detail": "704\u00D7521"
+    "detail": "844\u00D7641"
   },
   {
-    "t": 88.4,
+    "t": 56.8,
+    "step": "captured 5-settings-1-general-whole.png",
+    "ok": true,
+    "detail": "579\u00D7467"
+  },
+  {
+    "t": 62.9,
+    "step": "captured 5-settings-2-billing.png",
+    "ok": true,
+    "detail": "844\u00D7641"
+  },
+  {
+    "t": 63,
+    "step": "captured 5-settings-2-billing-whole.png",
+    "ok": true,
+    "detail": "579\u00D7600"
+  },
+  {
+    "t": 63,
+    "step": "billing from the hub",
+    "ok": true,
+    "detail": "credits|0|1|0|12/1/2026 12:00:00 AM|False|False|20,50,100,250|1 free hour left this month \u00B7 0 paid hours left.||AutoTopUp { Enabled = False, Usd = 20, BelowHours = 1 }||False|"
+  },
+  {
+    "t": 66,
+    "step": "captured 5-settings-3-languages.png",
+    "ok": true,
+    "detail": "844\u00D7641"
+  },
+  {
+    "t": 66.1,
+    "step": "captured 5-settings-3-languages-whole.png",
+    "ok": true,
+    "detail": "579\u00D7978"
+  },
+  {
+    "t": 69.1,
+    "step": "captured 5-settings-3b-languages-french.png",
+    "ok": true,
+    "detail": "844\u00D7641"
+  },
+  {
+    "t": 72.2,
+    "step": "captured 5-settings-4-speaking.png",
+    "ok": true,
+    "detail": "844\u00D7641"
+  },
+  {
+    "t": 72.3,
+    "step": "captured 5-settings-4-speaking-whole.png",
+    "ok": true,
+    "detail": "579\u00D7391"
+  },
+  {
+    "t": 81.4,
+    "step": "captured 5-settings-5-glossary.png",
+    "ok": true,
+    "detail": "844\u00D7641"
+  },
+  {
+    "t": 81.7,
+    "step": "captured 5-settings-5-glossary-whole.png",
+    "ok": true,
+    "detail": "217\u00D74096"
+  },
+  {
+    "t": 88.3,
+    "step": "captured 5-settings-6-congregation.png",
+    "ok": true,
+    "detail": "844\u00D7641"
+  },
+  {
+    "t": 88.3,
+    "step": "captured 5-settings-6-congregation-whole.png",
+    "ok": true,
+    "detail": "579\u00D7852"
+  },
+  {
+    "t": 91.4,
+    "step": "captured 5-settings-7-about.png",
+    "ok": true,
+    "detail": "844\u00D7641"
+  },
+  {
+    "t": 91.7,
+    "step": "captured 5-settings-7-about-whole.png",
+    "ok": true,
+    "detail": "579\u00D71766"
+  },
+  {
+    "t": 110.8,
     "step": "meeting stopped",
     "ok": true,
     "detail": ""
   },
   {
-    "t": 88.4,
+    "t": 110.8,
     "step": "done",
     "ok": true,
     "detail": ""

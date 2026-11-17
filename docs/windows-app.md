@@ -9,10 +9,14 @@ Unsigned; installer and automatic updates: docs/windows-release.md (W3).
 CI: the `app` job of `.github/workflows/windows.yml` builds it (`dotnet publish`), builds the sidecar and puts it in
 `engine\`, uploads the whole folder as the artifact **hearchurch-win-x64** (7 days), then walks the real app through
 its screens and uploads **windows-screenshots**. The pictures in `docs/windows-screenshots/` come from run
-[44006905518](https://github.com/hpriehle/hear-church/actions/runs/44006905518) (2026-11-17, `windows-latest`, its
-1024×768 screen): `1-sign-in`, `2-setup-languages`, `3-main-idle`, `4-main-meeting` (the sermon, 39 s in, French
-14 s behind at that moment: the runner's 4 shared vCPUs), `5-settings`, and `screens.json` (every step, timed). The
-whole walk-through takes about 90 s; the app folder (app + sidecar) is the `hearchurch-win-x64` artifact.
+[44014614181](https://github.com/hpriehle/hear-church/actions/runs/44014614181) (2026-11-17, `windows-latest`, its
+1024×768 screen): `1-sign-in`, `2-setup-languages`, `3-main-idle`, `4-main-meeting` (the sermon, 26 s in, French
+3.5 s behind at that moment), then every Settings tab during the meeting: `5-settings-1-general`, `-2-billing`,
+`-3-languages`, `-3b-languages-french` (a language's voices), `-4-speaking`, `-5-glossary` (French),
+`-6-congregation`, `-7-about`; `*-whole` is the whole tab where it scrolls; and `screens.json` (every step, timed). The
+CI congregation is on credit, so Billing shows (not AI), with the local hub's answers (no Stripe: "Buying credit isn't
+available yet"). The whole walk-through takes about 110 s; the app folder (app + sidecar) is the `hearchurch-win-x64`
+artifact.
 
 To try it on a PC: download `hearchurch-win-x64` from a green run (Actions → windows → the run → Artifacts), unzip,
 run `HearChurch.exe`. SmartScreen warns (unsigned): More info → Run anyway. Or install it: the **hearchurch-windows-dev**
@@ -75,7 +79,7 @@ prompt earlier, Windows may have added a *block* rule for the engine, which wins
 congregation, downloads speech recognition and the English and French voices into a fresh data folder through the
 sidecar, asks the hub for a pairing code, and starts `HearChurch.exe` with `HEARCHURCH_APP_SCREENSHOTS`. The app
 (`UI/Screenshots.cs`) then really signs in with that code, finishes setup, waits for the engine, plays the sermon
-(`samples\sermon.mp3` in the data folder) as a meeting, opens Settings, stops the meeting and quits, rendering each
+(`samples\sermon.mp3` in the data folder) as a meeting, opens every Settings tab, stops the meeting and quits, rendering each
 screen to a PNG (`RenderTargetBitmap`: the window's content, without its title bar). `screens.json` lists every step.
 No real hub credentials are used anywhere.
 
