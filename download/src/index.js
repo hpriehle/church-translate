@@ -119,6 +119,21 @@ const site = {
       if (!/^hearchurch-oss-\d+\.\d+\.\d+\.tar\.gz$/.test(name)) return new Response("Not found", { status: 404 });
       return file(request, env, `source/${name}`, "application/gzip", "public, max-age=31536000, immutable", name);
     }
+    // Windows (Velopack): feeds, packages and installers under R2 windows/<channel>/ (docs/windows-release.md).
+    const win = path.match(/^\/download\/windows\/(dev|public)\/([\w.-]+)$/);
+    if (win) {
+      const [, channel, wname] = win;
+      const key = `windows/${channel}/${wname}`;
+      if (/^(releases|assets)\.[\w-]+\.json$/.test(wname) || /^RELEASES(-[\w-]+)?$/.test(wname))
+        return file(request, env, key, wname.endsWith(".json") ? "application/json" : "text/plain", "max-age=300");
+      if (wname.endsWith(".nupkg")) return file(request, env, key, "application/octet-stream", "public, max-age=31536000, immutable", wname);
+      if (wname.endsWith("-Setup.exe")) {
+        const response = await file(request, env, key, "application/octet-stream", "no-store", wname);
+        if (isNewDownload(request, response)) ctx.waitUntil(countDownload(env, `windows-${channel}`));
+        return response;
+      }
+      return new Response("Not found", { status: 404 });
+    }
     // The site's audio samples (site/public/download/media/).
     if (path.startsWith("/download/media/")) return env.SITE.fetch(request);
     // generate_appcast names deltas after the app, so they have a space: "Hear Church4-3.delta".
