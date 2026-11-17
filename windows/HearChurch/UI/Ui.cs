@@ -88,6 +88,64 @@ public static class Ui
         return p;
     }
 
+    /// <summary>A Settings section (SwiftUI's grouped Form Section): a header, its rows on a card, a small footer.</summary>
+    public static StackPanel Group(string? header, string? footer, params UIElement?[] rows)
+    {
+        var p = new StackPanel { Spacing = 6 };
+        if (!string.IsNullOrEmpty(header)) p.Children.Add(T(header, Body, semibold: true));
+        var card = new StackPanel { Spacing = 12 };
+        foreach (var r in rows) if (r != null) card.Children.Add(r);
+        p.Children.Add(new Border
+        {
+            Background = Card,
+            BorderBrush = Res("CardStrokeColorDefaultBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(16, 12, 16, 12),
+            Child = card,
+        });
+        if (!string.IsNullOrEmpty(footer)) p.Children.Add(T(footer, Caption, Secondary));
+        return p;
+    }
+
+    /// <summary>Something on the left, something on the right (SwiftUI's LabeledContent / HStack with a Spacer).</summary>
+    public static Grid Field(UIElement left, UIElement? right)
+    {
+        var g = new Grid { ColumnSpacing = 12 };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        if (left is FrameworkElement fl) fl.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(left);
+        if (right != null)
+        {
+            if (right is FrameworkElement fr) fr.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn((FrameworkElement)right, 1);
+            g.Children.Add(right);
+        }
+        return g;
+    }
+
+    public static Grid Field(string label, string value) => Field(T(label), T(value, Body, Secondary, select: true));
+
+    public static ProgressRing Busy() => new() { IsActive = true, Width = 16, Height = 16 };
+
+    /// <summary>A question with one action and Cancel (SwiftUI's confirmationDialog / alert). True if the action was chosen.</summary>
+    public static async Task<bool> Confirm(XamlRoot? root, string title, string message, string action)
+    {
+        if (root == null) return false;
+        var dlg = new ContentDialog
+        {
+            Title = title,
+            Content = T(message),
+            PrimaryButtonText = action,
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = root,
+        };
+        try { return await dlg.ShowAsync() == ContentDialogResult.Primary; }
+        catch { return false; }   // another dialog is open
+    }
+
     public static void Tip(DependencyObject el, string? text)
     {
         if (!string.IsNullOrEmpty(text)) ToolTipService.SetToolTip(el, text);

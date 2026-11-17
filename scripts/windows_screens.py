@@ -5,7 +5,7 @@
 2. downloads speech recognition and the English and French voices into a fresh data folder through the sidecar's own
    /api/packages/download, and puts the sermon recording in its samples\\ folder;
 3. runs HearChurch.exe with HEARCHURCH_APP_SCREENSHOTS: the app signs in, finishes setup, waits for the engine,
-   plays the sermon as a meeting, opens Settings and quits, saving a PNG of each screen (UI/Screenshots.cs);
+   plays the sermon as a meeting, opens every Settings tab and quits, saving a PNG of each screen (UI/Screenshots.cs);
 4. checks the pictures are there and prints what the app logged (screens.json).
 
     python scripts/windows_screens.py --app out/HearChurch/HearChurch.exe --audio samples/sermon.mp3 \
@@ -31,7 +31,9 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import windows_smoke as smoke  # noqa: E402
 
-SCREENS = ["1-sign-in.png", "3-main-idle.png", "4-main-meeting.png", "5-settings.png"]
+SCREENS = ["1-sign-in.png", "3-main-idle.png", "4-main-meeting.png", "5-settings-1-general.png", "5-settings-2-billing.png",
+           "5-settings-3-languages.png", "5-settings-3b-languages-french.png", "5-settings-4-speaking.png",
+           "5-settings-5-glossary.png", "5-settings-6-congregation.png", "5-settings-7-about.png"]
 
 
 def serve_hub(port: int, home: Path) -> None:

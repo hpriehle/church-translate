@@ -306,6 +306,13 @@ public sealed class Engine
 
     public async Task<T?> Get<T>(string path) where T : class => (await GetWithText<T>(path)).Value;
 
+    /// <summary>A GET answer as plain JSON (the glossary: kept whole, so what the editor doesn't show is saved back).</summary>
+    public async Task<JsonObject?> GetObject(string path)
+    {
+        var (text, _) = await GetWithText<object>(path);
+        try { return text.Length == 0 ? null : JsonNode.Parse(text) as JsonObject; } catch { return null; }
+    }
+
     private async Task<(string Text, T? Value)> GetWithText<T>(string path) where T : class
     {
         if (Port == 0) return ("", null);

@@ -58,7 +58,7 @@ public sealed class LanguageSelector : StackPanel
         }
         if (!_everyLanguage)
         {
-            var link = Ui.Link(_compact ? "Add or remove languages…" : "Add or remove languages in Settings…", () => _model.OpenSettings?.Invoke());
+            var link = Ui.Link(_compact ? "Add or remove languages…" : "Add or remove languages in Settings…", () => _model.OpenSettingsTab(SettingsWindow.Languages));
             link.HorizontalAlignment = _compact ? HorizontalAlignment.Left : HorizontalAlignment.Center;
             link.FontSize = Ui.Callout;
             p.Children.Add(link);

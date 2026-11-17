@@ -138,6 +138,7 @@ public partial class App : Application
             _settings = new SettingsWindow(Model);
             _settings.Closed += (_, _) => _settings = null;
         }
+        else _settings.Select(Prefs.GetString(AppModel.SettingsTabKey) ?? SettingsWindow.General);
         _settings.Activate();
     }
 

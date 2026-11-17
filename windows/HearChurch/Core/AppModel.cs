@@ -110,6 +110,7 @@ public sealed class AppModel
     public async Task SetSharing(bool local)
     {
         await Engine.Set(new JsonObject { ["server"] = new JsonObject { ["sharing"] = local ? "local" : "cloud" } });
+        if (local && await Firewall.Allow() is { } why) { Message = why; Emit(); }   // once: Windows asks (UAC)
         if (!Running) RelaunchEngine();   // the engine picks its network address when it starts
     }
 
@@ -126,20 +127,101 @@ public sealed class AppModel
         _ = CheckDevice();
     }
 
-    public bool OwnKeyBilling => BillingMode.Length > 0 ? BillingMode == "own_key"
+    public bool OwnKeyBilling => Billing != null ? Billing.OwnKey : BillingMode.Length > 0 ? BillingMode == "own_key"
         : Engine.Status?.ClaudeAccess is { } a ? a != "credits" : KeyState is KeyStates.Ok or KeyStates.Bad;
 
+    /// <summary>What the hub last said about billing (Settings → Billing), or null before it answered.</summary>
+    public HubClient.Billing? Billing { get; private set; }
+
+    public static string? DeviceToken => Credentials.Get(Credentials.Item.DeviceToken) is { Length: > 0 } t ? t : null;
+
+    /// <summary>Ask the hub how the congregation pays now. Errors leave what we knew (an older hub, no internet).</summary>
     public async Task RefreshBilling()
     {
-        if (!Profile.SetupDone || Credentials.Get(Credentials.Item.DeviceToken) is not { Length: > 0 } token) return;
+        if (!Profile.SetupDone || DeviceToken is not { } token) return;
         try
         {
-            BillingMode = await HubClient.BillingMode(token);
+            Billing = await HubClient.GetBilling(token);
+            BillingMode = Billing.Mode;
             Prefs.Set("HubBilling", BillingMode);
             Emit();
         }
         catch (HubClient.SignedOut) { SignOut(); }
         catch { }
+    }
+
+    /// <summary>Settings → Congregation: a new listener link. The old one keeps working (the hub redirects it).
+    /// Returns why not, or null.</summary>
+    public async Task<string?> ChangeSlug(string slug)
+    {
+        if (DeviceToken is not { } token) return "This PC isn't connected to a congregation.";
+        try
+        {
+            Profile.Slug = await HubClient.ChangeSlug(slug, token);
+            Profile.Save();
+            if (!Running) RelaunchEngine();   // the engine's QR code and print page use the link
+            Emit();
+            return null;
+        }
+        catch (HubClient.SignedOut) { SignOut(); return null; }
+        catch (Exception e) { return e.Message; }
+    }
+
+    /// <summary>"Send logs to support": the last 7 days of the scrubbed log, with the operator's note. Returns the reference.</summary>
+    public async Task<int> SendLogsToSupport(string note)
+    {
+        if (DeviceToken is not { } token) throw new HubClient.Failure("Sign in to your congregation first.");
+        var facts = $"Hear Church {App.Updates.Version} for Windows, {Environment.OSVersion.VersionString}";
+        facts += Engine.State switch
+        {
+            Engine.RunState.Running => ", engine running",
+            Engine.RunState.Starting => ", engine starting",
+            Engine.RunState.Failed => ", engine failed to start",
+            _ => ", engine stopped",
+        };
+        if (Running) facts += ", meeting running";
+        var lines = await Task.Run(() => DiagnosticLog.LastDays(7));
+        return await HubClient.SendLogs(lines, facts, note, token);
+    }
+
+    public void OpenSettingsTab(string tab)
+    {
+        Prefs.Set(SettingsTabKey, tab);
+        OpenSettings?.Invoke();
+    }
+
+    public const string SettingsTabKey = "SettingsTab";
+
+    /// <summary>Download a language from Settings. Before a meeting it is ready to use in the language grids.</summary>
+    public void DownloadLanguage(string id) => _ = Engine.Download(new[] { id });
+
+    /// <summary>Delete a language's voice; null if it worked, or why it couldn't. A Wolof speaker keeps Wolof: it needs
+    /// Wolof speech recognition (RemoveWolofSpeech), not the voice.</summary>
+    public async Task<string?> RemoveLanguage(string code)
+    {
+        var spoken = OutputLanguage.PackageId(code, LanguageRole.Speaker) == code;   // the voice package also serves a speaker
+        var onlySpeaker = spoken && Profile.Speakers.Count == 1 && Profile.Speakers[0] == code;
+        if (onlySpeaker || (Profile.Targets.Count == 1 && Profile.Targets[0] == code))
+            return $"{OutputLanguage.NameOf(code)} is the meeting's only {(onlySpeaker ? "speaker" : "translation")} language: choose another one first.";
+        var r = await Engine.Post("api/packages/remove", new JsonObject { ["language"] = code });
+        if (!r.Ok) return r.Message.Length == 0 ? "Could not remove it." : r.Message;
+        if ((spoken && IsOn(code, LanguageRole.Speaker)) || IsOn(code, LanguageRole.Target))
+            SetMeeting(spoken ? Profile.Speakers.Where(s => s != code).ToList() : Profile.Speakers.ToList(),
+                       Profile.Targets.Where(t => t != code).ToList());
+        await Engine.RefreshPackages();
+        return null;
+    }
+
+    /// <summary>Delete Wolof speech recognition; null if it worked, or why it couldn't. Wolof stops being a speaker language.</summary>
+    public async Task<string?> RemoveWolofSpeech()
+    {
+        if (Profile.Speakers.Count == 1 && Profile.Speakers[0] == "wo")
+            return "Wolof is the meeting's only speaker language: choose another one first.";
+        var r = await Engine.Post("api/packages/remove", new JsonObject { ["language"] = OutputLanguage.WolofSpeechPackage });
+        if (!r.Ok) return r.Message.Length == 0 ? "Could not remove it." : r.Message;
+        if (IsOn("wo", LanguageRole.Speaker)) SetMeeting(Profile.Speakers.Where(s => s != "wo").ToList(), Profile.Targets.ToList());
+        await Engine.RefreshPackages();
+        return null;
     }
 
     /// <summary>A computer revoked elsewhere goes back to first launch. Only a clear 403 counts.</summary>
@@ -162,6 +244,7 @@ public sealed class AppModel
         Credentials.Delete(Credentials.Item.DeviceToken);
         OnboardingProgress.Clear();
         BillingMode = "";
+        Billing = null;
         Prefs.Remove("HubBilling");
         Profile.Slug = "";
         Profile.Claim = "";
@@ -587,9 +670,9 @@ public sealed class AppModel
                     KeyStates.Ok => new Check { Id = "key", Title = "API key works", State = Check.Kind.Ok },
                     KeyStates.Unknown or KeyStates.Checking => new Check { Id = "key", Title = "Checking the API key…", State = Check.Kind.Pending },
                     KeyStates.Missing => new Check { Id = "key", Title = "No API key", State = Check.Kind.Bad, Detail = "Add one in Settings → AI.",
-                                                     Action = ("Settings…", () => OpenSettings?.Invoke()) },
+                                                     Action = ("Settings…", () => OpenSettingsTab("ai")) },
                     _ => new Check { Id = "key", Title = "API key problem", State = Check.Kind.Bad, Detail = KeyProblem,
-                                     Action = ("Settings…", () => OpenSettings?.Invoke()) },
+                                     Action = ("Settings…", () => OpenSettingsTab("ai")) },
                 });
             if (Profile.SetupDone && (Profile.Speakers.Count == 0 || Profile.Targets.Count == 0))
                 o.Add(new Check { Id = "languages", Title = "No language chosen", State = Check.Kind.Bad,

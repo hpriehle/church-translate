@@ -39,5 +39,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\HearChurch.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Settings → Languages → a language → Listen: the Mac's recorded voice samples, so no download is needed. -->
+    <Content Include="..\..\mac\HearChurch\Resources\VoiceSamples\*.m4a" Link="Assets\VoiceSamples\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

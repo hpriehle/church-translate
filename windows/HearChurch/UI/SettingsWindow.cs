@@ -1,23 +1,36 @@
 using HearChurch.Core;
-using Microsoft.UI.Windowing;
+using HearChurch.UI.Settings;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace HearChurch.UI;
 
-/// <summary>Settings: only General for now (W5 brings the Mac's other tabs: Languages, Speaking, Glossary,
-/// Congregation, Billing, AI).</summary>
+/// <summary>Settings (the Mac's SettingsView.swift): General, Billing (or AI for a congregation on its own key),
+/// Languages, Speaking, Glossary, Congregation, and About (the Mac's About panel and its "About and help").</summary>
 public sealed class SettingsWindow : Window
 {
+    public const string General = "general", Billing = "billing", AI = "ai", Languages = "languages", Speaking = "voices",
+                        Glossary = "glossary", Congregation = "congregation", About = "about";
+
+    private readonly AppModel _model;
+    private readonly NavigationView _nav;
+    private SettingsTab? _tab;
+    private string _shown = "";
+    private bool _ownKey;
+
     public Grid Root { get; }
+    public string Shown => _shown;
+    /// <summary>The open tab (the screenshots in CI open a language, pick a glossary).</summary>
+    public SettingsTab? Tab => _tab;
 
     public SettingsWindow(AppModel model)
     {
+        _model = model;
         Title = "Hear Church Settings";
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(720, 560));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(860, 680));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "HearChurch.ico"));
 
-        var nav = new NavigationView
+        _nav = new NavigationView
         {
             PaneDisplayMode = NavigationViewPaneDisplayMode.Left,
             IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
@@ -25,57 +38,84 @@ public sealed class SettingsWindow : Window
             IsPaneToggleButtonVisible = false,
             OpenPaneLength = 200,
         };
-        var general = new NavigationViewItem { Content = "General", Icon = new FontIcon { Glyph = "" }, IsSelected = true };
-        nav.MenuItems.Add(general);
-        nav.SelectedItem = general;
-
-        var p = new StackPanel { Spacing = 20, Padding = new Thickness(32, 24, 32, 32), MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Left };
-        p.Children.Add(Ui.T("General", Ui.LargeTitle, bold: true));
-
-        var atLogin = new ToggleSwitch { Header = "Open Hear Church when this PC starts", IsOn = LoginItem.Enabled };
-        atLogin.Toggled += (_, _) => LoginItem.Set(atLogin.IsOn);
-        p.Children.Add(Ui.Section("This PC", atLogin));
-
-        var share = new CheckBox
+        _nav.SelectionChanged += (_, e) =>
         {
-            IsChecked = model.Profile.ShareLogs,
-            Content = Ui.Column(2, Ui.T("Share diagnostic logs with Hear Church support"), Ui.T(DiagnosticLogText.Detail, Ui.Callout, Ui.Secondary)),
+            if (e.SelectedItem is NavigationViewItem { Tag: string tag } && tag != _shown) Show(tag);
         };
-        share.Click += (_, _) => model.SetShareLogs(share.IsChecked == true);
-        var version = Ui.T(VersionLine(), Ui.Callout, Ui.Secondary);
-        Button? check = null;
-        check = Ui.Button("Check for Updates", async () =>
-        {
-            check!.IsEnabled = false;
-            version.Text = "Checking for updates…";
-            var answer = await App.Updates.Check();
-            version.Text = VersionLine() + "\n" + answer;
-            check.IsEnabled = true;
-        });
-        p.Children.Add(Ui.Section("About and help", share, Ui.Button("Show the engine's log", MainView.ShowLog), SignInStep.HelpLinks(),
-            version, check));
+        BuildMenu();
 
-        if (model.Profile.SetupDone)
-        {
-            var who = model.Profile.Name.Length > 0 ? model.Profile.Name : "your congregation";
-            p.Children.Add(Ui.Section("Congregation",
-                Ui.T($"This PC is signed in to {who}.", Ui.Body),
-                Ui.Button("Sign out of this PC", model.SignOut)));
-        }
-        p.Children.Add(Ui.T("Languages, voices, glossary, congregation and billing settings are not in the Windows app yet: use the Mac app, or hearchurch.com/account.", Ui.Callout, Ui.Secondary));
-
-        nav.Content = new ScrollViewer { Content = p };
         Root = new Grid { Background = Ui.WindowBackground };
-        Root.Children.Add(nav);
+        Root.Children.Add(_nav);
         Content = Root;
+
+        model.Changed += Changed;
+        Closed += (_, _) =>
+        {
+            model.Changed -= Changed;
+            _tab?.Leaving();
+        };
+        Select(Prefs.GetString(AppModel.SettingsTabKey) ?? General);
+        _ = model.RefreshBilling();   // the operator may have switched it since
     }
 
-    /// <summary>"Hear Church 0.4.0 (12) for Windows (test build)", plus the update channel when it isn't public.</summary>
-    private static string VersionLine()
+    /// <summary>Credits: the Billing tab. Its own key (the hub says "own_key"): the AI tab instead, with the key.</summary>
+    private void BuildMenu()
     {
-        var u = App.Updates;
-        var channel = u.Installed && Updates.Channel != "public" ? $", {Updates.Channel} updates" : "";
-        var line = $"Hear Church {u.Version} for Windows (test build{channel})";
-        return u.Ready != null ? $"{line}\nHear Church {u.Ready} is ready. It is installed the next time Hear Church quits." : line;
+        _ownKey = _model.OwnKeyBilling;
+        _nav.MenuItems.Clear();
+        void Add(string text, string glyph, string tag) =>
+            _nav.MenuItems.Add(new NavigationViewItem { Content = text, Icon = new FontIcon { Glyph = glyph }, Tag = tag });
+        Add("General", "", General);
+        if (_ownKey) Add("AI", "", AI);
+        else Add("Billing", "", Billing);
+        Add("Languages", "", Languages);
+        Add("Speaking", "", Speaking);
+        Add("Glossary", "", Glossary);
+        Add("Congregation", "", Congregation);
+        Add("About", "", About);
+    }
+
+    /// <summary>Open a tab (the one chosen last, or one asked for: "Add or remove languages…"). A tab that isn't there
+    /// for this congregation opens its counterpart.</summary>
+    public void Select(string tag)
+    {
+        if (tag == AI && !_ownKey) tag = Billing;
+        if (tag == Billing && _ownKey) tag = AI;
+        var item = _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => (string)i.Tag == tag)
+                   ?? (NavigationViewItem)_nav.MenuItems[0];
+        _nav.SelectedItem = item;
+        if ((string)item.Tag != _shown) Show((string)item.Tag);
+    }
+
+    private void Show(string tag)
+    {
+        _tab?.Leaving();
+        _shown = tag;
+        Prefs.Set(AppModel.SettingsTabKey, tag);
+        _tab = tag switch
+        {
+            Billing => new BillingTab(_model),
+            AI => new AITab(_model),
+            Languages => new LanguagesTab(_model),
+            Speaking => new SpeakingTab(_model),
+            Glossary => new GlossaryTab(_model),
+            Congregation => new CongregationTab(_model),
+            About => new AboutTab(_model),
+            _ => new GeneralTab(_model),
+        };
+        _nav.Content = _tab;
+    }
+
+    private void Changed()
+    {
+        if (_model.OwnKeyBilling != _ownKey)
+        {
+            var was = _shown;
+            BuildMenu();
+            _shown = "";
+            Select(was);
+            return;
+        }
+        _tab?.Refresh();
     }
 }

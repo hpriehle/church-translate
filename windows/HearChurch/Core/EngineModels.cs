@@ -148,9 +148,36 @@ public sealed class EngineSettings
             public double InputGain { get; set; } = 1;
         }
         public sealed class ServerInfo { public string? Sharing { get; set; } }
+        public sealed class TtsInfo
+        {
+            public string Engine { get; set; } = "";
+            public string Voice { get; set; } = "";
+            public double Volume { get; set; } = 1;
+            public double? Speed { get; set; }
+        }
+        public sealed class TranslateInfo { public string ClaudeModel { get; set; } = ""; }
+        public sealed class VoiceInfo
+        {
+            public string Engine { get; set; } = "";
+            public string Voice { get; set; } = "";
+            public double? Speed { get; set; }
+        }
         public AudioInfo Audio { get; set; } = new();
         public ServerInfo Server { get; set; } = new();
         public EngineStatus.Meeting? Meeting { get; set; }
+        public TtsInfo Tts { get; set; } = new();
+        public TranslateInfo Translate { get; set; } = new();
+        public Dictionary<string, VoiceInfo> Voices { get; set; } = new();
+    }
+
+    /// <summary>A voice: "piper" + "fr_FR-siwis-medium", and the name the operator sees.</summary>
+    public sealed class VoiceOption
+    {
+        public string Id { get; set; } = "";
+        public string Engine { get; set; } = "";
+        public string Voice { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string Key => $"{Engine}:{Voice}";
     }
 
     public sealed class Device
@@ -162,9 +189,21 @@ public sealed class EngineSettings
 
     public SettingsInfo Settings { get; set; } = new();
     public List<Device> Devices { get; set; } = new();
+    /// <summary>Downloaded voices, per language: these can be chosen.</summary>
+    public Dictionary<string, List<VoiceOption>> Voices { get; set; } = new();
+    /// <summary>Every voice, downloaded or not, so they can be heard.</summary>
+    public Dictionary<string, List<VoiceOption>> VoiceCatalog { get; set; } = new();
 
     public string Key => $"{Settings.Audio.InputDevice}|{Settings.Audio.InputChannel}|{Settings.Audio.InputGain}|{Settings.Server.Sharing}|"
-        + string.Join(",", Devices.Select(d => $"{d.Name}:{d.Channels}:{d.Default}"));
+        + string.Join(",", Devices.Select(d => $"{d.Name}:{d.Channels}:{d.Default}")) + "|" + VoiceKey
+        + $"|{Settings.Tts.Volume}|{Settings.Tts.Speed}|{Settings.Translate.ClaudeModel}|"
+        + string.Join(",", Settings.Voices.OrderBy(v => v.Key).Select(v => $"{v.Key}:{v.Value.Speed}"));
+
+    /// <summary>Changes when the voices to choose from, or the chosen ones, change.</summary>
+    public string VoiceKey => $"{Settings.Tts.Engine}:{Settings.Tts.Voice}|"
+        + string.Join(",", Settings.Voices.OrderBy(v => v.Key).Select(v => $"{v.Key}={v.Value.Engine}:{v.Value.Voice}")) + "|"
+        + string.Join(",", Voices.OrderBy(v => v.Key).Select(v => $"{v.Key}:{v.Value.Count}"))
+        + string.Join(",", VoiceCatalog.OrderBy(v => v.Key).Select(v => $"{v.Key}:{v.Value.Count}"));
 }
 
 /// <summary>One stretch of speech: what was heard and what each language made of it.</summary>
@@ -204,3 +243,31 @@ public sealed class Chunk
 }
 
 public sealed record LogLine(string Level, string Text);
+
+/// <summary>The engine's scrubbed diagnostic log (app/sharelog.py: logs\shared.log and its rotations, JSON lines),
+/// for "Send logs to support". Technical only: never anything that was said.</summary>
+public static class DiagnosticLog
+{
+    public static List<System.Text.Json.Nodes.JsonObject> LastDays(double days)
+    {
+        var since = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - days * 86400;
+        var o = new List<System.Text.Json.Nodes.JsonObject>();
+        foreach (var name in new[] { "shared.log.3", "shared.log.2", "shared.log.1", "shared.log" })
+        {
+            string[] lines;
+            try { lines = File.ReadAllLines(Path.Combine(AppPaths.Logs, name)); } catch { continue; }
+            foreach (var line in lines)
+            {
+                try
+                {
+                    if (System.Text.Json.Nodes.JsonNode.Parse(line) is System.Text.Json.Nodes.JsonObject obj
+                        && obj["t"] is System.Text.Json.Nodes.JsonValue t && t.TryGetValue<double>(out var at) && at > since
+                        && obj["msg"] is System.Text.Json.Nodes.JsonValue m && m.TryGetValue<string>(out _))
+                        o.Add(obj);
+                }
+                catch { }
+            }
+        }
+        return o;
+    }
+}

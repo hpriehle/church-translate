@@ -112,10 +112,36 @@ public sealed class Screenshots
             failures += await Capture(_window.Root, "4-main-meeting.png") ? 0 : 1;
             if (!captioned) failures++;
 
-            // 5. Settings.
+            // 5. Settings: every tab (the one shown, and the whole tab when it scrolls), a language's voices, a glossary.
             _openSettings();
             await Wait(3);
-            if (_settings() is { } sw) failures += await Capture(sw.Root, "5-settings.png") ? 0 : 1;
+            if (_settings() is { } sw)
+            {
+                var tabs = new[]
+                {
+                    ("1-general", SettingsWindow.General), ("2-billing", SettingsWindow.Billing), ("3-languages", SettingsWindow.Languages),
+                    ("4-speaking", SettingsWindow.Speaking), ("5-glossary", SettingsWindow.Glossary),
+                    ("6-congregation", SettingsWindow.Congregation), ("7-about", SettingsWindow.About),
+                };
+                foreach (var (name, tag) in tabs)
+                {
+                    sw.Select(tag);
+                    await Wait(tag is SettingsWindow.Billing or SettingsWindow.Congregation or SettingsWindow.Glossary ? 6 : 3);
+                    if (tag == SettingsWindow.Glossary && sw.Tab is Settings.GlossaryTab g) { g.Pick("fr"); await Wait(3); }
+                    var shown = sw.Shown == tag;
+                    if (!shown) Log($"settings tab {tag}", false, $"shows {sw.Shown}");
+                    failures += shown && await Capture(sw.Root, $"5-settings-{name}.png") ? 0 : 1;
+                    if (sw.Tab is { } t) await Capture(t.Whole, $"5-settings-{name}-whole.png");
+                    if (tag == SettingsWindow.Billing)
+                        Log("billing from the hub", _model.Billing != null, _model.Billing?.Key ?? "");
+                    if (tag == SettingsWindow.Languages && sw.Tab is Settings.LanguagesTab lt)
+                    {
+                        lt.OpenLanguage("fr");
+                        await Wait(3);
+                        failures += await Capture(sw.Root, "5-settings-3b-languages-french.png") ? 0 : 1;
+                    }
+                }
+            }
             else { Log("settings window", false); failures++; }
 
             await _model.StopMeeting();
