@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace HearChurch.UI;
 
 /// <summary>The icon in the notification area (the Mac's menu bar item): it keeps the app and the engine running when
-/// the window is closed. Left click opens the window; right click: Start/Stop, Open, Start at login, Quit.
+/// the window is closed. Left click opens the window; right click: Start/Stop, Open, Start at login, Check for Updates, Quit.
 /// Plain Shell_NotifyIcon on a message-only window, so there is no extra dependency.</summary>
 public sealed class Tray : IDisposable
 {
@@ -68,12 +68,12 @@ public sealed class Tray : IDisposable
     }
 
     /// <summary>A balloon / toast from the icon (the microphone warning during a meeting).</summary>
-    public void Notify(string title, string text)
+    public void Notify(string title, string text, bool warning = true)
     {
         var d = Data(0x10);   // NIF_INFO
         d.szInfoTitle = title.Length > 63 ? title[..63] : title;
         d.szInfo = text.Length > 255 ? text[..255] : text;
-        d.dwInfoFlags = 0x2;  // NIIF_WARNING
+        d.dwInfoFlags = warning ? 0x2u : 0x1u;  // NIIF_WARNING, NIIF_INFO
         Shell_NotifyIcon(1, ref d);
     }
 

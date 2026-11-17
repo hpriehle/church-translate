@@ -20,18 +20,22 @@
     <SelfContained>true</SelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- CI passes the release's version and build (-p:Version=… -p:FileVersion=…): docs/windows-release.md. -->
     <Version>0.1.0</Version>
     <FileVersion>0.1.0.1</FileVersion>
     <AssemblyVersion>0.1.0.1</AssemblyVersion>
     <Product>Hear Church</Product>
     <Company>Hear Church</Company>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- Program.cs has Main, so Velopack's hooks run before WinUI starts (docs/windows-release.md). -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\HearChurch.ico" CopyToOutputDirectory="PreserveNewest" />

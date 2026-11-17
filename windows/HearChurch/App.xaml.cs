@@ -13,10 +13,11 @@ public partial class App : Application
 {
     public static AppModel Model { get; private set; } = null!;
     public static MainWindow? Main { get; private set; }
+    public static Updates Updates { get; private set; } = null!;
     private Tray? _tray;
     private SettingsWindow? _settings;
     private Mutex? _single;
-    private EventWaitHandle? _showSignal;
+    private EventWaitHandle? _showSignal, _quitSignal;
     private bool _quitting;
 
     public App()
@@ -35,17 +36,25 @@ public partial class App : Application
         // One copy at a time: a second start brings the first one's window to the front.
         _single = new Mutex(true, "HearChurch.SingleInstance", out var first);
         _showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "HearChurch.Show");
-        if (!first)
+        // `HearChurch.exe --quit` asks the running copy to quit (unless a meeting runs): CI's update test, scripts.
+        _quitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "HearChurch.Quit");
+        if (!first || argv.Contains("--quit"))
         {
-            _showSignal.Set();
+            if (!first) (argv.Contains("--quit") ? _quitSignal : _showSignal).Set();
             Environment.Exit(0);
             return;
         }
         Directory.CreateDirectory(AppPaths.Logs);
+        if (Updates.ApplyAtStart(argv.Skip(1).ToArray()))   // a downloaded update: installed, then Hear Church restarts
+        {
+            Environment.Exit(0);
+            return;
+        }
         var dq = DispatcherQueue.GetForCurrentThread();
         void Post(Action a) => dq.TryEnqueue(() => a());
         Model = new AppModel(Post);
         Model.OpenSettings = OpenSettings;
+        Updates = new Updates(() => Model.Running);
         Main = new MainWindow(Model);
         Main.AppWindow.Closing += (_, e) =>
         {
@@ -62,6 +71,15 @@ public partial class App : Application
         {
             while (_showSignal.WaitOne()) dq.TryEnqueue(ShowMain);
         }) { IsBackground = true, Name = "show-signal" }.Start();
+        new Thread(() =>
+        {
+            while (_quitSignal.WaitOne())
+                dq.TryEnqueue(() =>
+                {
+                    if (Model.Running) Updates.Log("--quit ignored: a meeting is running");
+                    else Quit(0);
+                });
+        }) { IsBackground = true, Name = "quit-signal" }.Start();
 
         Model.Launch();
         var tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -69,7 +87,11 @@ public partial class App : Application
         tick.Tick += (_, _) =>
         {
             Main?.Tick();
-            if (++n % 10 == 0) Model.Tick();
+            if (++n % 10 == 0)
+            {
+                Model.Tick();
+                Updates.Tick();
+            }
         };
         tick.Start();
 
@@ -103,6 +125,7 @@ public partial class App : Application
         }
         items.Add(new Tray.Item("Open Hear Church", ShowMain));
         items.Add(new Tray.Item("Open Hear Church when this PC starts", () => LoginItem.Set(!LoginItem.Enabled), LoginItem.Enabled));
+        items.Add(new Tray.Item(Updates.Checking ? "Checking for Updates…" : "Check for Updates…", Updates.Checking ? null : CheckForUpdates));
         items.Add(null);
         items.Add(new Tray.Item("Quit Hear Church", () => _ = AskQuit()));
         return items;
@@ -139,10 +162,18 @@ public partial class App : Application
         Quit(0);
     }
 
+    /// <summary>"Check for Updates…" in the icon's menu: the answer comes as a notification.</summary>
+    private async void CheckForUpdates()
+    {
+        var text = await Updates.Check();
+        _tray?.Notify("Hear Church", text, warning: false);
+    }
+
     private void Quit(int code)
     {
         _quitting = true;
         try { Model.Engine.Stop(); } catch { }
+        Updates.ApplyOnQuit();   // a downloaded update goes in once this process has exited
         try { Model.Mic.Dispose(); } catch { }
         _tray?.Dispose();
         _tray = null;

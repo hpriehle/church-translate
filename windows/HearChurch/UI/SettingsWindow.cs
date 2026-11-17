@@ -42,8 +42,18 @@ public sealed class SettingsWindow : Window
             Content = Ui.Column(2, Ui.T("Share diagnostic logs with Hear Church support"), Ui.T(DiagnosticLogText.Detail, Ui.Callout, Ui.Secondary)),
         };
         share.Click += (_, _) => model.SetShareLogs(share.IsChecked == true);
+        var version = Ui.T(VersionLine(), Ui.Callout, Ui.Secondary);
+        Button? check = null;
+        check = Ui.Button("Check for Updates", async () =>
+        {
+            check!.IsEnabled = false;
+            version.Text = "Checking for updates…";
+            var answer = await App.Updates.Check();
+            version.Text = VersionLine() + "\n" + answer;
+            check.IsEnabled = true;
+        });
         p.Children.Add(Ui.Section("About and help", share, Ui.Button("Show the engine's log", MainView.ShowLog), SignInStep.HelpLinks(),
-            Ui.T($"Hear Church {Version} for Windows (test build)", Ui.Callout, Ui.Secondary)));
+            version, check));
 
         if (model.Profile.SetupDone)
         {
@@ -60,12 +70,12 @@ public sealed class SettingsWindow : Window
         Content = Root;
     }
 
-    public static string Version
+    /// <summary>"Hear Church 0.4.0 (12) for Windows (test build)", plus the update channel when it isn't public.</summary>
+    private static string VersionLine()
     {
-        get
-        {
-            var v = typeof(SettingsWindow).Assembly.GetName().Version;
-            return v == null ? "?" : $"{v.Major}.{v.Minor}.{v.Build}";
-        }
+        var u = App.Updates;
+        var channel = u.Installed && Updates.Channel != "public" ? $", {Updates.Channel} updates" : "";
+        var line = $"Hear Church {u.Version} for Windows (test build{channel})";
+        return u.Ready != null ? $"{line}\nHear Church {u.Ready} is ready. It is installed the next time Hear Church quits." : line;
     }
 }

@@ -4,7 +4,7 @@
 self-contained (no runtime to install), for Windows 10 1809+ and 11. It starts the engine sidecar from W1
 (`engine\hearchurch-engine.exe` beside `HearChurch.exe`) and drives it exactly as the Mac app does
 (docs/windows-engine.md). Everything real stays in the engine; the shell is screens, sign-in and the system bits.
-Unsigned, no installer yet (W3).
+Unsigned; installer and automatic updates: docs/windows-release.md (W3).
 
 CI: the `app` job of `.github/workflows/windows.yml` builds it (`dotnet publish`), builds the sidecar and puts it in
 `engine\`, uploads the whole folder as the artifact **hearchurch-win-x64** (7 days), then walks the real app through
@@ -15,7 +15,8 @@ its screens and uploads **windows-screenshots**. The pictures in `docs/windows-s
 whole walk-through takes about 90 s; the app folder (app + sidecar) is the `hearchurch-win-x64` artifact.
 
 To try it on a PC: download `hearchurch-win-x64` from a green run (Actions → windows → the run → Artifacts), unzip,
-run `HearChurch.exe`. SmartScreen warns (unsigned): More info → Run anyway.
+run `HearChurch.exe`. SmartScreen warns (unsigned): More info → Run anyway. Or install it: the **hearchurch-windows-dev**
+artifact's `Setup.exe` (docs/windows-release.md).
 
 ## What it has (the Mac's core)
 
@@ -34,7 +35,8 @@ run `HearChurch.exe`. SmartScreen warns (unsigned): More info → Run anyway.
 | Start at login (on after setup, as the Mac; toggle in Settings and in the icon's menu) | `LoginItem` | `Core/System.cs` (HKCU `Run`, started with `--background`) |
 | Secrets (device token, API key) | Keychain | Windows Credential Manager (`Core/System.cs`) |
 | Keep awake during a meeting | `KeepAwake` | `SetThreadExecutionState` |
-| Settings | 8 tabs | a stub: General (start at login, share logs, log, help links, sign out) |
+| Settings | 8 tabs | a stub: General (start at login, share logs, log, help links, version + Check for Updates, sign out) |
+| Sparkle updates (dev / public channel) | `Updater` | `Core/Updates.cs` (Velopack), docs/windows-release.md |
 
 Data folder: `%LOCALAPPDATA%\HearChurch` (`profile.json` and `app-settings.json` for the app, everything else the
 engine's). For testing: `HEARCHURCH_HOME` (another data folder), `HEARCHURCH_APP_HUB` (another hub, e.g.
@@ -60,7 +62,7 @@ No real hub credentials are used anywhere.
 
 ## Not done
 
-- Installer, updates, signing (W3); Windows Firewall rule for "This Wi-Fi only" sharing (asked by Windows the first
+- Signing (before any other church); Windows Firewall rule for "This Wi-Fi only" sharing (asked by Windows the first
   time instead).
 - Settings tabs beyond General (W5): Languages (remove), Speaking, Glossary, Congregation (Add device, e-mails,
   link), Billing, AI. "Add or remove languages…" opens the stub.
