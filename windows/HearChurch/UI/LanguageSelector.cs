@@ -121,7 +121,7 @@ public sealed class LanguageSelector : StackPanel
             Content = content,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Center,
-            Padding = _compact ? new Thickness(8, 5, 8, 5) : new Thickness(10, 8, 10, 8),
+            Padding = _compact ? new Thickness(6, 5, 6, 5) : new Thickness(4, 8, 4, 8),
             IsEnabled = available,
             Opacity = available ? 1 : 0.45,
             CornerRadius = new CornerRadius(8),

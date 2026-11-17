@@ -24,50 +24,63 @@ public sealed class MicMonitor : IDisposable
     private MMDeviceEnumerator? _enumerator;
     private Notifications? _notifications;
 
+    // Core Audio objects live on a worker (MTA) thread: NAudio's WASAPI calls fail on the UI's STA thread.
+    private Task _queue = Task.CompletedTask;
+    private readonly object _gate = new();
+    private volatile bool _open;
+
+    private void OnWorker(Action a)
+    {
+        lock (_gate) { _queue = _queue.ContinueWith(_ => { try { a(); } catch { } }, TaskScheduler.Default); }
+    }
+
     public MicMonitor(Action<Action> post)
     {
         _post = post;
-        try
+        OnWorker(() =>
         {
             _enumerator = new MMDeviceEnumerator();
             _notifications = new Notifications(() => _post(() => OnDevicesChanged?.Invoke()));
             _enumerator.RegisterEndpointNotificationCallback(_notifications);
-        }
-        catch { _enumerator = null; }
+        });
     }
 
-    public bool Running => _capture != null;
+    public bool Running => _open;
 
     /// <summary>"" = the default input.</summary>
     public void Start(string device)
     {
-        if (_capture != null && device == _device) return;
-        Stop();
+        if (_open && device == _device) return;
         _device = device;
-        try
+        _open = true;
+        OnWorker(() =>
         {
+            Close();
+            if (!_open) return;
             var dev = Find(device);
             if (dev == null) return;
             var cap = new WasapiCapture(dev, true, 50);
             cap.DataAvailable += (_, e) => Measure(cap.WaveFormat, e.Buffer, e.BytesRecorded);
-            cap.RecordingStopped += (_, _) => { };
             cap.StartRecording();
             _capture = cap;
-        }
-        catch { _capture = null; }
+        });
     }
 
     public void Stop()
     {
-        var c = _capture;
-        _capture = null;
-        if (c != null)
-        {
-            try { c.StopRecording(); } catch { }
-            try { c.Dispose(); } catch { }
-        }
+        _open = false;
+        OnWorker(Close);
         Db = -80;
         _post(() => LevelChanged?.Invoke());
+    }
+
+    private void Close()
+    {
+        var c = _capture;
+        _capture = null;
+        if (c == null) return;
+        try { c.StopRecording(); } catch { }
+        try { c.Dispose(); } catch { }
     }
 
     private MMDevice? Find(string name)
@@ -100,7 +113,7 @@ public sealed class MicMonitor : IDisposable
         _lastShown = now;
         _post(() =>
         {
-            if (_capture == null) return;
+            if (!_open) return;
             Db = db;
             _history.Enqueue((now, db));
             while (_history.Count > 0 && (now - _history.Peek().At).TotalSeconds > 10) _history.Dequeue();
@@ -112,9 +125,14 @@ public sealed class MicMonitor : IDisposable
 
     public void Dispose()
     {
-        Stop();
-        try { if (_notifications != null) _enumerator?.UnregisterEndpointNotificationCallback(_notifications); } catch { }
-        _enumerator?.Dispose();
+        _open = false;
+        OnWorker(() =>
+        {
+            Close();
+            if (_notifications != null) _enumerator?.UnregisterEndpointNotificationCallback(_notifications);
+            _enumerator?.Dispose();
+        });
+        try { _queue.Wait(2000); } catch { }
     }
 
     private sealed class Notifications : IMMNotificationClient

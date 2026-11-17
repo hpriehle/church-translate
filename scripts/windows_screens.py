@@ -34,6 +34,20 @@ import windows_smoke as smoke  # noqa: E402
 SCREENS = ["1-sign-in.png", "3-main-idle.png", "4-main-meeting.png", "5-settings.png"]
 
 
+def serve_hub(port: int, home: Path) -> None:
+    """The smoke test's hub, plus a plain /health: run with lifespan off it has no pipeline, so the real one fails,
+    and the app's "Can reach hearchurch.com" check would show red in the screenshots."""
+    from fastapi.routing import APIRoute
+
+    from app import main as hub_main
+
+    async def health():
+        return {"ok": True}
+
+    hub_main.app.router.routes.insert(0, APIRoute("/health", health, methods=["GET"]))
+    smoke.serve_hub(port, home)
+
+
 def pairing_code(base: str, token: str) -> str:
     r = httpx.post(f"{base}/api/hc/pairing-code", headers={"Authorization": f"Bearer {token}"}, json={}, timeout=30)
     r.raise_for_status()
@@ -47,6 +61,11 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=Path, help="where the screenshots go")
     ap.add_argument("--keep", type=Path, help="copy the logs here")
     ap.add_argument("--timeout", type=float, default=1500)
+    ap.add_argument("--serve-hub", nargs=2, metavar=("PORT", "HOME"), help=argparse.SUPPRESS)
+    if "--serve-hub" in sys.argv:
+        i = sys.argv.index("--serve-hub")
+        serve_hub(int(sys.argv[i + 1]), Path(sys.argv[i + 2]))
+        return 0
     a = ap.parse_args()
 
     app = a.app.resolve()
@@ -64,7 +83,7 @@ def main() -> int:
                     "E2E_OPERATOR_PIN": secrets.token_hex(12)})
     (tmp / "hub").mkdir()
     hub_log = open(logs / "hub.log", "w", encoding="utf-8")
-    hub = subprocess.Popen([sys.executable, str(Path(smoke.__file__).resolve()), "--serve-hub", str(hub_port), str(tmp / "hub")],
+    hub = subprocess.Popen([sys.executable, __file__, "--serve-hub", str(hub_port), str(tmp / "hub")],
                            cwd=smoke.ROOT, env=hub_env, stdout=hub_log, stderr=subprocess.STDOUT)
     try:
         base = f"http://127.0.0.1:{hub_port}"
