@@ -143,7 +143,9 @@ builds it, as `tests/test_languages.py` does for the Mac.
   stop probability) and `vocoder` (postnet + HiFi-GAN). The loop is transformers' `_generate_speech`, in numpy
   (`app/tts/speecht5_onnx.py`); the tokenizer (a SentencePiece character model) is read from `tokens.json`, no
   sentencepiece. SpeechT5 keeps its prenet dropout on while speaking: the masks are drawn in numpy and passed in.
-  The export is deterministic (same files, same archive id).
+  The export is deterministic on one platform (same files, same archive id, run to run on Linux); the Windows
+  runner's export differs in its bytes (id `…22522b5425e1` vs the published `…4939affb461a`, built on Linux), so the
+  archive is built once and its hash recorded.
 - **int8 where it holds**: the transformer layers' feed-forward and attention weights are int8 (onnxruntime dynamic
   quantisation, per channel); the text embedding, the decoder's prenet / mel / stop projections and the vocoder
   stay float32. Quantising everything made the speech unintelligible (below).
@@ -196,7 +198,7 @@ test sentences as the engine does, two sentences per caption, 5 passes alternati
 
 | machine | RTF | per caption (p50) |
 |---|---|---|
-| GitHub `windows-latest`, 4 vCPU (CI job `wolof-voice`) | RUNNER_RTF | RUNNER_CAPTION |
+| GitHub `windows-latest`, 4 vCPU Intel, no GPU ([run 44031634401](https://github.com/hpriehle/hear-church/actions/runs/44031634401), 195 s of speech, 25 captions) | **0.198** (worst caption 0.229) | 1.31 s (p95 2.63 s) |
 | Linux dev box, 4 cores, shared (load 4–6 from other work) | 0.39 | |
 | for comparison, the Mac's torch voice on the same Linux box | 1.6–3.9 | |
 
@@ -206,7 +208,10 @@ speech. The vocoder is the larger half.
 The CI job `wolof-voice` exports the voice on the runner (torch only in that step's own venv), measures the RTF
 above, then builds the exe and runs `scripts/windows_smoke.py --no-sermon --wolof-voice 120`: English → the hub
 proxy (fake Claude) → the Wolof voice, through the exe's own download/install path (the exported folder is put where
-the download goes, until the archive is on hearchurch.com).
+the download goes, until the archive is on hearchurch.com). In that run the exe voiced **22 of 22** lines over 120 s
+of the sermon (1.9 s of voice work per line, p50; speech-to-voice p50 14.3 s, p95 17.6 s, most of it speech
+recognition and chunking, as for French above), with the log line
+`Wolof voice: SpeechT5 on onnxruntime (wolof-voice-speecht5-onnx-int8-4939affb461a)`.
 
 **Intel Mac** (also CPU-only): the same code runs there with `HEARCHURCH_WOLOF_VOICE=onnx` (onnxruntime is in the
 Intel build for Wolof speech recognition); not switched on or tested on an Intel Mac.
