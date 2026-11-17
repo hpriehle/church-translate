@@ -288,7 +288,9 @@ class FileSource(Source):
         if self.max_s:
             cmd += ["-t", str(self.max_s)]
         cmd += ["-f", "f32le", "-ac", "1", "-ar", str(SR), "pipe:1"]
-        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        # stdin given explicitly: a Windows engine started without a console (the Windows app) has no stdin
+        # handle to pass on, and Popen fails with WinError 50.
+        self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
         block = 1600  # 100 ms
         t0 = time.monotonic()
         done = 0

@@ -143,7 +143,7 @@ class Engine:
         out = open(self.log_dir / f"engine-{name}.log", "w", encoding="utf-8")
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
         p = subprocess.Popen([*self.cmd, "--app", "--no-browser", "--port", str(port), *args], env=self.env,
-                             stdout=out, stderr=subprocess.STDOUT, creationflags=flags, cwd=self.home)
+                             stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, creationflags=flags, cwd=self.home)
         return p, port
 
     def download(self, r: Report, languages: list[str], timeout: float) -> bool:
