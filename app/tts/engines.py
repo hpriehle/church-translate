@@ -400,6 +400,9 @@ class TtsRunner:
         self.ready.clear()
         for path in [p for p in _PIPER_LOADED if Path(p).name.startswith(self.cfg.lang)]:
             del _PIPER_LOADED[path]
+        if self.cfg.lang == "wo":   # the ONNX Wolof voice's sessions (its files are deleted)
+            _SPEECHT5_LOADED.pop("onnx", None)
+            _SPEECHT5_LOADED.pop("onnx_dir", None)
 
     @property
     def voice(self) -> str:
