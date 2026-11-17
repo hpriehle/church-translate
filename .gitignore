@@ -27,3 +27,10 @@ site/.astro/
 /scripture/
 /build/
 /dist/
+
+# Windows app build output
+windows/HearChurch/bin/
+windows/HearChurch/obj/
+/out/
+/screens/
+/screens-logs/

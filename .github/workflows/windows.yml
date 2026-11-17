@@ -1,4 +1,5 @@
-# The Hear Church engine on Windows x64 (docs/windows-engine.md): test suite, sidecar exe, sermon smoke test.
+# Hear Church on Windows x64: test suite, sidecar exe and sermon smoke test (docs/windows-engine.md), and the WinUI 3
+# app with the sidecar, walked through its screens with screenshots (docs/windows-app.md).
 name: windows
 
 on:
@@ -111,5 +112,80 @@ jobs:
           path: |
             smoke.json
             smoke-logs
+          retention-days: 7
+          if-no-files-found: ignore
+
+  app:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6   # Python from .python-version
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build the app (WinUI 3, self-contained, x64)
+        run: |
+          dotnet publish windows/HearChurch/HearChurch.csproj -c Release -r win-x64 -p:Platform=x64 \
+            -o out/HearChurch -nologo -clp:ErrorsOnly
+          ls out/HearChurch | head -50
+          du -sh out/HearChurch
+
+      - name: Install (uv.lock, CPU speech recognition)
+        run: uv sync --frozen --extra linux
+
+      - name: Build the sidecar and put it beside the app (engine\)
+        run: |
+          uv pip install "pyinstaller>=6.10,<7"
+          uv run --no-sync python windows/build.py
+          cp -r dist/hearchurch-engine out/HearChurch/engine
+          out/HearChurch/engine/hearchurch-engine.exe --self-check > /dev/null
+          du -sh out/HearChurch
+
+      - name: Upload the app (HearChurch.exe + engine)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hearchurch-win-x64
+          path: out/HearChurch
+          retention-days: 7
+
+      - name: Cache the sermon recording
+        uses: actions/cache@v4
+        with:
+          path: samples/sermon.mp3
+          key: sermon-${{ env.SERMON_SHA1 }}
+
+      - name: Fetch the sermon recording
+        run: |
+          [ -f samples/sermon.mp3 ] || curl -sSfL --retry 3 -o samples/sermon.mp3 "$SERMON_URL"
+          echo "$SERMON_SHA1  samples/sermon.mp3" | sha1sum -c -
+
+      - name: ffmpeg (test recordings only)
+        run: |
+          if ! command -v ffmpeg >/dev/null; then choco install ffmpeg -y --no-progress >/dev/null; fi
+          ffmpeg -version | head -1
+
+      - name: Screenshots (sign-in, main window idle and in a meeting, settings)
+        run: |
+          export PATH="$PATH:/c/ProgramData/chocolatey/bin"
+          uv run --no-sync python scripts/windows_screens.py --app out/HearChurch/HearChurch.exe \
+            --audio samples/sermon.mp3 --out screens --keep screens-logs
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-screenshots
+          path: |
+            screens
+            screens-logs
           retention-days: 7
           if-no-files-found: ignore

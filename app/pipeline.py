@@ -46,6 +46,7 @@ class Pipeline:
         self.records: dict[int, ChunkRecord] = {}
         self.stt_exec = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
         self.stt_ready = asyncio.Event()
+        self._stt_ready_at = 0.0        # monotonic: when speech recognition finished loading (queue waits start there)
         self.stt_loading = False
         self.loop: asyncio.AbstractEventLoop | None = None
 
@@ -232,6 +233,7 @@ class Pipeline:
         self.stt_loading = True
         try:
             await asyncio.get_running_loop().run_in_executor(self.stt_exec, self.stt.load)
+            self._stt_ready_at = time.monotonic()
             self.stt_ready.set()
             if self.last_error.startswith("Speech recognition failed"):
                 self.last_error = ""
@@ -412,6 +414,9 @@ class Pipeline:
                     self._health("stt_behind")
                     self._finalize(rec)
                     continue
+                note_wait = getattr(self.stt, "note_wait", None)
+                if note_wait:   # the time it queued behind earlier speech (not the model loading at the start)
+                    note_wait(time.monotonic() - max(chunk.t_cut, self._stt_ready_at))
                 res = await self.loop.run_in_executor(self.stt_exec, self._recognise, chunk.audio, self.source)
             except Exception as e:
                 log.exception("stt failed")
@@ -599,6 +604,7 @@ class Pipeline:
             "stt_ready": self.stt.ready,
             "stt_engine": self.stt.engine,
             "stt_rtf": round(self.stt.rtf, 2),
+            "stt_wait_s": round(getattr(self.stt, "wait", 0.0), 1),   # median queue wait before recognition
             "stt_skipped": self.stt_skipped,
             "stt_model": self._stt_model(),
             "stt_stepped_down": self.stt.stepped_down,
