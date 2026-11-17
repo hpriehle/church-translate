@@ -384,7 +384,8 @@ def test_save_secrets_keeps_other_lines_and_is_private(tmp_path):
     save_secrets({"ANTHROPIC_API_KEY": "sk-ant-api03-new"}, f)
     assert load_secrets(f) == {"ANTHROPIC_API_KEY": "sk-ant-api03-new"}
     assert "# comment" in f.read_text() and "OTHER=1" in f.read_text()
-    assert f.stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":   # Windows has no POSIX modes: the per-user %LOCALAPPDATA% ACL keeps it private
+        assert f.stat().st_mode & 0o777 == 0o600
     assert claude_access(f) == "api_key"
     save_secrets({}, f)
     assert claude_access(f) == "login"
@@ -528,9 +529,12 @@ def test_english_only_speech_model_is_not_used_for_another_language():
     assert t._fw_wanted() == "large-v3"
 
 
-def test_slow_cpu_steps_down_one_model_size_and_no_further():
+def test_slow_cpu_steps_down_one_model_size_and_no_further(monkeypatch):
     from app.config import SttCfg
     from app.stt import Transcriber
+
+    # the smaller model counts as downloaded (a fresh machine, e.g. CI, would fetch it in the background first)
+    monkeypatch.setattr(Transcriber, "_on_disk", staticmethod(lambda name: True))
 
     t = Transcriber(SttCfg(engine="faster-whisper", faster_whisper_model="small", language="ru"))
     for _ in range(5):
@@ -558,9 +562,12 @@ def test_mixed_speaker_meeting_steps_down_to_the_multilingual_model():
     assert t._fw_wanted() == "base.en"
 
 
-def test_fast_cpu_or_short_chunks_keep_the_model():
+def test_fast_cpu_or_short_chunks_keep_the_model(monkeypatch):
     from app.config import SttCfg
     from app.stt import Transcriber
+
+    # the smaller model counts as downloaded (a fresh machine, e.g. CI, would fetch it in the background first)
+    monkeypatch.setattr(Transcriber, "_on_disk", staticmethod(lambda name: True))
 
     t = Transcriber(SttCfg(engine="faster-whisper", faster_whisper_model="small.en", language="en"))
     for _ in range(20):
