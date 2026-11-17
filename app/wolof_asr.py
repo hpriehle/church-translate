@@ -101,7 +101,7 @@ def install(archive: Path, entry: dict[str, Any]) -> None:
             digest.update(chunk)
     if digest.hexdigest() != entry["sha256"]:
         archive.unlink(missing_ok=True)
-        raise RuntimeError("the Wolof speech model download was damaged")
+        raise RuntimeError(f"the {entry.get('name') or 'Wolof model'} download was damaged")
     dest = model_dir(entry)
     work = dest.with_name(dest.name + ".unpacking")
     shutil.rmtree(work, ignore_errors=True)

@@ -1,0 +1,10 @@
+{
+ "onnx": {
+  "id": "wolof-voice-speecht5-onnx-int8-4939affb461a",
+  "url": "https://hearchurch.com/download/wolof-voice-speecht5-onnx-int8-4939affb461a.tar.gz",
+  "sha256": "76c002d44b60706d20dec346586284650fb2eb87f60d9028e8d50177fdbfb94a",
+  "size": 192191577,
+  "unpacked": 213013534,
+  "name": "Wolof voice (SpeechT5), ONNX"
+ }
+}

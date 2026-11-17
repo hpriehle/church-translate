@@ -53,7 +53,7 @@ engine's). For testing: `HEARCHURCH_HOME` (another data folder), `HEARCHURCH_APP
 Customer-visible text is the Mac's, word for word, except where it names the Mac: "this Mac" → "this PC",
 "Mac default" → "PC default", "a code from another Mac" → "a code from another computer" (and "On a Mac or PC already
 signed in…"), "Keychain" → "Windows Credential Manager", the microphone privacy path (Settings → Privacy & security →
-Microphone), Wolof's voice ("No Wolof voice on Windows yet…"), "Not on this Mac" → "Not on this PC", and in Congregation
+Microphone), "Not on this Mac" → "Not on this PC", and in Congregation
 "another Mac" → "another computer" (e-mails, devices, Add device's code). Settings has an About tab the Mac doesn't
 need (its About panel and the links under General): version, credits, notices. Flags are left out of the language buttons: Windows
 has no flag emoji (it shows the two letters).
@@ -96,4 +96,5 @@ No real hub credentials are used anywhere.
 - Live input on a real PC (the runner has no audio input): how the hearing-assist receiver shows up (line-in vs USB)
   and whether the engine's MME names match the WASAPI names the pre-meeting meter uses (matched by prefix, since MME
   cuts names at 31 characters) needs the office PC (W4).
-- The Wolof voice (see docs/windows-engine.md; decided later: "No Wolof voice on Windows yet…").
+- The Wolof voice is offered like every other (Download with progress, Moussa and Fatou on the voice page): the
+  same SpeechT5 voice as the Apple Silicon Mac, on onnxruntime (docs/windows-engine.md, "The Wolof voice").

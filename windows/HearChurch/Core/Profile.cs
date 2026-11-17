@@ -60,15 +60,14 @@ public sealed class Profile
 public enum LanguageRole { Speaker, Target }
 
 /// <summary>The 12 languages: each can be a translation language (a listen pill), and each can be spoken.
-/// As on the Intel Mac: CPU speech recognition, and no Wolof voice (it needs torch; docs/windows-engine.md).</summary>
+/// CPU speech recognition, as on the Intel Mac; the Wolof voice is SpeechT5 on onnxruntime (docs/windows-engine.md).</summary>
 public sealed record OutputLanguage(string Id, string Name, string Native, bool Available, double SizeMB)
 {
     public const double SpeechDownloadMB = 634;          // faster-whisper small + base (the engine reports the real size)
     public const double WolofSpeechDownloadMB = 330;
     public const string WolofSpeechPackage = "speech-wo"; // the "wo" package is the Wolof voice
 
-    public string? UnavailableReason => Available ? null
-        : "No Wolof voice on Windows yet. Wolof can still be spoken: pick it as a speaker language.";
+    public string? UnavailableReason => Available ? null : $"{Name} isn't available on this computer.";
 
     public bool AvailableAs(LanguageRole role) => role == LanguageRole.Speaker || Available;
     public string? UnavailableReasonAs(LanguageRole role) => AvailableAs(role) ? null : UnavailableReason;
@@ -83,7 +82,7 @@ public sealed record OutputLanguage(string Id, string Name, string Native, bool 
     public static readonly IReadOnlyList<OutputLanguage> All = new List<OutputLanguage>
     {
         new("fr", "French", "Français", true, 127),
-        new("wo", "Wolof", "Wolof", false, 634),
+        new("wo", "Wolof", "Wolof", true, 260),          // the ONNX voice (the engine reports the real size)
         new("es", "Spanish", "Español", true, 127),
         new("ru", "Russian", "Русский", true, 127),
         new("pt", "Portuguese", "Português", true, 126),

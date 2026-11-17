@@ -18,6 +18,7 @@ datas = [
     (str(REPO / "LICENSE"), "."),
     (str(REPO / "THIRD_PARTY_NOTICES.md"), "."),
     (str(REPO / "app" / "wolof_asr.json"), "app"),
+    (str(REPO / "app" / "wolof_voice.json"), "app"),
     (str(REPO / "app" / "tts" / "g2pw_data"), "app/tts/g2pw_data"),
 ]
 datas += [(str(p), ".") for p in sorted(REPO.glob("glossary*.json"))]

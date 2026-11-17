@@ -181,11 +181,14 @@ def _torch_available() -> bool:
 
 
 def speecht5_available() -> bool:
-    return _torch_available() and any(WOLOF_DIR.glob("speaker-*.npy"))
+    from ..wolof_voice import model_dir, onnx_voice
+
+    runs = model_dir() is not None if onnx_voice() else _torch_available()
+    return runs and any(WOLOF_DIR.glob("speaker-*.npy"))
 
 
 def list_wolof_voices() -> list[dict]:
-    if not _torch_available():
+    if not speecht5_available():
         return []
     # The MMS voice is non-commercial (CC BY-NC), so the paid app never offers it.
     return [{"id": f"speecht5:{p.stem[8:]}", "engine": "speecht5", "voice": p.stem[8:],
@@ -251,6 +254,49 @@ class SpeechT5Tts:
         return _resample(_tempo(pcm, self.SR, self.cfg.speed * speed), self.SR, self.out_sr)
 
 
+class SpeechT5OnnxTts:
+    """The same Wolof voice on onnxruntime (Windows): app/tts/speecht5_onnx.py, downloaded as the "wo" package.
+    The decoder writes one sentence while the vocoder turns the one before into sound."""
+
+    name = "speecht5"
+
+    def __init__(self, cfg: TtsCfg, out_sr: int):
+        from ..wolof_voice import model_dir
+        from .speecht5_onnx import SpeechT5Onnx
+
+        self.cfg = cfg
+        self.out_sr = out_sr
+        voice = cfg.voice if cfg.voice in ("male", "female") else "male"
+        path = WOLOF_DIR / f"speaker-{voice}.npy"
+        if not path.exists():
+            raise RuntimeError(f"Wolof voice profile {path.name} missing (models/wolof)")
+        folder = model_dir()
+        if folder is None:
+            raise RuntimeError("the Wolof voice isn't downloaded")
+        self.voice = voice
+        if _SPEECHT5_LOADED.get("onnx_dir") != folder:
+            _SPEECHT5_LOADED["onnx"] = SpeechT5Onnx(folder)
+            _SPEECHT5_LOADED["onnx_dir"] = folder
+            log.info("Wolof voice: SpeechT5 on onnxruntime (%s)", folder.name)
+        self._m = _SPEECHT5_LOADED["onnx"]
+        self.SR = self._m.sr
+        self._spk = np.load(path).astype(np.float32).reshape(1, -1)
+        self._lock = threading.Lock()
+
+    def synth(self, text: str, speed: float = 1.0) -> np.ndarray:
+        parts = [p.strip() for p in re.split(r"(?<=[.!?;:])\s+", text) if p.strip()] or [text]
+        gap = np.zeros(int(0.15 * self.SR), dtype=np.float32)
+        with self._lock:
+            # As the torch voice: stop at 0.4, at most ~6 frames per input character (never a long babble).
+            waves = self._m.speak_all(parts, self._spk, threshold=0.4, maxlenratio=6.0)
+        out = []
+        for w in waves:
+            out += [w, gap]
+        audio = np.concatenate(out[:-1]) if out else np.zeros(0, np.float32)
+        pcm = (np.clip(audio / max(1e-6, float(np.abs(audio).max())) * 0.9, -1, 1) * 32767).astype(np.int16)
+        return _resample(_tempo(pcm, self.SR, self.cfg.speed * speed), self.SR, self.out_sr)
+
+
 class MmsTts:
     """Wolof voice from Meta's MMS project (one voice). Fast enough for a server without a GPU."""
 
@@ -301,13 +347,16 @@ def list_voices_for(code: str) -> list[dict]:
 def make_tts(cfg: TtsCfg, out_sr: int):
     if cfg.engine == "piper":
         return PiperTts(cfg, out_sr)
+    from ..wolof_voice import onnx_voice
+
     if cfg.engine == "speecht5":
-        return SpeechT5Tts(cfg, out_sr)
+        return SpeechT5OnnxTts(cfg, out_sr) if onnx_voice() else SpeechT5Tts(cfg, out_sr)
     if cfg.engine == "mms":
-        # CC BY-NC 4.0: never in the paid Mac app, even if a setting or caller asks for it (config.py already
-        # swaps a saved "mms" for SpeechT5 on macOS; this is the last line of defence).
-        if sys.platform == "darwin":
-            raise ValueError("the MMS Wolof voice is licensed for non-commercial use only and is not available on macOS")
+        # CC BY-NC 4.0: never in the paid app (Mac, Windows), even if a setting or caller asks for it (config.py
+        # already swaps a saved "mms" for SpeechT5 there; this is the last line of defence).
+        if sys.platform == "darwin" or onnx_voice():
+            raise ValueError("the MMS Wolof voice is licensed for non-commercial use only and is not available "
+                             "in the Hear Church app")
         return MmsTts(cfg, out_sr)
     raise ValueError(f"unknown voice engine {cfg.engine!r}")
 

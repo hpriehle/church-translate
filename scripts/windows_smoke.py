@@ -1,7 +1,8 @@
 """End-to-end smoke test of the built engine (the Windows sidecar exe, or any engine command) on a recorded sermon.
 
     python scripts/windows_smoke.py --engine dist/hearchurch-engine/hearchurch-engine.exe \
-        --audio samples/sermon.mp3 --duration 300 [--wolof 45] [--out smoke.json]
+        --audio samples/sermon.mp3 --duration 300 [--wolof 45] [--wolof-voice 60 [--wolof-voice-dir DIR]]
+        [--no-sermon] [--out smoke.json]
 
 Like the Mac app runs it, with nothing live:
 1. starts this repo's hub (app/hear, hub routes only) on a free port with a throwaway database, Claude replaced by a
@@ -18,6 +19,11 @@ Like the Mac app runs it, with nothing live:
 6. with --wolof N: downloads Wolof speech recognition (the Omnilingual ONNX model from hearchurch.com, as every
    non-Apple-Silicon computer does) and runs N seconds with Wolof as the speaker language, to prove onnxruntime runs
    it here (the sermon is English, so the Wolof text itself means nothing)
+7. with --wolof-voice N: N seconds with English spoken and Wolof as the translation language, voiced by the Wolof
+   SpeechT5 voice on onnxruntime (the fake Claude's text, so the words aren't Wolof; only that it speaks, and how
+   fast, is checked). The voice is downloaded through the engine, or, with --wolof-voice-dir (a folder from
+   scripts/models/export_speecht5_onnx.py, before the archive is on hearchurch.com), put where the download goes.
+--no-sermon skips 3-5 (the French part); the speech model is still downloaded.
 Exit 1 when any step fails. The temp folder is kept with --keep (logs for the CI artifact).
 """
 from __future__ import annotations
@@ -228,6 +234,35 @@ async def signup(base: str) -> str:
         return res.json()["device_token"]
 
 
+def wolof_voice(r: Report, eng: Engine, a: argparse.Namespace, result: dict) -> int:
+    """English spoken, translated into Wolof and voiced by the ONNX Wolof voice (step 7)."""
+    eng.meeting(["en"], ["wo"])
+    if a.wolof_voice_dir:
+        from app import wolof_voice as wv
+
+        entry = wv.manifest()
+        if not r.step("app/wolof_voice.json names the ONNX Wolof voice", bool(entry)):
+            return 1
+        dest = eng.home / "models" / entry["id"]
+        shutil.copytree(a.wolof_voice_dir, dest, dirs_exist_ok=True)
+        r.step("Wolof voice from the exported folder (not downloaded)", (dest / "config.json").exists(), str(dest))
+    if not eng.download(r, ["wo"], a.download_timeout):
+        return 1
+    since = time.time()
+    code, took = eng.run_file("wolof-voice", a.audio.resolve(), a.wolof_voice, a.wolof_voice * 4 + 600)
+    w = lag_numbers(eng.records(since), "wo")
+    log = eng.log_dir / "engine-wolof-voice.log"
+    text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+    w["tts_engine"] = next((ln.split("  ", 1)[-1].strip() for ln in text.splitlines() if "SpeechT5 on onnxruntime" in ln), "")
+    result["wolof_voice"] = w
+    r.step("Wolof voice (SpeechT5 ONNX) speaks on this machine", code == 0 and w["aired"] >= 3 and bool(w["tts_engine"]),
+           f"exit {code}, {w['aired']} of {w['captioned']} lines voiced, {w['tts_ms_p50']} ms per line (p50), "
+           f"voice lag p50 {w['voice_lag_p50']}s; {w['tts_engine']}")
+    print("WOLOF VOICE  speech-to-voice p50 {voice_lag_p50}s p95 {voice_lag_p95}s · {aired} lines voiced, "
+          "{tts_ms_p50} ms per line (p50)".format(**w), flush=True)
+    return 1 if r.fails else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--engine", help="the engine command, e.g. dist/hearchurch-engine/hearchurch-engine.exe "
@@ -235,6 +270,9 @@ def main() -> int:
     ap.add_argument("--audio", type=Path, help="the sermon recording")
     ap.add_argument("--duration", type=float, default=300.0, help="seconds of the recording to play (real time)")
     ap.add_argument("--wolof", type=float, default=0.0, help="also N seconds with Wolof as the speaker language")
+    ap.add_argument("--wolof-voice", type=float, default=0.0, help="also N seconds translated into Wolof, voiced")
+    ap.add_argument("--wolof-voice-dir", type=Path, help="the exported ONNX Wolof voice, instead of downloading it")
+    ap.add_argument("--no-sermon", action="store_true", help="skip the French sermon run")
     ap.add_argument("--download-timeout", type=float, default=1200.0)
     ap.add_argument("--out", type=Path, help="write the numbers here (JSON)")
     ap.add_argument("--keep", type=Path, help="keep the engine's folder and logs here")
@@ -269,6 +307,8 @@ def main() -> int:
         token = asyncio.run(signup(base))
         r.step("test congregation signed up (device token)", bool(token))
         eng = Engine(cmd, tmp / "engine", hub_port, token, logs)
+        if a.no_sermon:
+            return wolof_voice(r, eng, a, result)
         eng.meeting(["en"], ["fr"])
         if not eng.download(r, ["fr"], a.download_timeout):
             return 1
@@ -302,6 +342,8 @@ def main() -> int:
                 result["wolof"] = w
                 r.step("Wolof speaker: Omnilingual ONNX recognises on this machine", code == 0 and len(wo) >= 1,
                        f"exit {code}, {len(wo)} Wolof chunks, RTF {w['stt_rtf']}, e.g. {(wo[0]['en'] if wo else '')[:50]!r}")
+        if a.wolof_voice:
+            wolof_voice(r, eng, a, result)
     except Exception as e:   # noqa: BLE001
         r.step("unexpected error", False, f"{type(e).__name__}: {e}")
     finally:

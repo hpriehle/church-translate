@@ -54,10 +54,7 @@ jobs:
       - name: Install (uv.lock, CPU speech recognition)
         run: uv sync --frozen --extra linux
       - name: Test suite
-        # Deselected: a known failure on every non-Mac machine (it fails on Linux too), see docs/windows-engine.md.
-        run: >
-          uv run --no-sync pytest -q -p no:cacheprovider
-          --deselect tests/test_languages.py::test_the_paid_mac_app_never_offers_the_non_commercial_wolof_voice
+        run: uv run --no-sync pytest -q -p no:cacheprovider
 
   engine:
     runs-on: windows-latest
@@ -130,6 +127,94 @@ jobs:
           path: |
             smoke.json
             smoke-logs
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The Wolof voice (SpeechT5 on onnxruntime, docs/windows-engine.md "The Wolof voice"): exported to ONNX here (torch
+  # only in this step's own venv, never in the app), its speed on the runner's 4 vCPU, then the exe voicing Wolof.
+  wolof-voice:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6   # Python from .python-version
+        with:
+          enable-cache: true
+
+      - name: Install (uv.lock, CPU speech recognition)
+        run: uv sync --frozen --extra linux
+
+      - name: Export the Wolof voice to ONNX (the published archive's recipe)
+        run: |
+          uv venv -q .export -p 3.12
+          uv pip install -q --python .export "torch==2.14.1" --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -q --python .export "transformers==5.19.0" "sentencepiece==0.2.3" "onnx==1.23.2" \
+            "onnxscript==0.7.2" "onnxruntime==1.31.0" "numpy==2.5.5" "soundfile==0.14.0"
+          .export/Scripts/python -I scripts/models/export_speecht5_onnx.py --out wolof-voice --int8 2>&1 | grep -E "MB$"
+          # Informational: the same files as the archive app/wolof_voice.json names (the export is deterministic)?
+          .export/Scripts/python -I scripts/models/package_model.py wolof-voice --runtime voice --exclude "*.onnx" \
+            --include encoder.int8.onnx --include decoder.int8.onnx --include vocoder.onnx \
+            --prefix wolof-voice-speecht5-onnx-int8 --name check --out wolof-voice-pkg --manifest wolof-voice-pkg.json \
+            | grep '"id"'
+          grep '"id"' app/wolof_voice.json
+
+      - name: Speed of the Wolof voice on this runner (real-time factor)
+        run: |
+          uv run --no-sync python scripts/wolof_voice_bench.py wolof-voice --passes 5 --out wolof-bench.json
+          {
+            echo '### Wolof voice (SpeechT5 ONNX) on the Windows runner'
+            echo '```json'
+            cat wolof-bench.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build hearchurch-engine.exe (PyInstaller onedir)
+        run: |
+          uv pip install "pyinstaller>=6.10,<7"
+          uv run --no-sync python windows/build.py
+
+      - name: ffmpeg (test recordings only)
+        run: |
+          if ! command -v ffmpeg >/dev/null; then choco install ffmpeg -y --no-progress >/dev/null; fi
+          ffmpeg -version | head -1
+
+      - name: Cache the sermon recording
+        uses: actions/cache@v4
+        with:
+          path: samples/sermon.mp3
+          key: sermon-${{ env.SERMON_SHA1 }}
+
+      - name: Fetch the sermon recording
+        run: |
+          [ -f samples/sermon.mp3 ] || curl -sSfL --retry 3 -o samples/sermon.mp3 "$SERMON_URL"
+          echo "$SERMON_SHA1  samples/sermon.mp3" | sha1sum -c -
+
+      - name: The exe voices Wolof (English → fake Claude → the Wolof voice)
+        run: |
+          export PATH="$PATH:/c/ProgramData/chocolatey/bin"
+          uv run --no-sync python scripts/windows_smoke.py \
+            --engine dist/hearchurch-engine/hearchurch-engine.exe --audio samples/sermon.mp3 \
+            --no-sermon --wolof-voice 120 --wolof-voice-dir wolof-voice --out wolof-smoke.json --keep wolof-smoke-logs
+          {
+            echo '### The exe voicing Wolof on the Windows runner'
+            echo '```json'
+            cat wolof-smoke.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the Wolof voice logs and numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wolof-voice-logs
+          path: |
+            wolof-bench.json
+            wolof-smoke.json
+            wolof-smoke-logs
           retention-days: 7
           if-no-files-found: ignore
 

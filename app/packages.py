@@ -10,6 +10,7 @@ from hearchurch.com with that voice: wolof_libs.json in the app names the signed
 
 Wolof speech recognition ("speech-wo", for a Wolof speaker language) comes from hearchurch.com too, never from
 Hugging Face: wolof_asr.json names this computer's model archive and its hash (docs/wolof-speaker.md).
+On Windows the Wolof voice is an ONNX model from hearchurch.com in the same way (wolof_voice.json), with no torch.
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ from typing import Any, Callable
 
 import httpx
 
-from . import wolof_asr
+from . import wolof_asr, wolof_voice
 from .config import HOME, PIPER_DIR, ROOT
 
 log = logging.getLogger("packages")
@@ -85,6 +86,7 @@ FASTER_WHISPER_STEP_MB = 148    # the "base" model it can step down to (see stt.
 SIZES_MB = {"speech": 1615, "fr": 127, "wo": 634, "es": 127, "ru": 127, "pt": 126, "uk": 228, "fa": 127, "ne": 63, "vi": 63, "zh": 176, "en": 126, "lv": 64}
 # Wolof speech recognition before its model is published (wolof_asr.json): the expected sizes.
 WOLOF_ASR_MB = {"mlx": 1700, "onnx": 330}
+WOLOF_VOICE_ONNX_MB = 260   # the ONNX Wolof voice, before wolof_voice.json names it
 LIBS_MANIFEST = ROOT / "wolof_libs.json"
 LIBS_DIR = HOME / "packages"
 
@@ -203,6 +205,10 @@ def package_for(code: str, stt_model: str, asr_runtime: str = "") -> Package | N
     if code in PIPER_VOICES:
         name, voices = PIPER_VOICES[code]
         return Package(code, name, SIZES_MB[code], piper_voices=voices)
+    if code == "wo" and wolof_voice.onnx_voice():   # Windows: the ONNX voice from our download host, no torch
+        entry = wolof_voice.manifest()
+        return Package("wo", "Wolof voice", round(entry["size"] / 1e6) if entry else WOLOF_VOICE_ONNX_MB, model=entry,
+                       unavailable="" if entry else "The Wolof voice can't be downloaded yet.")
     if code == "wo":
         libs = _libs()
         size = SIZES_MB["wo"] + (round(libs["size"] / 1e6) if libs else 0)
@@ -240,7 +246,9 @@ class Packages:
 
     @staticmethod
     def _present(p: Package) -> bool:
-        if p.id == wolof_asr.PACKAGE_ID:
+        if p.unavailable:   # not published for this computer yet
+            return False
+        if p.model:   # Wolof speech recognition, or the ONNX Wolof voice
             return wolof_asr.installed(p.model)
         if not all(_hf_cached(r, p.hf_only) for r in p.hf_repos):
             return False

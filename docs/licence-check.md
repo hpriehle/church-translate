@@ -131,6 +131,9 @@ Piper voices, from each voice's `MODEL_CARD` in `rhasspy/piper-voices` (fetched 
 - `app/tts/engines.py` `list_wolof_voices()`: offers only `speecht5:*` voices.
 - `app/packages.py`: the Wolof package downloads only `WOLOF_REPOS` (SpeechT5 + HiFi-GAN), never the MMS repo.
 - Nothing in `web/` or the Swift app names MMS (grep for `mms`, `MmsWolof`, `rnjema`).
+- Windows (2026-11-17): the same guarantee. The Wolof voice there is the same MIT SpeechT5 + HiFi-GAN, converted to
+  ONNX (`scripts/models/export_speecht5_onnx.py`; the archive carries both MIT notices). `config.tts_for` swaps a
+  saved `mms` for SpeechT5 and `make_tts()` refuses MMS on Windows as on macOS; `tests/test_wolof_voice.py` checks it.
 
 The only gap is defence in depth: `make_tts()` itself would still build the MMS engine if handed `engine="mms"`
 on a Mac; today nothing can hand it that. Also note MMS is the Linux default: if a Linux server ever serves paying

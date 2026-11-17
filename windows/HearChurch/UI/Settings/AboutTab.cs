@@ -11,10 +11,12 @@ public sealed class AboutTab : SettingsTab
 {
     private const string HiFiTts = "fine-tuned from a model trained on the Hi-Fi TTS dataset (reader 92, Cori Samuel), by Evelina Bakhturina, Vitaly Lavrukhin, Boris Ginsburg and Yang Zhang (NVIDIA)";
 
-    /// <summary>The voices on Windows (download/src/credits.html, without Wolof's: no Wolof voice on Windows yet).</summary>
+    /// <summary>The voices on Windows (download/src/credits.html).</summary>
     private static readonly (string Language, string Voice, string Source, string Licence)[] Voices =
     {
         ("French", "Male 1 - Julien", "French voice “tom” by Tjiho", "AGPLv3"),
+        ("Wolof", "Male 1 - Moussa", "SpeechT5 Wolof, by Bilal Faye, with Microsoft's SpeechT5 vocoder", "MIT"),
+        ("Wolof", "Female 1 - Fatou", "SpeechT5 Wolof, by Bilal Faye, with Microsoft's SpeechT5 vocoder", "MIT"),
         ("French", "Female 1 - Camille", "The SIWIS French Speech Synthesis Database, by Junichi Yamagishi, Pierre-Edouard Honnet, Philip Garner and Alexandros Lazaridis, " + HiFiTts, "CC BY 4.0; Hi-Fi TTS: CC BY 4.0"),
         ("Spanish", "Male 1 - Carlos", "Ald Mexican Spanish speech dataset", "Unlicense"),
         ("Spanish", "Female 1 - Lucía", "Piper TTS Spanish, by HirCoir", "Apache 2.0"),

@@ -28,7 +28,8 @@ dist/hearchurch-engine/hearchurch-engine.exe --self-check
   libraries of faster-whisper/CTranslate2, onnxruntime, Piper, PortAudio (sounddevice), soxr, lameenc and PyAV.
   torch, transformers and mlx are left out. 357 MB unpacked (CI build).
 - **No models are bundled.** As on the Mac, speech models and voices are downloaded on first use through the engine's
-  own `/api/packages/download` (Hugging Face for Whisper and Piper, hearchurch.com/download for Wolof speech).
+  own `/api/packages/download` (Hugging Face for Whisper and Piper, hearchurch.com/download for Wolof speech and
+  the Wolof voice).
 - The exe runs with Python's UTF-8 mode on (built in), because the engine reads its JSON/TOML without naming an
   encoding; without it Windows would use cp1252.
 - `--self-check` imports everything, checks the shipped files, and prints UTF-8 mode, the audio host APIs (MME,
@@ -129,6 +130,87 @@ Read them with care: the translation is the instant fake, so the caption delay h
 engine's own chunking and queueing; a real Claude turn through the hub adds its own time (about a second or two).
 A GitHub runner (4 vCPU, shared) is also not the church office PC; the W4 test on that PC gives the real figure.
 
+## The Wolof voice
+
+The same voice as the Apple Silicon Mac — SpeechT5 Wolof by Bilal Faye (`bilalfaye/speecht5_tts-wolof`, MIT) with
+Microsoft's SpeechT5 HiFi-GAN vocoder (`microsoft/speecht5_hifigan`, MIT), Moussa (male) and Fatou (female) — but
+exported to ONNX and run with onnxruntime, which the engine already ships for Wolof speech recognition: **no torch on
+Windows**. Never the MMS Wolof voice (CC BY-NC): `tests/test_wolof_voice.py` checks that Windows never offers or
+builds it, as `tests/test_languages.py` does for the Mac.
+
+- **Export**: `scripts/models/export_speecht5_onnx.py` writes three graphs: `encoder` (text → each decoder layer's
+  cross-attention keys/values, once per sentence), `decoder` (one step with its self-attention cache: 2 mel frames +
+  stop probability) and `vocoder` (postnet + HiFi-GAN). The loop is transformers' `_generate_speech`, in numpy
+  (`app/tts/speecht5_onnx.py`); the tokenizer (a SentencePiece character model) is read from `tokens.json`, no
+  sentencepiece. SpeechT5 keeps its prenet dropout on while speaking: the masks are drawn in numpy and passed in.
+  The export is deterministic (same files, same archive id).
+- **int8 where it holds**: the transformer layers' feed-forward and attention weights are int8 (onnxruntime dynamic
+  quantisation, per channel); the text embedding, the decoder's prenet / mel / stop projections and the vocoder
+  stay float32. Quantising everything made the speech unintelligible (below).
+- **Package**: `wolof-voice-speecht5-onnx-int8-4939affb461a.tar.gz`, **192 MB** (213 MB unpacked; the Mac's torch voice
+  + libraries is ~835 MB), built with `scripts/models/package_model.py --runtime voice` and named in
+  `app/wolof_voice.json` (sha256 `76c002d4…fbb94a`). The app downloads it from
+  `hearchurch.com/download/<id>.tar.gz` as the "wo" package (Download with progress, like the other voices), checks
+  the hash and unpacks it into `models\<id>`. **Not uploaded yet**: until it is, Download fails (404).
+- **Engine**: `app/wolof_voice.py` turns the ONNX voice on for Windows (and with `HEARCHURCH_WOLOF_VOICE=onnx`
+  anywhere else, for tests and trials); `app/tts/engines.py SpeechT5OnnxTts` speaks a caption sentence by sentence
+  with the same settings as the Mac (stop at 0.4, at most 6 frames per character), the vocoder turning one sentence
+  into sound while the decoder writes the next. The decoder runs on 1 thread (2 with 6+ cores; more threads only add
+  overhead to its small steps), the vocoder on the rest (up to 4).
+
+### Quality: ONNX against the Mac's torch voice
+
+`export_speecht5_onnx.py --check --wavs DIR` speaks the 10 Wolof test sentences with both, using the **same dropout
+masks**. Float32 ONNX gives the torch output to the sample (mel cosine 1.0000, MAE < 0.001, waveform correlation
+1.000 on 9 of 10; the tenth drifts at the stop decision). The shipped int8 voice:
+
+| sentence | frames torch / ONNX | mel cosine | mel MAE (log-mel) |
+|---|---|---|---|
+| 0 Yàlla mooy sunu Boroom… | 158 / 158 | 0.9997 | 0.05 |
+| 1 Ndaxte Yàlla dafa bëgg àddina bi… (long) | 592 / 564 | 0.9293 | 0.70 |
+| 2 Dalal ak jàmm… | 144 / 146 | 0.9998 | 0.04 |
+| 3 Tey, dinanu jàng téere Yowaana… | 304 / 306 | 0.9742 | 0.37 |
+| 4 Yeesu Krist moo di yoon wi… | 200 / 198 | 0.9996 | 0.05 |
+| 5–9 | ±2–8 frames | 0.957–0.999 | 0.08–0.52 |
+
+Lower cosines are timing drift (a sound a frame longer shifts the rest), not a different voice. Intelligibility,
+measured by transcribing each voice's output with a Wolof Whisper (`M9and2M/whisper-small-wolof`) and comparing with
+the text (character error rate over 5 sentences; it includes the recogniser's own mistakes and trailing noise, so
+only the comparison counts):
+
+| voice | CER |
+|---|---|
+| Mac torch voice | 0.274 |
+| ONNX float32 | 0.274 (identical output) |
+| **ONNX, int8 transformer layers (shipped)** | **0.237** |
+| ONNX, int8 everywhere (per tensor) | 0.857 — unintelligible ("yii buuruh" for "Yàlla mooy sunu Boroom…") |
+| ONNX, int8 everywhere (per channel) | 0.696 |
+
+Listen: `docs/wolof-voice-samples/` has sentences 0, 1 and 4 from each (`*-mac-torch.wav`, `*-windows-onnx.wav`,
+male voice, the same dropout masks).
+
+### Speed
+
+Real-time factor = seconds of work per second of speech (target < 0.5). `scripts/wolof_voice_bench.py` speaks the
+test sentences as the engine does, two sentences per caption, 5 passes alternating Moussa and Fatou (~3 min of speech).
+
+| machine | RTF | per caption (p50) |
+|---|---|---|
+| GitHub `windows-latest`, 4 vCPU (CI job `wolof-voice`) | RUNNER_RTF | RUNNER_CAPTION |
+| Linux dev box, 4 cores, shared (load 4–6 from other work) | 0.39 | |
+| for comparison, the Mac's torch voice on the same Linux box | 1.6–3.9 | |
+
+Per step the int8 decoder takes ~6–9 ms on one thread (float32: ~29 ms at 4 threads); each step makes 32 ms of
+speech. The vocoder is the larger half.
+
+The CI job `wolof-voice` exports the voice on the runner (torch only in that step's own venv), measures the RTF
+above, then builds the exe and runs `scripts/windows_smoke.py --no-sermon --wolof-voice 120`: English → the hub
+proxy (fake Claude) → the Wolof voice, through the exe's own download/install path (the exported folder is put where
+the download goes, until the archive is on hearchurch.com).
+
+**Intel Mac** (also CPU-only): the same code runs there with `HEARCHURCH_WOLOF_VOICE=onnx` (onnxruntime is in the
+Intel build for Wolof speech recognition); not switched on or tested on an Intel Mac.
+
 ## Not done yet
 
 - **W2**: the WinUI 3 shell is in `windows/HearChurch` (docs/windows-app.md). Still to come: an installer and updates (W3), signing.
@@ -137,13 +219,6 @@ A GitHub runner (4 vCPU, shared) is also not the church office PC; the W4 test o
   receiver's line-in, and how a USB receiver shows up, needs the office PC (W4).
 - **NVIDIA GPU**: detection and CPU fallback are in, but the CUDA libraries are not bundled; untested on real
   hardware (runners have no GPU).
-- **Wolof voice (speaking Wolof translations)**: not offered on Windows by default (like the Intel Mac). The
-  non-Apple default would be the MMS voice, whose licence is non-commercial; the Mac's SpeechT5 voice needs torch.
-  Before Wolof translation is offered on Windows (W5), decide: download torch with the voice as the Mac does, or
-  leave it out. Wolof as a *speaker* language works (the ONNX model above).
-- **Known test failure** `tests/test_languages.py::test_the_paid_mac_app_never_offers_the_non_commercial_wolof_voice`
-  fails on every non-Mac machine (Linux too: the default voices are chosen when `app.config` is imported, before
-  the test pretends to be a Mac). It is deselected in the Windows workflow; not a Windows problem.
 - Test-file playback (`--file`) needs ffmpeg on PATH; the shipped engine doesn't need it for live meetings.
 - First-run downloads come from Hugging Face without a token (the log warns about rate limits).
 - The exe is unsigned: SmartScreen will warn on the office PC until it is signed.
