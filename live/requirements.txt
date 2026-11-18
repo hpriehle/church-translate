@@ -1,0 +1,4 @@
+av>=14
+numpy>=1.26
+sounddevice>=0.5
+zeroconf>=0.130
