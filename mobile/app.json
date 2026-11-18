@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "Hear Church",
+    "slug": "hear-church",
+    "scheme": "hearchurch",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#000000",
+    "ios": {
+      "bundleIdentifier": "com.hearchurch.app",
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "NSLocalNetworkUsageDescription": "Hear Church finds the chapel's room audio on the church Wi-Fi and plays it to you.",
+        "NSBonjourServices": [
+          "_hearchurch-live._udp"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "appleTeamId": "5473W6M839"
+    },
+    "android": {
+      "package": "com.hearchurch.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#E8B95A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Hear Church uses your location once to list congregations near you. It isn't stored."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "backgroundColor": "#000000"
+        }
+      ],
+      "expo-localization"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}
