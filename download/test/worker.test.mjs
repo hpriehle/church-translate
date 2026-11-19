@@ -187,11 +187,20 @@ test("/api/windows-beta drops a honeypot hit without forwarding", async () => {
   assert.equal(sent.length, 0);
 });
 
-test("/api/windows-beta rejects a bad email or a missing phone", async () => {
+test("/api/windows-beta rejects a bad email or a short phone", async () => {
   assert.equal((await postBeta({ ...BETA, email: "ana-at-grace" })).res.status, 422);
-  const { res, sent } = await postBeta({ ...BETA, phone: "" });
+  const { res, sent } = await postBeta({ ...BETA, phone: "555-12" });
   assert.equal(res.status, 422);
   assert.equal(sent.length, 0);
+});
+
+test("/api/windows-beta forwards a request without a phone (hub keys it by email)", async () => {
+  const { res, sent } = await postBeta({ ...BETA, phone: "" });
+  assert.equal(res.status, 303);
+  assert.equal(sent.length, 1);
+  const lead = JSON.parse(sent[0].init.body);
+  assert.equal("phone" in lead, false);
+  assert.equal(lead.email, "ana@grace.org");
 });
 
 test("/api/windows-beta fails closed without HUB_INGEST_TOKEN or when the hub refuses", async () => {

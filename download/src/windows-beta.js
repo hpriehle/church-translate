@@ -3,7 +3,7 @@
 // with Authorization: Bearer HUB_INGEST_TOKEN (the secret /api/collect already uses). Honeypot hits are dropped
 // silently. Without the token, or if the hub refuses, the visitor is told to email us: a request is never
 // reported as sent when it wasn't.
-// The hub keys contacts by phone, so the phone is required: without it every request would share one thread.
+// The phone is optional: the hub keys phoneless form leads by email (hub 5abd753, LWE PR #134).
 const LIMITS = { name: 100, church: 120, phone: 20, email: 200, city: 60, languages: 200, windows: 20, message: 2000 };
 const DEFAULT_INGEST = "https://hub.clntacq.com/api/ingest/lead";
 
@@ -26,8 +26,8 @@ export async function windowsBeta(request, env) {
   for (const [k, max] of Object.entries(LIMITS)) f[k] = clean(form.get(k), max);
   f.message = String(form.get("message") ?? "").replace(/\r\n?/g, "\n").trim().slice(0, LIMITS.message);
   const digits = f.phone.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
-  if (!f.name || !f.church || digits.length !== 10 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) {
-    return text("Please go back and enter your name, your church, a 10-digit phone number and your email.", 422);
+  if (!f.name || !f.church || (digits && digits.length !== 10) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) {
+    return text("Please go back and enter your name, your church and your email (and a 10-digit phone number, if you add one).", 422);
   }
 
   const body = JSON.stringify({
@@ -36,7 +36,7 @@ export async function windowsBeta(request, env) {
     external_id: crypto.randomUUID(),
     name: f.name,
     email: f.email,
-    phone: `+1${digits}`,
+    ...(digits ? { phone: `+1${digits}` } : {}),
     city: f.city,
     service: "Windows app (beta)",
     message: [`Church: ${f.church}`, `Languages: ${f.languages || "-"}`, `Windows: ${f.windows || "not sure"}`, f.message]
