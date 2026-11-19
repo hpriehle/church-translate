@@ -141,8 +141,12 @@ class Hear:
         self.pair_ip = FailureLimiter(10, 15 * 60)       # wrong add-a-Mac codes per IP
         self.codes_cong = FailureLimiter(20, 3600)       # wrong codes (own key, free hours, % off) per congregation
         self.web_code_ip = FailureLimiter(10, 15 * 60)   # wrong e-mailed codes on hearchurch.com/start and /account
-        from . import payments
-        live.after_end = payments.after_meeting          # maybe an automatic top-up once a meeting ends
+        from . import payments, trial_emails
+
+        def after_end(cid: int) -> None:
+            payments.after_meeting(cid)                  # maybe an automatic top-up once a meeting ends
+            trial_emails.soon(cid)                       # maybe the trial's 75% or ended e-mail
+        live.after_end = after_end
         self.limits = {"live": RateLimiter(60, 60), "search": RateLimiter(60, 60), "location": RateLimiter(30, 3600),
                        "signup": RateLimiter(5, 3600), "email": RateLimiter(10, 3600),
                        "email_addr": RateLimiter(3, 3600), "claim": RateLimiter(1200, 3600),
@@ -187,6 +191,9 @@ def setup(settings) -> Hear:
              verify_email=cfg.verify_email)
     try:
         asyncio.get_running_loop().create_task(backfill_towns())
+        from . import trial_emails
+        if trial_emails.mode() != "off":
+            asyncio.get_running_loop().create_task(trial_emails.run_forever())
     except RuntimeError:   # no event loop (a plain script): skip
         pass
     return H
@@ -304,6 +311,8 @@ async def signup(request: Request, body: SignUp):
     pin_note = "" if lat is not None else " We could not find the building on the map: please place its pin."
     if not h.verify_email:  # no e-mail confirmation for now: the congregation is live-capable at once
         h.db.set_verified(cong["id"])
+        from . import trial_emails
+        trial_emails.soon(cong["id"])
         return {"ok": True, "slug": cong["slug"], "device_token": h.db.add_device(cong["id"], body.device_name),
                 "connect_code": h.db.new_connect_code(cong["id"]), "emails": h.db.emails(cong["id"]),
                 "congregation": _public(cong), "billing": billing_for(request, cong["billing"]), **located, **redeemed,
@@ -463,6 +472,8 @@ async def verify(request: Request, token: str = ""):
         return _page("Link expired", "This link is no longer valid. Ask the app for a new one.", 410)
     if row["purpose"] == "verify":
         h.db.set_verified(row["congregation_id"])
+        from . import trial_emails
+        trial_emails.soon(row["congregation_id"])
     return _page("Done", "Your e-mail is confirmed. Go back to the Hear Church app: it continues by itself.")
 
 

@@ -309,10 +309,9 @@ def test_auto_top_up_turns_off_on_a_late_failure(client, hear, fake, mail):
 def test_a_meeting_ending_starts_the_auto_top_up_check(hear, monkeypatch):
     seen = []
     monkeypatch.setattr(payments, "auto_topup", lambda cid: seen.append(cid) or asyncio.sleep(0))
-    assert hear.live.after_end is payments.after_meeting
 
     async def go():
-        payments.after_meeting(7)
+        hear.live.after_end(7)
         await asyncio.sleep(0)
     run(go())
     assert seen == [7]

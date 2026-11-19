@@ -13,3 +13,9 @@ def pytest_configure(config):
 def _no_free_trial_unless_asked(request, monkeypatch):
     if request.node.get_closest_marker("free_trial") is None:
         monkeypatch.setattr(db, "NEW_CONGREGATIONS_GET_TRIAL", False)
+
+
+@pytest.fixture(autouse=True)
+def _no_trial_emails(monkeypatch):
+    """Trial e-mails (app/hear/trial_emails.py) never go out from tests, whatever the shell has set."""
+    monkeypatch.delenv("HC_TRIAL_EMAILS", raising=False)

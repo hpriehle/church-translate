@@ -259,6 +259,8 @@ async def web_signup(request: Request, body: WebSignUp):
     cong, redeemed, located = made
     h.db.set_verified(cong["id"])
     log.info("%s signed up on the web", cong["slug"])
+    from . import trial_emails
+    trial_emails.soon(cong["id"])
     token, csrf = h.db.new_web_session(body.email, cong["id"])
     from . import payments
     return _set_session(JSONResponse({

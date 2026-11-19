@@ -240,6 +240,16 @@ CREATE TABLE IF NOT EXISTS device_logs (
     bytes INTEGER NOT NULL,
     lines TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS trial_emails (
+    congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+    kind TEXT NOT NULL,
+    sent_at REAL NOT NULL,
+    PRIMARY KEY (congregation_id, kind)
+);
+CREATE TABLE IF NOT EXISTS hub_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS device_logs_cong ON device_logs(congregation_id, received_at);
 CREATE INDEX IF NOT EXISTS device_logs_received ON device_logs(received_at);
 CREATE INDEX IF NOT EXISTS web_codes_email ON web_codes(email, purpose);
@@ -616,6 +626,34 @@ class Database:
 
     def set_verified(self, cid: int) -> None:
         self._x("UPDATE congregations SET email_verified = 1 WHERE id = ?", (cid,))
+
+    # ------------------------------------------------------------ trial e-mails (app/hear/trial_emails.py)
+    def setting(self, key: str, default: str | None = None) -> str | None:
+        """A hub-wide value (hub_settings), or the default once on first use (kept: INSERT OR IGNORE)."""
+        if default is not None:
+            self._x("INSERT OR IGNORE INTO hub_settings (key, value) VALUES (?, ?)", (key, default))
+        row = self._q("SELECT value FROM hub_settings WHERE key = ?", (key,))
+        return row[0]["value"] if row else None
+
+    def trial_email_congregations(self, since: float, cid: int | None = None) -> list[dict[str, Any]]:
+        """Congregations with the free trial made at `since` or later, newest first (one if cid)."""
+        rows = self._q("SELECT * FROM congregations WHERE free_trial = 1 AND created_at >= ?"
+                       + (" AND id = ?" if cid is not None else "") + " ORDER BY id DESC",
+                       (since, cid) if cid is not None else (since,))
+        return [_cong(r) for r in rows]
+
+    def trial_emails_sent(self, cid: int) -> dict[str, float]:
+        return {r["kind"]: r["sent_at"] for r in self._q("SELECT kind, sent_at FROM trial_emails"
+                                                         " WHERE congregation_id = ?", (cid,))}
+
+    def claim_trial_email(self, cid: int, kind: str) -> bool:
+        """Mark one e-mail as sent before sending it, so two checks at once can't both send it. False: already."""
+        return self._x("INSERT OR IGNORE INTO trial_emails (congregation_id, kind, sent_at) VALUES (?,?,?)",
+                       (cid, kind, time.time())).rowcount > 0
+
+    def unclaim_trial_email(self, cid: int, kind: str) -> None:
+        """The send failed: the next check tries again."""
+        self._x("DELETE FROM trial_emails WHERE congregation_id = ? AND kind = ?", (cid, kind))
 
     def set_location(self, cid: int, lat: float, lng: float, address: str | None = None, city: str = "") -> None:
         """city: the town at the pin (reverse geocoded); otherwise taken from the address, if it says."""

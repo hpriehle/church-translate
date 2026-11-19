@@ -14,6 +14,7 @@ docs/admin-api.md:
   POST /api/admin/devices/{id}/revoke          the device's token stops working; its meeting ends
   GET  /api/admin/congregations/{id}/health?since=&session=&limit=   the Macs' meeting health reports (30 days)
   GET  /api/admin/congregations/{id}/logs?since=&kind=&device=&limit=   the Macs' diagnostic logs (30 days)
+  GET  /api/admin/trial-emails   trial e-mails: mode, cutoff, per new congregation what was sent and what is due
   GET  /api/admin/logs/{ref}   one batch by the reference a church was shown after "Send logs to support"
 
 The ledger has no table of its own: top-ups and manual credits are `credits` rows, refunds are `refunds` rows (one per
@@ -509,3 +510,9 @@ async def admin_revoke_device(request: Request, did: int):
     d = h.db.device(did)
     log.info("device %d of congregation %d revoked", did, d["congregation_id"])
     return {"ok": True, "device": d}
+
+
+@router.get("/api/admin/trial-emails")
+async def admin_trial_emails(request: Request):
+    from . import trial_emails
+    return trial_emails.overview(_operator(request).db)

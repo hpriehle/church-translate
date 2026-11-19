@@ -79,17 +79,19 @@ class Resend:
     def configured(self) -> bool:
         return bool(self.key)
 
-    async def send(self, to: str, subject: str, text: str) -> bool:
+    async def send(self, to: str, subject: str, text: str, reply_to: str | None = None) -> bool:
         """One message to one address. True when Resend took it; failures are logged (status only) and False."""
         import httpx
 
         key = self.key
         if not key:
             return False
+        msg = {"from": self.sender, "to": [to], "subject": subject, "text": text}
+        if reply_to:
+            msg["reply_to"] = reply_to
         try:
             async with httpx.AsyncClient(timeout=15) as http:
-                r = await http.post(RESEND_URL, headers={"Authorization": f"Bearer {key}"},
-                                    json={"from": self.sender, "to": [to], "subject": subject, "text": text})
+                r = await http.post(RESEND_URL, headers={"Authorization": f"Bearer {key}"}, json=msg)
         except Exception as e:
             log.warning("resend: no answer (%s)", type(e).__name__)
             return False
