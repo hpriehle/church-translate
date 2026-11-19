@@ -16,3 +16,7 @@ export const LANGUAGES = [
 
 const names = LANGUAGES.map((l) => l.name);
 export const LANGUAGE_LIST = `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+// What the speaker may talk in: every listener language except Wolof, whose speech models aren't published yet.
+const spoken = names.filter((n) => n !== "Wolof");
+export const SPEAKER_LIST = `${spoken.slice(0, -1).join(", ")} or ${spoken.at(-1)}`;

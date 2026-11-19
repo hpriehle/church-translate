@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import { LANGUAGE_LIST } from "../languages.js";
+import { LANGUAGE_LIST, SPEAKER_LIST } from "../languages.js";
 
 const faq = [
   ["Who should approve using it?",
@@ -10,7 +10,7 @@ const faq = [
   ["Does it translate the hymns?",
    "It skips music. When a hymn is announced, it uses the title from the hymnbook in the listener's language."],
   ["What about speakers who don't speak English?",
-   "The person at the Mac switches the speaker's language to French, Spanish or Russian. Hear Church then adds an English translation, and members who share that language are told to listen in the room."],
+   "The person at the Mac switches the speaker's language to the one they speak. Speakers can use " + SPEAKER_LIST + ". Hear Church then adds an English translation, and members who share that language are told to listen in the room."],
 ];
 
 const schema = {
@@ -49,10 +49,10 @@ const schema = {
 
       <h2>Languages members can choose</h2>
       <p>{LANGUAGE_LIST}.</p>
-      <p class="quiet">Speakers can talk in English, French, Spanish or Russian. The others are for listening.</p>
+      <p class="quiet">Speakers can talk in {SPEAKER_LIST}. Wolof is for listening.</p>
 
       <h2>Setting it up for your unit</h2>
-      <p>A ward clerk, a member of the bishopric or a tech-minded member can set it up in about 5 minutes on a Mac with Apple silicon. Print the QR code for the chapel doors or the bulletin, and members can also find your congregation at <a href="/listen">hearchurch.com/listen</a>. The <a href="/blog/sacrament-meeting-translation">sacrament meeting guide</a> walks through the first Sunday.</p>
+      <p>A ward clerk, a member of the bishopric or a tech-minded member can set it up in about 5 minutes on a Mac with Apple silicon or an Intel chip. Print the QR code for the chapel doors or the bulletin, and members can also find your congregation at <a href="/listen">hearchurch.com/listen</a>. The <a href="/blog/sacrament-meeting-translation">sacrament meeting guide</a> walks through the first Sunday.</p>
 
       <h2>Questions</h2>
       <dl class="faq">

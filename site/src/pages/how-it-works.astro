@@ -1,13 +1,14 @@
 ---
 import Base from "../layouts/Base.astro";
 import Demo from "../components/Demo.astro";
+import { SPEAKER_LIST } from "../languages.js";
 
 const schema = {
   "@context": "https://schema.org",
   "@type": "HowTo",
   name: "How to translate a church service live with Hear Church",
   step: [
-    { "@type": "HowToStep", name: "Set up the Mac", text: "Install Hear Church on a Mac with Apple silicon, enter your congregation and choose its languages." },
+    { "@type": "HowToStep", name: "Set up the Mac", text: "Install Hear Church on a Mac (Apple silicon or Intel), enter your congregation and choose its languages." },
     { "@type": "HowToStep", name: "Connect the sound", text: "Use the Mac's microphone or a cable from the sound system, and check that the Mac hears the speaker." },
     { "@type": "HowToStep", name: "Start the meeting", text: "Press Start meeting. Listeners scan the QR code or open the congregation's link on their phones." },
   ],
@@ -29,7 +30,7 @@ const schema = {
     <div class="cols">
       <div>
         <h3>The Mac</h3>
-        <p class="quiet">Any Mac with Apple silicon and macOS 14 or newer. Setup takes about 5 minutes: your congregation, when you meet, and the languages people need.</p>
+        <p class="quiet">Any Mac with macOS 14 or newer, Apple silicon or Intel. Windows is coming soon. Setup takes about 5 minutes: your congregation, when you meet, and the languages people need.</p>
         <ul>
           <li>Hears the speaker through its microphone or a cable from the sound system</li>
           <li>Turns speech into text on the Mac itself</li>
@@ -40,7 +41,7 @@ const schema = {
         <h3>The speaker</h3>
         <p class="quiet">Nothing changes at the pulpit. Speak as usual.</p>
         <ul>
-          <li>English, French, Spanish or Russian</li>
+          <li>{SPEAKER_LIST}</li>
           <li>The person at the Mac switches the language when a speaker changes</li>
           <li>Music is skipped, so hymns don't fill phones with noise</li>
         </ul>
