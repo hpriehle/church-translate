@@ -575,9 +575,14 @@ class Database:
                             meeting_times: list | None = None, timezone: str = "", city: str = "",
                             free_trial: bool | None = None) -> dict[str, Any]:
         """A new congregation, billed with credits; free_trial: it gets the free trial (None: as
-        NEW_CONGREGATIONS_GET_TRIAL says, which is yes)."""
+        NEW_CONGREGATIONS_GET_TRIAL says, which is yes, except for the same church and name signing up again with the
+        same e-mail: one trial per congregation, decided Nov 19; another name, e.g. a second ward, still gets one)."""
         if free_trial is None:
-            free_trial = NEW_CONGREGATIONS_GET_TRIAL
+            same = (church.strip().casefold(), name.strip().casefold())
+            free_trial = NEW_CONGREGATIONS_GET_TRIAL and not any(
+                (r["church"].strip().casefold(), r["name"].strip().casefold()) == same for r in self._q(
+                    "SELECT c.church, c.name FROM congregations c JOIN congregation_emails e ON e.congregation_id = c.id"
+                    " WHERE e.email = ?", (email.strip().lower(),)))
         for _ in range(5):  # two sign-ups with the same name at once: retry with the next free slug
             slug = self.unique_slug(name)
             try:
