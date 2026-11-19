@@ -3,6 +3,7 @@
 // hub's own pages, like /start and /account), so no congregation can take it.
 export const NAV = [
   { href: "/how-it-works", label: "How it works" },
+  { href: "/setup", label: "Setup" },
   { href: "/pricing", label: "Pricing" },
   { href: "/blog", label: "Blog" },
   { href: "/account", label: "Sign in" },
@@ -14,6 +15,7 @@ export const CTA = { href: "/start", label: "Get started" };
 export const FOOTER = [
   { href: "/", label: "Hear Church" },
   { href: "/how-it-works", label: "How it works" },
+  { href: "/setup", label: "Setup guide" },
   { href: "/pricing", label: "Pricing" },
   { href: "/blog", label: "Blog" },
   { href: "/lds", label: "For Latter-day Saint wards" },

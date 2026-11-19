@@ -1,0 +1,142 @@
+---
+// /setup: the guide for a church arriving from our email, from download to the first Sunday.
+// Every step and message here matches the Mac app (mac/HearChurch/Sources: OnboardingView, MainView, AppModel
+// preflight, LanguageSelector, SettingsView Glossary) and the trial wording on pricing.astro. Change them together.
+import Base from "../layouts/Base.astro";
+
+const faq = [
+  ["What does it cost after the free trial?",
+   "Every new church starts with 14 days free, up to 20 language-hours. After that, one free language-hour each month, then prepaid hours from $5 per language-hour. Bundles run from $20 for 4 hours to $250 for 70 hours. Hours never expire, there is no monthly plan, and you can get unused hours refunded. Silence isn't counted, and listeners pay nothing."],
+  ["How accurate is it?",
+   "It is machine translation, so it will make mistakes, most often with names. Add your congregation's names under Settings, Glossary, and they come through as written."],
+  ["What about Bible verses?",
+   "When an English speaker names a verse, like “John 3:16”, Hear Church uses published wording where it has a Bible for that language: the Reina-Valera 1909 in Spanish, the Chinese Union Version in Chinese and the Vietnamese Bible 1923 in Vietnamese, among others. In other languages the verse is translated like the rest of the sermon."],
+  ["What is recorded, and who sees it?",
+   "The sound never leaves your Mac: speech is turned into text on the Mac itself. Only the text is sent out to be translated. Our server passes captions and voice to listeners while the meeting is live and doesn't save them. The Mac keeps a log of each meeting, with the transcript and its translations, and you can delete it. The privacy policy has the details."],
+  ["Which languages?",
+   "Listeners can choose Spanish, Vietnamese, Chinese, Portuguese, Ukrainian, French, Russian, Persian, Nepali, Wolof or English. You turn on the ones your members need. If yours isn't there, email us and tell us which."],
+  ["How many people can listen?",
+   "As many as you have. There is no limit on listeners, and they never pay. They need a phone with a web browser, and headphones help."],
+  ["Do we need internet?",
+   "Yes. The Mac needs internet to translate and to reach your listeners, and listeners use your church Wi-Fi or their own data. If the connection drops, phones reconnect by themselves when it's back."],
+  ["Our Mac is older, or has an Intel chip. Will it work?",
+   "It needs macOS 14 or newer. There is a version for Intel Macs, but an Intel Mac is slower at turning speech into text, so the translation runs further behind the speaker and some sentences can be missed. A Mac with Apple silicon gives the best results."],
+  ["We're Catholic. Does it work for Mass?",
+   "Yes. A homily, readings, prayers and announcements are translated the same way as any sermon. Choose Catholic when you sign up. Music is skipped, so hymns don't fill phones with noise."],
+  ["Is there a Windows version?",
+   "Windows version coming soon."],
+];
+
+const schema = [
+  {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "How to set up Hear Church for Sunday",
+    step: [
+      { "@type": "HowToStep", name: "Download the app", text: "Download Hear Church on the Mac you'll use at church." },
+      { "@type": "HowToStep", name: "Sign up", text: "Sign up your church on hearchurch.com/start, then sign in on the Mac with the same email." },
+      { "@type": "HowToStep", name: "Connect the sound", text: "Run a cable from the sound board to the Mac and choose it under Sound, Input." },
+      { "@type": "HowToStep", name: "Pick languages", text: "Choose the speaker's language and the languages your members need." },
+      { "@type": "HowToStep", name: "Press Start meeting", text: "Press Start meeting. The Mac checks the sound, power and internet first." },
+      { "@type": "HowToStep", name: "Share the QR code", text: "Print a sign, or put the QR code on a slide or in the bulletin." },
+      { "@type": "HowToStep", name: "Members listen", text: "Members scan the code, pick a language and listen on their phones." },
+    ],
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faq.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+  },
+];
+---
+<Base
+  title="Set Up Live Church Translation for Sunday | Hear Church"
+  description="A step-by-step guide for the pastor or sound volunteer: download the Mac app, connect the sound board, pick languages, press Start and share the QR code."
+  schema={schema}>
+
+  <section class="wrap head">
+    <h1>Set it up for Sunday</h1>
+    <p class="lede">A guide for the pastor or the sound volunteer. It takes about 5 minutes on a Mac, and you can do it all yourself. Every new church starts with 14 days free, up to 20 language-hours, no card.</p>
+  </section>
+
+  <section class="wrap band" aria-labelledby="steps-h">
+    <h2 id="steps-h">Seven steps</h2>
+    <ol class="steps guide">
+      <li><b>Download the app</b>
+        <span>On the Mac you'll use at church (macOS 14 or newer): <a href="/download/HearChurch.dmg" data-cta="download">Mac with Apple silicon</a> or <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Intel Mac</a>.
+          Not sure which? Open the Apple menu and choose About This Mac. If it lists a Chip, it's Apple silicon. If it lists a Processor, it's Intel.
+          Windows version coming soon.</span></li>
+      <li><b>Sign up your church</b>
+        <span><a href="/start">Sign up on hearchurch.com</a> with your church's name, when you meet and an email. 14 days free to start, up to 20 language-hours, no card. Then open the app and choose Sign in with your email.</span></li>
+      <li><b>Connect the sound board</b>
+        <span>A cable from the sound board gives much cleaner sound than the Mac's microphone. Common ways to get it there: a USB audio interface fed from the board, a cable into the Mac's audio jack, or the receiver of your hearing-assist system. In the app, choose it under Sound, Input, and watch the level meter move when someone talks.</span></li>
+      <li><b>Pick languages</b>
+        <span>Under “Select speaker language”, choose the language from the pulpit, usually English. Under “Select translation language”, turn on the languages your members need, like Spanish or Vietnamese. You can change both during the meeting.</span></li>
+      <li><b>Press Start meeting</b>
+        <span>The Mac checks the sound, its power and the internet first. Anything marked in red tells you what to fix. Keep the lid open and the Mac plugged in until the meeting ends.</span></li>
+      <li><b>Share the QR code</b>
+        <span>The app shows your QR code and link under Listeners. Press Print a sign for a sign in each language, or put the code on a slide or in the bulletin. Your link stays the same every week.</span></li>
+      <li><b>Members scan and listen</b>
+        <span>They scan the code with their phone camera, pick their language and put in headphones. Captions and a voice follow a few seconds behind the speaker. Nothing to install, no account, and no limit on how many listen.</span></li>
+    </ol>
+    <div class="ctas">
+      <a class="get" href="/start">Start your free trial</a>
+      <a class="second" href="/download">Download for Mac</a>
+    </div>
+  </section>
+
+  <section class="wrap band split">
+    <div>
+      <h2>Before Sunday: a 5-minute test</h2>
+      <ol class="check">
+        <li>Plug the Mac into power and connect it to the church Wi-Fi.</li>
+        <li>Connect the cable from the sound board and choose it under Sound, Input.</li>
+        <li>Press Start meeting. Everything in the checklist should be green.</li>
+        <li>Scan the QR code with your own phone, pick a language and put in headphones.</li>
+        <li>Press Play a test sentence. Your phone should say a short sentence in its language.</li>
+        <li>Have someone speak at the pulpit, and check the captions on your phone.</li>
+        <li>Press Stop meeting.</li>
+      </ol>
+      <p class="quiet">Your 14 free days start with your first translated meeting, and a test with a phone listening counts. So test in the week you plan to start.</p>
+    </div>
+    <div>
+      <h2>If something goes wrong</h2>
+      <h3>No sound</h3>
+      <p class="quiet">Check that the pulpit microphone is on at the board and the output to the Mac is turned up. Under Sound, check the Input is your cable, not “(not connected)”, and raise the Gain if the meter barely moves. If a cable comes loose mid-meeting, the app warns you, and translation resumes when it's plugged back in.</p>
+      <h3>The translation lags</h3>
+      <p class="quiet">The app shows how many seconds the voices are behind the speaker, and they speed up to catch up. Clean sound from the board, power and a steady internet connection keep it close. An Intel Mac runs further behind.</p>
+      <h3>The wrong language</h3>
+      <p class="quiet">If a speaker switches language, turn that language on under “Select speaker language”. When the app hears a new language twice in a row, it adds it and offers Undo. A listener hearing the wrong language can pick theirs again on their phone.</p>
+      <h3>Names come out wrong</h3>
+      <p class="quiet">Add them under Settings, Glossary. They come through as written.</p>
+      <p class="quiet">Still stuck? Email <a href="mailto:support@hearchurch.com">support@hearchurch.com</a>.</p>
+    </div>
+  </section>
+
+  <section class="wrap band" aria-labelledby="faq-h">
+    <h2 id="faq-h">Questions pastors ask</h2>
+    <dl class="faq">
+      {faq.map(([q, a]) => <><dt>{q}</dt><dd>{a}</dd></>)}
+    </dl>
+    <p class="quiet more">More on cost on the <a href="/pricing">pricing page</a>, and on what is stored in the <a href="/privacy">privacy policy</a>.</p>
+    <div class="ctas">
+      <a class="get" href="/start">Start your free trial</a>
+      <a class="second" href="/how-it-works">See how it works</a>
+    </div>
+  </section>
+</Base>
+
+<style>
+.head { padding-top: clamp(1.25rem, 4vh, 2.5rem); padding-bottom: clamp(2.5rem, 6vh, 4rem); }
+.head .lede { max-width: 40rem; margin: 0; }
+@media (min-width: 48rem) { ol.steps.guide { grid-template-columns: repeat(2, 1fr); } }
+.guide ~ .ctas { margin-top: 2.5rem; }
+.split { display: grid; gap: 2.5rem clamp(2rem, 5vw, 4rem); }
+@media (min-width: 48rem) { .split { grid-template-columns: 1fr 1fr; } }
+.split h3 { margin-top: 1.4rem; }
+.split h3:first-of-type { margin-top: 0; }
+.split p { margin: 0 0 .6rem; }
+.check { padding-left: 1.4rem; margin: 0 0 1.25rem; }
+.check li { margin-bottom: .55rem; }
+.more { margin: 2rem 0 0; }
+</style>

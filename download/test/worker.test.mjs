@@ -68,7 +68,8 @@ test("/source/<file> serves the archive; unknown names are 404", async () => {
 
 test("the Worker's own pages and the site pages still route", async () => {
   for (const path of ["/terms", "/privacy", "/credits", "/sitemap.xml"]) assert.equal((await get(path)).status, 200, path);
-  for (const path of ["/", "/pricing", "/download"]) assert.equal(await (await get(path)).text(), `site ${path}`, path);
+  for (const path of ["/", "/pricing", "/setup", "/download"]) assert.equal(await (await get(path)).text(), `site ${path}`, path);
+  assert.match(await (await get("/sitemap.xml")).text(), /hearchurch.com\/setup</);
 });
 
 test("/download/windows/<channel>/ serves the Velopack feed, packages and installer", async () => {
