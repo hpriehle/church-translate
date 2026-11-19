@@ -25,7 +25,7 @@ const faq = [
   ["We're Catholic. Does it work for Mass?",
    "Yes. A homily, readings, prayers and announcements are translated the same way as any sermon. Choose Catholic when you sign up. Music is skipped, so hymns don't fill phones with noise."],
   ["What computer does it need?",
-   "A Mac with macOS 14 or newer (Apple silicon or Intel), or a Windows 10 (version 1809 or newer) or Windows 11 PC, 64-bit. No graphics card needed. The Windows version isn't signed yet, so Windows may say “Windows protected your PC” when you open the installer: click More info, then Run anyway."],
+   "A Mac with macOS 14 or newer (Apple silicon or Intel), or a Windows 10 (version 1809 or newer) or Windows 11 PC, 64-bit. No graphics card needed. The Windows app is in beta: request it at hearchurch.com/download and we'll send you the download and help you set it up."],
 ];
 
 const schema = [
@@ -34,7 +34,7 @@ const schema = [
     "@type": "HowTo",
     name: "How to set up Hear Church for Sunday",
     step: [
-      { "@type": "HowToStep", name: "Download the app", text: "Download Hear Church on the Mac or Windows PC you'll use at church." },
+      { "@type": "HowToStep", name: "Download the app", text: "Download Hear Church on the Mac you'll use at church. For a Windows PC, request the Windows app (beta) at hearchurch.com/download." },
       { "@type": "HowToStep", name: "Sign up", text: "Sign up your church on hearchurch.com/start, then sign in in the app with the same email." },
       { "@type": "HowToStep", name: "Connect the sound", text: "Run a cable from the sound board to the computer and choose it under Sound, Input." },
       { "@type": "HowToStep", name: "Pick languages", text: "Choose the speaker's language and the languages your members need." },
@@ -66,8 +66,8 @@ const schema = [
       <li><b>Download the app</b>
         <span>On the Mac you'll use at church (macOS 14 or newer): <a href="/download/HearChurch.dmg" data-cta="download">Mac with Apple silicon</a> or <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Intel Mac</a>.
           Not sure which? Open the Apple menu and choose About This Mac. If it lists a Chip, it's Apple silicon. If it lists a Processor, it's Intel.
-          Or on a Windows PC (Windows 10 version 1809 or newer, or Windows 11, 64-bit, no graphics card needed): <a href="/download/HearChurch-Setup.exe" data-cta="download-windows">Windows version</a>.
-          It isn't signed yet, so Windows may say “Windows protected your PC”: click More info, then Run anyway.</span></li>
+          Or on a Windows PC (Windows 10 version 1809 or newer, or Windows 11, 64-bit, no graphics card needed): the Windows app is in beta,
+          so <a href="/download#windows-beta" data-cta="windows-beta">request the Windows app (beta)</a> and we'll send you the download and help you set it up.</span></li>
       <li><b>Sign up your church</b>
         <span><a href="/start">Sign up on hearchurch.com</a> with your church's name, when you meet and an email. 14 days free to start, up to 20 language-hours, no card. Then open the app and choose Sign in with your email.</span></li>
       <li><b>Connect the sound board</b>

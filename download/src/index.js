@@ -5,7 +5,9 @@
 //   /download/<file>           a versioned DMG, Sparkle delta or the Wolof libraries from R2
 //   /appcast.xml               Sparkle's update feed
 //   /download/HearChurch-Intel.dmg, /appcast-intel.xml   the same for Intel Macs (separate build and feed)
-//   /download/HearChurch-Setup.exe  always the newest public Windows installer (R2 windows/public/); counted like the DMG
+//   /download/HearChurch-Setup.exe  always the newest public Windows installer (R2 windows/public/); counted like the DMG.
+//                              No page links it while Windows is in beta: we email it to churches that ask.
+//   /api/windows-beta          the "Request the Windows app (beta)" form, forwarded to the hub's inbox (windows-beta.js)
 //   /download/windows/<channel>/<file>  the Windows app's Velopack feeds, packages and installers
 //   /privacy, /terms, /credits  the legal pages
 //   /source, /source/<file>    the source code of the app's GPL/LGPL parts, per version (R2 source/*, from mac/release.sh)
@@ -28,6 +30,7 @@ import ALEGREYA from "./fonts/alegreya.woff2";
 import ALEGREYA_SANS_400 from "./fonts/alegreya-sans-400.woff2";
 import ALEGREYA_SANS_700 from "./fonts/alegreya-sans-700.woff2";
 import { isPageView, point } from "./edge-log.js";
+import { windowsBeta } from "./windows-beta.js";
 
 // The page's own files, served from here so a visit sends nothing to a font or image host.
 const ASSETS = {
@@ -72,6 +75,11 @@ const site = {
       return request.method === "POST"
         ? collectPost({ request, env, waitUntil: (p) => ctx.waitUntil(p) })
         : collectOther();
+    }
+    if (url.pathname === "/api/windows-beta") {
+      return request.method === "POST"
+        ? windowsBeta(request, env)
+        : new Response("Method not allowed", { status: 405, headers: { allow: "POST" } });
     }
     const path = url.pathname.replace(/\/+$/, "");
     // A route like hearchurch.com/lds* also matches a congregation's /lds-harlem: anything that isn't ours goes on

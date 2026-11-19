@@ -151,3 +151,54 @@ test("/download/HearChurch-Setup.exe is a 404 before a public release, and count
   assert.equal((await other.fetchIt("/download/HearChurch-Setup.exe")).status, 200);
   assert.deepEqual(other.counted, ["unknown-windows"]);
 });
+
+// The Windows beta request form: forwarded to the hub's inbox, never reported as sent when it wasn't.
+async function postBeta(fields, envExtra = { HUB_INGEST_TOKEN: "tok" }, hubStatus = 200) {
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { sent.push({ url: String(url), init }); return new Response("{}", { status: hubStatus }); };
+  try {
+    const res = await worker.fetch(new Request("https://hearchurch.com/api/windows-beta",
+      { method: "POST", body: new URLSearchParams(fields) }), { ...env, ...envExtra }, ctx);
+    return { res, sent };
+  } finally { globalThis.fetch = realFetch; }
+}
+const BETA = { name: "Ana Diaz", church: "Grace Chapel", phone: "(555) 201-3344", email: "ana@grace.org",
+  city: "Provo, UT", languages: "Spanish, Tongan", windows: "11", message: "Sundays at 10", website: "" };
+
+test("/api/windows-beta forwards a valid request to the hub and thanks the visitor", async () => {
+  const { res, sent } = await postBeta(BETA);
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("location"), "https://hearchurch.com/download?requested#windows-beta");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, "https://hub.clntacq.com/api/ingest/lead");
+  assert.equal(sent[0].init.headers.authorization, "Bearer tok");
+  const lead = JSON.parse(sent[0].init.body);
+  assert.equal(lead.site, "hearchurch");
+  assert.equal(lead.form, "windows-beta");
+  assert.equal(lead.phone, "+15552013344");
+  assert.equal(lead.email, "ana@grace.org");
+  assert.match(lead.message, /Church: Grace Chapel\nLanguages: Spanish, Tongan\nWindows: 11\nSundays at 10/);
+});
+
+test("/api/windows-beta drops a honeypot hit without forwarding", async () => {
+  const { res, sent } = await postBeta({ ...BETA, website: "http://spam.example" });
+  assert.equal(res.status, 303);
+  assert.equal(sent.length, 0);
+});
+
+test("/api/windows-beta rejects a bad email or a missing phone", async () => {
+  assert.equal((await postBeta({ ...BETA, email: "ana-at-grace" })).res.status, 422);
+  const { res, sent } = await postBeta({ ...BETA, phone: "" });
+  assert.equal(res.status, 422);
+  assert.equal(sent.length, 0);
+});
+
+test("/api/windows-beta fails closed without HUB_INGEST_TOKEN or when the hub refuses", async () => {
+  const noToken = await postBeta(BETA, {});
+  assert.equal(noToken.res.status, 503);
+  assert.equal(noToken.sent.length, 0);
+  assert.match(await noToken.res.text(), /support@hearchurch.com/);
+  assert.equal((await postBeta(BETA, undefined, 400)).res.status, 502);
+  assert.equal((await worker.fetch(new Request("https://hearchurch.com/api/windows-beta"), env, ctx)).status, 405);
+});

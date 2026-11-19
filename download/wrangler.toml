@@ -24,6 +24,8 @@ routes = [
   { pattern = "hearchurch.com/b8a8b0718483acd04cef33be1f6d395c.txt", zone_name = "hearchurch.com" },
   # Siteboard analytics, loaded only by the /download page. Nothing on the listener pages uses these.
   { pattern = "hearchurch.com/api/collect", zone_name = "hearchurch.com" },
+  # The Windows beta request form on /download (src/windows-beta.js; needs the HUB_INGEST_TOKEN secret).
+  { pattern = "hearchurch.com/api/windows-beta", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/rr.js", zone_name = "hearchurch.com" },
   { pattern = "hearchurch.com/rrweb.min.js", zone_name = "hearchurch.com" },
   # The marketing site (site/). The Worker hands anything that isn't one of its pages on to the VPS.

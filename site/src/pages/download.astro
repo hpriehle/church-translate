@@ -1,6 +1,7 @@
 ---
-// The download page. On a Mac it checks which chip it has and offers that build; on a Windows PC, the Windows
-// installer. The other builds are linked below.
+// The download page. On a Mac it checks which chip it has and offers that build; on a Windows PC, the form to
+// request the Windows app, which is in beta (we email the installer link, /download/HearChurch-Setup.exe, to churches
+// that ask; download/src/windows-beta.js). The other builds are linked below.
 import Base from "../layouts/Base.astro";
 ---
 <Base
@@ -18,14 +19,33 @@ import Base from "../layouts/Base.astro";
       <p class="other" data-other="intel" hidden>Have a Mac with Apple silicon? <a href="/download/HearChurch.dmg" data-cta="download">Download that version</a></p>
       <p class="other" data-unsure hidden>Not sure which you have? Open the Apple menu and choose About This Mac.
         If it lists a Chip, your Mac has Apple silicon. If it lists a Processor, it's an Intel Mac.</p>
-      <p class="other" data-other="win">Using a Windows PC? <a href="/download/HearChurch-Setup.exe" data-cta="download-windows">Download the Windows version</a> (Windows 10
-        version 1809 or newer, or Windows 11, on a 64-bit PC)</p>
+      <p class="other" data-other="win">Using a Windows PC? <a href="#windows-beta" data-cta="windows-beta">Request the Windows app (beta)</a></p>
       <p class="other" data-other="mac" hidden>Using a Mac? Download the <a href="/download/HearChurch.dmg" data-cta="download">Apple silicon version</a> or the <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Intel version</a></p>
-      <p class="other" data-win-notes hidden>The Windows version needs Windows 10 (version 1809 or newer) or Windows 11
-        on a 64-bit (x64) PC. No graphics card needed.</p>
-      <p class="other" data-win-notes hidden>It isn't signed yet, so when you open the installer Windows may say
-        "Windows protected your PC". Click More info, then Run anyway.</p>
     </div>
+  </section>
+
+  <section class="beta wrap" id="windows-beta" aria-labelledby="beta-h" data-beta>
+    <h2 id="beta-h">Request the Windows app (beta)</h2>
+    <div data-ask>
+      <p>The Windows app is in beta. Tell us about your church and we'll send you the download and help you set it up.
+        It needs Windows 10 (version 1809 or newer) or Windows 11 on a 64-bit PC. No graphics card needed.</p>
+      <form method="post" action="/api/windows-beta">
+        <label>Your name <input name="name" autocomplete="name" maxlength="100" required></label>
+        <label>Church <input name="church" autocomplete="organization" maxlength="120" required></label>
+        <label>Email <input name="email" type="email" autocomplete="email" maxlength="200" required></label>
+        <label>Church or your phone <input name="phone" type="tel" autocomplete="tel" maxlength="20" required></label>
+        <label>City and state <input name="city" autocomplete="address-level2" maxlength="60"></label>
+        <label>Languages your members need <input name="languages" maxlength="200" placeholder="For example Spanish, Tongan"></label>
+        <label>Windows version (optional)
+          <select name="windows"><option value="">Not sure</option><option>11</option><option>10</option></select></label>
+        <label>Anything else <textarea name="message" rows="3" maxlength="2000"></textarea></label>
+        <!-- Spam guard: hidden from people, filled in by bots. -->
+        <label class="trap" aria-hidden="true">Website <input name="website" tabindex="-1" autocomplete="off"></label>
+        <button class="get" type="submit" data-cta="windows-beta-send">Request the Windows app</button>
+      </form>
+    </div>
+    <p class="found" data-thanks hidden>Thank you. We got your request and will email you the download and help you
+      set it up.</p>
   </section>
 </Base>
 
@@ -60,13 +80,10 @@ import Base from "../layouts/Base.astro";
     found.textContent = "Hear Church runs on a Mac or a Windows PC. Open this page on the computer you'll use at church to download it.";
   } else if (/Windows NT/.test(ua)) {
     document.documentElement.dataset.os = "windows";
-    found.textContent = "This is a Windows PC, so this is the version you need.";
-    get.href = "/download/HearChurch-Setup.exe";
-    get.dataset.cta = "download-windows";
-    get.textContent = "Download for Windows";
+    found.textContent = "This is a Windows PC. The Windows app is in beta: fill in the form below and we'll send it to you.";
+    get.hidden = true;
     for (const p of box.querySelectorAll<HTMLElement>("[data-other], [data-unsure]")) p.hidden = true;
     $('[data-other="mac"]').hidden = false;
-    for (const p of box.querySelectorAll<HTMLElement>("[data-win-notes]")) p.hidden = false;
   } else {
     whichMac().then((chip) => {
       document.documentElement.dataset.mac = chip || "unknown";
@@ -84,6 +101,21 @@ import Base from "../layouts/Base.astro";
         $("[data-unsure]").hidden = false;
       }
     });
+  }
+</script>
+
+<script>
+  // The request form shows for Windows PCs and for anyone sent to #windows-beta; a Mac visitor sees only the download.
+  const beta = document.querySelector<HTMLElement>("[data-beta]")!;
+  const requested = new URLSearchParams(location.search).has("requested");
+  const showBeta = () => {
+    beta.hidden = !(requested || location.hash === "#windows-beta" || /Windows NT/.test(navigator.userAgent));
+  };
+  showBeta();
+  addEventListener("hashchange", showBeta);
+  if (requested) {
+    beta.querySelector<HTMLElement>("[data-ask]")!.hidden = true;
+    beta.querySelector<HTMLElement>("[data-thanks]")!.hidden = false;
   }
 </script>
 
@@ -105,6 +137,15 @@ import Base from "../layouts/Base.astro";
 .found { font-size: 1.25rem; margin: 0 0 1.75rem; max-width: 30rem; text-wrap: pretty; }
 .other { color: var(--quiet); font-size: 1rem; margin: 1rem 0 0; max-width: 30rem; text-wrap: pretty; }
 .other[hidden] { display: none; }
+
+/* The Windows beta request form. */
+.beta { max-width: 40rem; padding-bottom: clamp(3rem, 10vh, 6rem); }
+.beta[hidden], .beta [hidden], .get[hidden] { display: none; }
+.beta form { display: grid; gap: 1rem; margin-top: 1.5rem; }
+.beta label { display: grid; gap: .3rem; font-weight: 700; }
+.beta input, .beta select, .beta textarea { font: inherit; font-weight: 400; padding: .55rem .7rem; border: 1px solid var(--quiet); border-radius: .4rem; }
+.beta button { justify-self: start; border: 0; cursor: pointer; font: inherit; }
+.beta .trap { position: absolute; left: -100vw; }
 
 /* The app icon, the way it sits in the Dock. */
 .icon { width: clamp(11rem, 24vw, 16rem); height: auto; margin: 0 -.5rem; filter: drop-shadow(0 1.1rem 1.6rem rgb(0 0 0 / .32)); }
