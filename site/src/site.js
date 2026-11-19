@@ -21,6 +21,6 @@ export const FOOTER = [
   { href: "/lds", label: "For Latter-day Saint wards" },
   { href: "/start", label: "Get started" },
   { href: "/account", label: "Sign in" },
-  { href: "/download", label: "Download for Mac" },
+  { href: "/download", label: "Download for Mac or Windows" },
   { href: "/listen", label: "Find your congregation" },
 ];

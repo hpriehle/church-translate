@@ -1,22 +1,30 @@
 ---
-// The download page. It checks which chip this Mac has, offers that build, and the other one below.
+// The download page. On a Mac it checks which chip it has and offers that build; on a Windows PC, the Windows
+// installer. The other builds are linked below.
 import Base from "../layouts/Base.astro";
 ---
 <Base
-  title="Download Hear Church for Mac | Hear Church"
-  description="Download Hear Church, the free Mac app that translates your church meeting live. For Macs with Apple silicon or Intel.">
+  title="Download Hear Church for Mac and Windows | Hear Church"
+  description="Download Hear Church, the free app that translates your church meeting live. For Macs with Apple silicon or Intel, and Windows 10 and 11 PCs.">
 
   <section class="dl wrap" data-dl>
     <img class="icon" src="/download/icon.png" width="1024" height="1024" alt="The Hear Church app icon: a pulpit with a microphone and a sound wave on it">
 
     <div class="copy">
       <h1>Download Hear Church</h1>
-      <p class="found" data-found aria-live="polite">The free Mac app that translates your church meeting live.</p>
+      <p class="found" data-found aria-live="polite">The free app that translates your church meeting live, for Mac and Windows.</p>
       <a class="get" href="/download/HearChurch.dmg" data-cta="download" data-get>Download for Mac with Apple silicon</a>
       <p class="other" data-other="arm">Have an Intel Mac? <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Download the Intel version</a></p>
       <p class="other" data-other="intel" hidden>Have a Mac with Apple silicon? <a href="/download/HearChurch.dmg" data-cta="download">Download that version</a></p>
       <p class="other" data-unsure hidden>Not sure which you have? Open the Apple menu and choose About This Mac.
         If it lists a Chip, your Mac has Apple silicon. If it lists a Processor, it's an Intel Mac.</p>
+      <p class="other" data-other="win">Using a Windows PC? <a href="/download/HearChurch-Setup.exe" data-cta="download-windows">Download the Windows version</a> (Windows 10
+        version 1809 or newer, or Windows 11, on a 64-bit PC)</p>
+      <p class="other" data-other="mac" hidden>Using a Mac? Download the <a href="/download/HearChurch.dmg" data-cta="download">Apple silicon version</a> or the <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Intel version</a></p>
+      <p class="other" data-win-notes hidden>The Windows version needs Windows 10 (version 1809 or newer) or Windows 11
+        on a 64-bit (x64) PC. No graphics card needed.</p>
+      <p class="other" data-win-notes hidden>It isn't signed yet, so when you open the installer Windows may say
+        "Windows protected your PC". Click More info, then Run anyway.</p>
     </div>
   </section>
 </Base>
@@ -49,7 +57,16 @@ import Base from "../layouts/Base.astro";
   const phone = /iPhone|iPod|iPad|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 
   if (phone) {
-    found.textContent = "Hear Church runs on a Mac. Open this page on the Mac you'll use at church to download it.";
+    found.textContent = "Hear Church runs on a Mac or a Windows PC. Open this page on the computer you'll use at church to download it.";
+  } else if (/Windows NT/.test(ua)) {
+    document.documentElement.dataset.os = "windows";
+    found.textContent = "This is a Windows PC, so this is the version you need.";
+    get.href = "/download/HearChurch-Setup.exe";
+    get.dataset.cta = "download-windows";
+    get.textContent = "Download for Windows";
+    for (const p of box.querySelectorAll<HTMLElement>("[data-other], [data-unsure]")) p.hidden = true;
+    $('[data-other="mac"]').hidden = false;
+    for (const p of box.querySelectorAll<HTMLElement>("[data-win-notes]")) p.hidden = false;
   } else {
     whichMac().then((chip) => {
       document.documentElement.dataset.mac = chip || "unknown";

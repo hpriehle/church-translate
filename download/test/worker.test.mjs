@@ -86,3 +86,68 @@ test("/download/windows/<channel>/ serves the Velopack feed, packages and instal
   assert.equal((await get("/download/windows/dev/notes.txt")).status, 404);
   assert.equal((await get("/download/windows/public/HearChurchApp-public-Setup.exe")).status, 404);
 });
+
+// The stable Windows link, against its own bucket, with the D1 counter recorded.
+function windowsEnv(files) {
+  const counted = [], pending = [];
+  const store = Object.fromEntries(Object.entries(files).map(([k, v]) => [k, typeof v === "string" ? new TextEncoder().encode(v) : v]));
+  const obj = (key) => ({ key, size: store[key].length, httpEtag: `"${key}"` });
+  const e = {
+    FILES: {
+      async head(key) { return store[key] ? obj(key) : null; },
+      async get(key) {
+        if (!store[key]) return null;
+        const body = store[key];
+        return { ...obj(key), body, async json() { return JSON.parse(new TextDecoder().decode(body)); } };
+      },
+    },
+    STATS: { prepare() { return { bind(day, version) { return { async run() { counted.push(version); } }; } }; } },
+    SITE: env.SITE,
+  };
+  const c = { waitUntil(p) { pending.push(p); } };
+  const fetchIt = async (path, init = {}) => {
+    const res = await worker.fetch(new Request(`https://hearchurch.com${path}`, init), e, c);
+    await Promise.all(pending);
+    return res;
+  };
+  return { fetchIt, counted };
+}
+
+const SETUP = "windows/public/HearChurchApp-public-Setup.exe";
+
+test("/download/HearChurch-Setup.exe serves the public installer and counts it with latest.json's version", async () => {
+  const { fetchIt, counted } = windowsEnv({ [SETUP]: ARCHIVE, "windows/public/latest.json": '{"version":"0.4.0"}' });
+  const res = await fetchIt("/download/HearChurch-Setup.exe");
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/octet-stream");
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  assert.equal(res.headers.get("content-disposition"), 'attachment; filename="HearChurch-Setup.exe"');
+  assert.deepEqual(counted, ["0.4.0-windows"]);
+  // HEAD and a resumed download are not new downloads; a download from byte 0 is.
+  assert.equal((await fetchIt("/download/HearChurch-Setup.exe", { method: "HEAD" })).status, 200);
+  await fetchIt("/download/HearChurch-Setup.exe", { headers: { range: "bytes=2-" } });
+  await fetchIt("/download/HearChurch-Setup.exe", { headers: { range: "bytes=0-" } });
+  assert.deepEqual(counted, ["0.4.0-windows", "0.4.0-windows"]);
+});
+
+test("/download/HearChurch-Setup.exe takes the version from the Velopack feed without latest.json", async () => {
+  const feed = JSON.stringify({ Assets: [
+    { PackageId: "HearChurchApp", Version: "0.4.0", Type: "Full", FileName: "HearChurchApp-0.4.0-full.nupkg" },
+    { PackageId: "HearChurchApp", Version: "0.10.0", Type: "Delta", FileName: "HearChurchApp-0.10.0-delta.nupkg" },
+    { PackageId: "HearChurchApp", Version: "0.9.1", Type: "Full", FileName: "HearChurchApp-0.9.1-full.nupkg" },
+    { PackageId: "HearChurchApp", Version: "0.9.1-rc.2", Type: "Full", FileName: "x.nupkg" },
+  ] });
+  const { fetchIt, counted } = windowsEnv({ [SETUP]: ARCHIVE, "windows/public/releases.public.json": feed });
+  await fetchIt("/download/HearChurch-Setup.exe");
+  assert.deepEqual(counted, ["0.9.1-windows"]);
+});
+
+test("/download/HearChurch-Setup.exe is a 404 before a public release, and counts nothing", async () => {
+  const { fetchIt, counted } = windowsEnv({});
+  assert.equal((await fetchIt("/download/HearChurch-Setup.exe")).status, 404);
+  assert.deepEqual(counted, []);
+  // Without any version file the download still works; it is counted as unknown.
+  const other = windowsEnv({ [SETUP]: ARCHIVE });
+  assert.equal((await other.fetchIt("/download/HearChurch-Setup.exe")).status, 200);
+  assert.deepEqual(other.counted, ["unknown-windows"]);
+});

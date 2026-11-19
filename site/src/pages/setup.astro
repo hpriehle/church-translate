@@ -1,7 +1,8 @@
 ---
 // /setup: the guide for a church arriving from our email, from download to the first Sunday.
 // Every step and message here matches the Mac app (mac/HearChurch/Sources: OnboardingView, MainView, AppModel
-// preflight, LanguageSelector, SettingsView Glossary) and the trial wording on pricing.astro. Change them together.
+// preflight, LanguageSelector, SettingsView Glossary), the Windows app (windows/HearChurch, docs/windows-app.md: the same
+// labels, "this Mac" -> "this PC") and the trial wording on pricing.astro. Change them together.
 import Base from "../layouts/Base.astro";
 
 const faq = [
@@ -12,19 +13,19 @@ const faq = [
   ["What about Bible verses?",
    "When an English speaker names a verse, like “John 3:16”, Hear Church uses published wording where it has a Bible for that language: the Reina-Valera 1909 in Spanish, the Chinese Union Version in Chinese and the Vietnamese Bible 1923 in Vietnamese, among others. In other languages the verse is translated like the rest of the sermon."],
   ["What is recorded, and who sees it?",
-   "The sound never leaves your Mac: speech is turned into text on the Mac itself. Only the text is sent out to be translated. Our server passes captions and voice to listeners while the meeting is live and doesn't save them. The Mac keeps a log of each meeting, with the transcript and its translations, and you can delete it. The privacy policy has the details."],
+   "The sound never leaves your computer: speech is turned into text on the computer itself. Only the text is sent out to be translated. Our server passes captions and voice to listeners while the meeting is live and doesn't save them. The computer keeps a log of each meeting, with the transcript and its translations, and you can delete it. The privacy policy has the details."],
   ["Which languages?",
    "Listeners can choose Spanish, Vietnamese, Chinese, Portuguese, Ukrainian, French, Russian, Persian, Nepali, Wolof or English. You turn on the ones your members need. If yours isn't there, email us and tell us which."],
   ["How many people can listen?",
    "As many as you have. There is no limit on listeners, and they never pay. They need a phone with a web browser, and headphones help."],
   ["Do we need internet?",
-   "Yes. The Mac needs internet to translate and to reach your listeners, and listeners use your church Wi-Fi or their own data. If the connection drops, phones reconnect by themselves when it's back."],
+   "Yes. The computer needs internet to translate and to reach your listeners, and listeners use your church Wi-Fi or their own data. If the connection drops, phones reconnect by themselves when it's back."],
   ["Our Mac is older, or has an Intel chip. Will it work?",
    "It needs macOS 14 or newer. There is a version for Intel Macs, but an Intel Mac is slower at turning speech into text, so the translation runs further behind the speaker and some sentences can be missed. A Mac with Apple silicon gives the best results."],
   ["We're Catholic. Does it work for Mass?",
    "Yes. A homily, readings, prayers and announcements are translated the same way as any sermon. Choose Catholic when you sign up. Music is skipped, so hymns don't fill phones with noise."],
-  ["Is there a Windows version?",
-   "Windows version coming soon."],
+  ["What computer does it need?",
+   "A Mac with macOS 14 or newer (Apple silicon or Intel), or a Windows 10 (version 1809 or newer) or Windows 11 PC, 64-bit. No graphics card needed. The Windows version isn't signed yet, so Windows may say “Windows protected your PC” when you open the installer: click More info, then Run anyway."],
 ];
 
 const schema = [
@@ -33,11 +34,11 @@ const schema = [
     "@type": "HowTo",
     name: "How to set up Hear Church for Sunday",
     step: [
-      { "@type": "HowToStep", name: "Download the app", text: "Download Hear Church on the Mac you'll use at church." },
-      { "@type": "HowToStep", name: "Sign up", text: "Sign up your church on hearchurch.com/start, then sign in on the Mac with the same email." },
-      { "@type": "HowToStep", name: "Connect the sound", text: "Run a cable from the sound board to the Mac and choose it under Sound, Input." },
+      { "@type": "HowToStep", name: "Download the app", text: "Download Hear Church on the Mac or Windows PC you'll use at church." },
+      { "@type": "HowToStep", name: "Sign up", text: "Sign up your church on hearchurch.com/start, then sign in in the app with the same email." },
+      { "@type": "HowToStep", name: "Connect the sound", text: "Run a cable from the sound board to the computer and choose it under Sound, Input." },
       { "@type": "HowToStep", name: "Pick languages", text: "Choose the speaker's language and the languages your members need." },
-      { "@type": "HowToStep", name: "Press Start meeting", text: "Press Start meeting. The Mac checks the sound, power and internet first." },
+      { "@type": "HowToStep", name: "Press Start meeting", text: "Press Start meeting. The app checks the sound, power and internet first." },
       { "@type": "HowToStep", name: "Share the QR code", text: "Print a sign, or put the QR code on a slide or in the bulletin." },
       { "@type": "HowToStep", name: "Members listen", text: "Members scan the code, pick a language and listen on their phones." },
     ],
@@ -51,12 +52,12 @@ const schema = [
 ---
 <Base
   title="Set Up Live Church Translation for Sunday | Hear Church"
-  description="A step-by-step guide for the pastor or sound volunteer: download the Mac app, connect the sound board, pick languages, press Start and share the QR code."
+  description="A step-by-step guide for the pastor or sound volunteer: download the app for Mac or Windows, connect the sound board, pick languages, press Start and share the QR code."
   schema={schema}>
 
   <section class="wrap head">
     <h1>Set it up for Sunday</h1>
-    <p class="lede">A guide for the pastor or the sound volunteer. It takes about 5 minutes on a Mac, and you can do it all yourself. Every new church starts with 14 days free, up to 20 language-hours, no card.</p>
+    <p class="lede">A guide for the pastor or the sound volunteer. It takes about 5 minutes on a Mac or Windows PC, and you can do it all yourself. Every new church starts with 14 days free, up to 20 language-hours, no card.</p>
   </section>
 
   <section class="wrap band" aria-labelledby="steps-h">
@@ -65,15 +66,16 @@ const schema = [
       <li><b>Download the app</b>
         <span>On the Mac you'll use at church (macOS 14 or newer): <a href="/download/HearChurch.dmg" data-cta="download">Mac with Apple silicon</a> or <a href="/download/HearChurch-Intel.dmg" data-cta="download-intel">Intel Mac</a>.
           Not sure which? Open the Apple menu and choose About This Mac. If it lists a Chip, it's Apple silicon. If it lists a Processor, it's Intel.
-          Windows version coming soon.</span></li>
+          Or on a Windows PC (Windows 10 version 1809 or newer, or Windows 11, 64-bit, no graphics card needed): <a href="/download/HearChurch-Setup.exe" data-cta="download-windows">Windows version</a>.
+          It isn't signed yet, so Windows may say “Windows protected your PC”: click More info, then Run anyway.</span></li>
       <li><b>Sign up your church</b>
         <span><a href="/start">Sign up on hearchurch.com</a> with your church's name, when you meet and an email. 14 days free to start, up to 20 language-hours, no card. Then open the app and choose Sign in with your email.</span></li>
       <li><b>Connect the sound board</b>
-        <span>A cable from the sound board gives much cleaner sound than the Mac's microphone. Common ways to get it there: a USB audio interface fed from the board, a cable into the Mac's audio jack, or the receiver of your hearing-assist system. In the app, choose it under Sound, Input, and watch the level meter move when someone talks.</span></li>
+        <span>A cable from the sound board gives much cleaner sound than the computer's microphone. Common ways to get it there: a USB audio interface fed from the board, a cable into the computer's audio jack, or the receiver of your hearing-assist system. In the app, choose it under Sound, Input, and watch the level meter move when someone talks. On Windows, if the app says it can't use the microphone, allow desktop apps under Windows Settings, Privacy &amp; security, Microphone.</span></li>
       <li><b>Pick languages</b>
         <span>Under “Select speaker language”, choose the language from the pulpit, usually English. Under “Select translation language”, turn on the languages your members need, like Spanish or Vietnamese. You can change both during the meeting.</span></li>
       <li><b>Press Start meeting</b>
-        <span>The Mac checks the sound, its power and the internet first. Anything marked in red tells you what to fix. Keep the lid open and the Mac plugged in until the meeting ends.</span></li>
+        <span>The app checks the sound, power and the internet first. Anything marked in red tells you what to fix. Keep the lid open and the computer plugged in until the meeting ends. Closing the window doesn't stop the meeting: the app keeps running from its icon in the menu bar on a Mac, or in the notification area by the clock on Windows.</span></li>
       <li><b>Share the QR code</b>
         <span>The app shows your QR code and link under Listeners. Press Print a sign for a sign in each language, or put the code on a slide or in the bulletin. Your link stays the same every week.</span></li>
       <li><b>Members scan and listen</b>
@@ -81,7 +83,7 @@ const schema = [
     </ol>
     <div class="ctas">
       <a class="get" href="/start">Start your free trial</a>
-      <a class="second" href="/download">Download for Mac</a>
+      <a class="second" href="/download">Download for Mac or Windows</a>
     </div>
   </section>
 
@@ -89,7 +91,7 @@ const schema = [
     <div>
       <h2>Before Sunday: a 5-minute test</h2>
       <ol class="check">
-        <li>Plug the Mac into power and connect it to the church Wi-Fi.</li>
+        <li>Plug the computer into power and connect it to the church Wi-Fi.</li>
         <li>Connect the cable from the sound board and choose it under Sound, Input.</li>
         <li>Press Start meeting. Everything in the checklist should be green.</li>
         <li>Scan the QR code with your own phone, pick a language and put in headphones.</li>
@@ -108,7 +110,7 @@ const schema = [
       <h3>The wrong language</h3>
       <p class="quiet">If a speaker switches language, turn that language on under “Select speaker language”. When the app hears a new language twice in a row, it adds it and offers Undo. A listener hearing the wrong language can pick theirs again on their phone.</p>
       <h3>Names come out wrong</h3>
-      <p class="quiet">Add them under Settings, Glossary. They come through as written.</p>
+      <p class="quiet">Add them under Settings, Glossary (on Windows, the gear button in the app window opens Settings). They come through as written.</p>
       <p class="quiet">Still stuck? Email <a href="mailto:support@hearchurch.com">support@hearchurch.com</a>.</p>
     </div>
   </section>

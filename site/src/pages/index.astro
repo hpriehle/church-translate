@@ -19,7 +19,7 @@ const faq = [
   ["What does it cost?",
    "Every new church starts with 14 days free, up to 20 language-hours, and no card is needed. After that, one free language-hour each month, with unlimited listeners. More hours come in prepaid bundles, from $20 for 4 hours to $250 for 70 hours. Silence and pauses aren't counted, and listeners pay nothing. See hearchurch.com/pricing."],
   ["What computer does it need?",
-   "A Mac with macOS 14 or newer, with Apple silicon or an Intel chip. Apple silicon keeps closer to the speaker. Windows is coming soon."],
+   "A Mac with macOS 14 or newer, with Apple silicon or an Intel chip. Apple silicon keeps closer to the speaker. Or a Windows 10 (version 1809 or newer) or Windows 11 PC, 64-bit, no graphics card needed."],
 ];
 
 const schema = [
@@ -28,7 +28,7 @@ const schema = [
     "@type": "SoftwareApplication",
     name: "Hear Church",
     applicationCategory: "MultimediaApplication",
-    operatingSystem: "macOS 14 or later (Apple silicon or Intel)",
+    operatingSystem: "macOS 14 or later (Apple silicon or Intel), Windows 10 (1809 or later) or Windows 11 (x64)",
     description: "Live translation for church meetings. A Mac translates the service as it's spoken, and listeners follow along on their own phones with captions and a spoken voice.",
     url: "https://hearchurch.com/",
     downloadUrl: "https://hearchurch.com/download",
@@ -61,7 +61,7 @@ const schema = [
     <h1><span class="call">Every Nation, Kindred, Tongue and People</span><span class="what">Live translation for your church meeting</span></h1>
     <p class="lede">Speak once. Everyone hears it in their own language, live on their phone.</p>
     <div class="ctas">
-      <a class="get" href="/download">Download for Mac</a>
+      <a class="get" href="/download">Download for Mac or Windows</a>
       <a class="second" href="#sample">Hear a sample</a>
     </div>
   </section>
@@ -109,7 +109,7 @@ const schema = [
       {faq.map(([q, a]) => <><dt>{q}</dt><dd>{a}</dd></>)}
     </dl>
     <div class="ctas">
-      <a class="get" href="/download">Download for Mac</a>
+      <a class="get" href="/download">Download for Mac or Windows</a>
       <a class="second" href="/how-it-works">See how it works</a>
     </div>
   </section>
