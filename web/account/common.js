@@ -105,6 +105,8 @@ const HC = {
       map = L.map(box.querySelector(".map"), { scrollWheelZoom: false }).setView([25, 0], 2);
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
+        // OSM's tile policy blocks requests without a Referer; our pages send Referrer-Policy: same-origin.
+        referrerPolicy: "strict-origin-when-cross-origin",
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(map);
       map.on("click", (e) => place(e.latlng.lat, e.latlng.lng, true));

@@ -1,0 +1,33 @@
+{
+  "wrong_code": {
+    "error": "bad_code",
+    "message": "That code is wrong or has expired: ask for a new one."
+  },
+  "pair": {
+    "ok": true,
+    "slug": "maple-grove-ward",
+    "congregation": {
+      "slug": "maple-grove-ward",
+      "church": "The Church of Jesus Christ of Latter-day Saints",
+      "name": "Maple Grove Ward",
+      "unit_type": "ward",
+      "stake": "Maple Stake",
+      "address": "1 Main Street, Maple Grove, Minnesota, 55369, United States",
+      "meeting_times": [
+        {
+          "day": "sun",
+          "time": "10:00"
+        },
+        {
+          "day": "wed",
+          "time": "19:00"
+        }
+      ]
+    },
+    "billing": "credits"
+  },
+  "reused_code": {
+    "error": "bad_code",
+    "message": "That code is wrong or has expired: ask for a new one."
+  }
+}

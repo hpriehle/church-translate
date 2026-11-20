@@ -97,6 +97,8 @@ def test_pages_are_served_by_the_hub_with_a_csrf_cookie(browser, hear):
     for f in ("account/account.css", "account/common.js", "account/start.js", "account/account.js",
               "vendor/leaflet/leaflet.js"):
         assert browser.get(f"/static/{f}").status_code == 200
+    # OSM's tile servers block requests without a Referer, and these pages send Referrer-Policy: same-origin
+    assert 'referrerPolicy: "strict-origin-when-cross-origin"' in browser.get("/static/account/common.js").text
 
 
 def test_start_and_account_can_never_be_a_congregations_slug(hear):

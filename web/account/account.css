@@ -51,7 +51,7 @@ h3 { font-size: 1.25rem; margin: 1.4rem 0 .5rem; }
 .get[disabled] { opacity: .55; cursor: default; }
 button, .btn { font: 700 1rem/1.2 var(--sans); padding: .55rem 1rem; border-radius: .7rem; cursor: pointer;
   background: transparent; color: var(--gold); border: 1px solid var(--gold-deep); text-decoration: none; display: inline-block; }
-button:hover, .btn:hover { background: rgb(244 208 131 / .08); }
+button:not(.get):hover, .btn:hover { background: rgb(244 208 131 / .08); }
 button.danger { color: var(--bad); border-color: var(--bad); }
 button.link { border: 0; padding: 0; text-decoration: underline; font-weight: 400; }
 button[disabled] { opacity: .5; cursor: default; }

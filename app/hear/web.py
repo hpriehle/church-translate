@@ -213,8 +213,11 @@ async def _send_code(email: str, purpose: str) -> None:
 
 
 def _mail_limits(request: Request, email: str) -> None:
-    api._limit(request, "email_code")
-    api._limit(request, "email_code_addr", email)
+    try:
+        api._limit(request, "email_code")
+        api._limit(request, "email_code_addr", email)
+    except HTTPException as e:   # both limits count the last hour
+        raise HTTPException(429, "Too many codes asked for. Use the last code we sent, or try again in an hour.") from e
 
 
 @router.post("/api/hc/web/signup-code")
